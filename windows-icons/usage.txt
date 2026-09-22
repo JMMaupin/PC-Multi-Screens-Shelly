@@ -1,0 +1,11 @@
+Le fichier qui compte est windows-icons/icon.ico : il porte les neuf tailles.
+Les PNG a cote servent aux pages, aux stores et aux documents.
+
+PyInstaller
+    pyinstaller --onefile --windowed --icon windows-icons/icon.ico app.py
+
+Fenetre Tkinter
+    root.iconbitmap("windows-icons/icon.ico")
+
+Raccourci, ressource Win32 (.rc)
+    1 ICON "windows-icons/icon.ico"

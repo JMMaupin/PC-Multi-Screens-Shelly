@@ -1,0 +1,38 @@
+# Configuration locale.
+#
+# Elle porte les mots de passe des multiprises, chiffres par DPAPI avec la
+# cle du compte Windows de la machine -- illisibles ailleurs, donc inutiles
+# a qui les recupererait, mais inutiles aussi a qui clonerait le depot. Elle
+# porte surtout les adresses MAC des appareils, leurs adresses IP et
+# l'identifiant materiel de chaque ecran : l'inventaire d'un reseau prive.
+config.json
+
+# Journal d'execution.
+#
+# Il retrace les adresses du reseau local et les noms mDNS, qui contiennent
+# les adresses MAC. Il grossit a chaque session et n'apprend rien a personne
+# d'autre qu'a celui qui diagnostique sa propre installation.
+shelly-screens.log
+shelly-screens.log.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Empaquetage
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Editeurs et systeme de fichiers
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
