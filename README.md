@@ -55,6 +55,15 @@ Chaque appareil reçoit une **clé courte** (`strip`, `strip2`, `plug`), et
 c'est elle que les profils référencent — une prise se désigne par
 `strip2:1`. La clé se renomme à tout moment, les références suivent.
 
+La colonne **Signal** donne la puissance de la liaison Wi-Fi de l'appareil,
+assortie de ce qu'elle vaut : *excellent* au-dessus de -60 dBm, *good*
+jusqu'à -70, *fair* jusqu'à -78, *weak* en dessous. Un nombre négatif en
+décibels ne parle qu'à qui le pratique ; le qualificatif se lit d'un coup
+d'œil. Une multiprise à -79 dBm tient au bord du décrochage sans que rien
+ne l'annonce, et son seuil de bascule interne est justement à -80.
+Le signal est relu une fois par minute, jamais plus : une liaison ne change
+pas d'un battement de cil, et chaque interrogation pèse sur l'appareil.
+
 Deux colonnes distinguent **Reached via** et **IP address**. L'application
 joint de préférence l'appareil par son nom mDNS, plus stable que son bail
 DHCP, mais c'est l'adresse qu'on veut lire — pour ouvrir son interface web,

@@ -78,8 +78,10 @@ class SettingsWindow:
         i18n.set_language(self.config.settings.language)
         icon_module.apply_to_window(root)
         root.title(t("Shelly Screens {version} - Settings", version=__version__))
-        root.geometry("860x720")
-        root.minsize(760, 600)
+        # La vue Devices aligne 944 pixels de colonnes ; en deca, les
+        # dernieres sont tronquees sans que rien ne le signale.
+        root.geometry("1020x760")
+        root.minsize(900, 640)
 
         # Le theme doit etre pose avant la creation des widgets : certains
         # lisent leurs couleurs a la construction.
@@ -216,12 +218,13 @@ class SettingsWindow:
         # l'appareil par son nom mDNS, plus stable que son bail DHCP, mais
         # c'est l'adresse qu'on veut lire pour ouvrir son interface web ou
         # reperer qu'elle a change.
-        columns = ("kind", "host", "ip", "outlets", "auth", "state")
+        columns = ("kind", "host", "ip", "signal", "outlets", "auth", "state")
         self.device_tree = ttk.Treeview(frame, columns=columns, height=7)
         self.device_tree.heading("#0", text=t("Key / name"))
         self.device_tree.heading("kind", text=t("Model"))
         self.device_tree.heading("host", text=t("Reached via"))
         self.device_tree.heading("ip", text=t("IP address"))
+        self.device_tree.heading("signal", text=t("Signal"))
         self.device_tree.heading("outlets", text=t("Outlets"))
         self.device_tree.heading("auth", text=t("Password"))
         self.device_tree.heading("state", text=t("Status"))
@@ -229,6 +232,7 @@ class SettingsWindow:
         self.device_tree.column("kind", width=115)
         self.device_tree.column("host", width=215)
         self.device_tree.column("ip", width=110)
+        self.device_tree.column("signal", width=118)
         self.device_tree.column("outlets", width=58, anchor="center")
         self.device_tree.column("auth", width=78, anchor="center")
         self.device_tree.column("state", width=90)
@@ -274,6 +278,27 @@ class SettingsWindow:
         ttk.Button(buttons, text=t("Remove"), command=self._remove_device).pack(
             side="left", padx=8
         )
+
+    def _signal_label(self, key: str) -> str:
+        """Puissance du signal, assortie de ce qu'elle vaut.
+
+        Un nombre negatif en decibels ne parle qu'a qui le pratique. Le
+        qualificatif, lui, se lit d'un coup d'oeil -- et c'est la lecture
+        qui compte : une multiprise a -79 dBm tenait au bord du
+        decrochage sans que rien ne l'annonce.
+        """
+        rssi = self.app.controller.wifi_signal(key)
+        if rssi is None:
+            return "-"
+        if rssi >= -60:
+            qualite = t("excellent")
+        elif rssi >= -70:
+            qualite = t("good")
+        elif rssi >= -78:
+            qualite = t("fair")
+        else:
+            qualite = t("weak")
+        return f"{rssi} dBm - {qualite}"
 
     def _auth_label(self, device) -> str:
         """Etat du mot de passe tel que l'appareil le rapporte.
@@ -654,18 +679,32 @@ class SettingsWindow:
         right = ttk.Frame(frame)
         right.pack(side="left", fill="both", expand=True)
 
+        # Le logo prend la place laissee libre a droite. Sans lui, les cases
+        # et la zone de disposition s'etiraient sur toute la largeur de la
+        # fenetre : une case a cocher large d'un ecran est plus penible a
+        # viser qu'une case serree contre son libelle, et l'oeil parcourt
+        # une distance inutile entre l'intitule et la case suivante.
+        badge = ttk.Frame(right)
+        badge.pack(side="right", fill="y", padx=(24, 0))
+        self._profile_logo = icon_module.load_photo(96)
+        if self._profile_logo is not None:
+            ttk.Label(badge, image=self._profile_logo).pack(anchor="ne", pady=(6, 0))
+
+        content = ttk.Frame(right)
+        content.pack(side="left", fill="both")
+
         self.profile_title = tk.StringVar(value="No profile selected")
-        ttk.Label(right, textvariable=self.profile_title, style="Title.TLabel").pack(
+        ttk.Label(content, textvariable=self.profile_title, style="Title.TLabel").pack(
             anchor="w"
         )
 
         # Les cases sont reconstruites a chaque changement de configuration :
         # ajouter une multiprise ajoute des prises, et donc des cases.
-        self.outlets_box = ttk.LabelFrame(right, text=t("Powered outlets"), padding=10)
+        self.outlets_box = ttk.LabelFrame(content, text=t("Powered outlets"), padding=10)
         self.outlets_box.pack(fill="x", pady=10)
         self.profile_outlet_vars: dict[str, tk.BooleanVar] = {}
 
-        layout_box = ttk.LabelFrame(right, text=t("Window layout"), padding=10)
+        layout_box = ttk.LabelFrame(content, text=t("Window layout"), padding=10)
         layout_box.pack(fill="x")
         self.layout_info = tk.StringVar(value="")
         ttk.Label(layout_box, textvariable=self.layout_info, wraplength=440).pack(
@@ -681,7 +720,7 @@ class SettingsWindow:
         )
         ttk.Button(layout_buttons, text=t("Clear"), command=self._clear_layout).pack(side="left")
 
-        apply_row = ttk.Frame(right)
+        apply_row = ttk.Frame(content)
         apply_row.pack(fill="x", pady=14)
         ttk.Button(
             apply_row, text=t("Apply this profile now"), command=self._apply_profile_now
@@ -1400,6 +1439,7 @@ class SettingsWindow:
                     identity.model if identity else device.kind,
                     device.host or "unknown",
                     device.ip or "-",
+                    self._signal_label(device.key),
                     len(self.config.outlets_of(device.key)),
                     self._auth_label(device),
                     self._device_state_label(device.key, online),
@@ -1520,6 +1560,9 @@ class SettingsWindow:
                 )
                 self.device_tree.set(device.key, "host", device.host or "unknown")
                 self.device_tree.set(device.key, "ip", device.ip or "-")
+                self.device_tree.set(
+                    device.key, "signal", self._signal_label(device.key)
+                )
         self._update_auth_banner()
 
     # ------------------------------------------------ assistant d'identification
@@ -1843,7 +1886,8 @@ class AddDeviceDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("Add a Shelly device"))
-        self.window.geometry("640x420")
+        self.window.geometry("720x520")
+        self.window.minsize(660, 460)
         self.window.transient(parent)
         self.window.grab_set()
         _theme_dialog(self.window, owner.palette)
@@ -1869,6 +1913,22 @@ class AddDeviceDialog:
         entry.bind("<Return>", lambda _e: self._probe_host())
         ttk.Button(manual, text=t("Check"), command=self._probe_host).pack(side="left")
 
+        # Le bas se reserve avant l'arbre extensible. Tk distribue l'espace
+        # dans l'ordre d'empaquetage : un arbre en `expand=True` pose en
+        # premier prend tout ce qui reste, et les boutons poses ensuite se
+        # font rogner des que la fenetre manque de hauteur. Ils etaient
+        # invisibles depuis le premier jour.
+        self.message = tk.StringVar(value="")
+        buttons = ttk.Frame(self.window, padding=12)
+        buttons.pack(fill="x", side="bottom")
+        self.scan_button = ttk.Button(buttons, text=t("Scan network"), command=self._scan)
+        self.scan_button.pack(side="left")
+        ttk.Button(buttons, text=t("Add selected"), command=self._adopt).pack(side="left", padx=8)
+        ttk.Button(buttons, text=t("Close"), command=self._close).pack(side="right")
+        ttk.Label(
+            self.window, textvariable=self.message, padding=(12, 0)
+        ).pack(anchor="w", side="bottom")
+
         columns = ("model", "app", "id")
         self.tree = ttk.Treeview(self.window, columns=columns, height=10)
         self.tree.heading("#0", text=t("Address"))
@@ -1880,16 +1940,6 @@ class AddDeviceDialog:
         self.tree.column("app", width=85)
         self.tree.column("id", width=230)
         self.tree.pack(fill="both", expand=True, padx=12, pady=12)
-
-        self.message = tk.StringVar(value="")
-        ttk.Label(self.window, textvariable=self.message, padding=(12, 0)).pack(anchor="w")
-
-        buttons = ttk.Frame(self.window, padding=12)
-        buttons.pack(fill="x")
-        self.scan_button = ttk.Button(buttons, text=t("Scan network"), command=self._scan)
-        self.scan_button.pack(side="left")
-        ttk.Button(buttons, text=t("Add selected"), command=self._adopt).pack(side="left", padx=8)
-        ttk.Button(buttons, text=t("Close"), command=self._close).pack(side="right")
 
         self._scan()
 
@@ -2129,7 +2179,10 @@ class DeviceServicesDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("Services - {device}", device=device.label))
-        self.window.geometry("780x660")
+        # Sept services de trois lignes chacun : la fenetre demande
+        # 900 pixels de haut. En deca, le pied reste visible -- il est
+        # reserve en premier -- mais la liste se comprime.
+        self.window.geometry("800x900")
         self.window.minsize(700, 560)
         self.window.transient(parent)
         _theme_dialog(self.window, owner.palette)
@@ -2148,6 +2201,17 @@ class DeviceServicesDialog:
         self.memory = tk.StringVar(value="")
         ttk.Label(self.window, textvariable=self.memory, padding=(14, 0),
                   style="Hint.TLabel").pack(anchor="w")
+
+        # Meme precaution qu'ailleurs : le pied de fenetre est reserve
+        # avant la liste extensible, sinon il disparait sur un petit ecran.
+        footer = ttk.Frame(self.window, padding=14)
+        footer.pack(fill="x", side="bottom")
+        self.reboot_button = ttk.Button(
+            footer, text=t("Restart the device"), command=self._reboot
+        )
+        self.reboot_button.pack(side="left")
+        ttk.Button(footer, text=t("Refresh"), command=self.reload).pack(side="left", padx=8)
+        ttk.Button(footer, text=t("Close"), command=self._close).pack(side="right")
 
         body = ttk.Frame(self.window, padding=(14, 10))
         body.pack(fill="both", expand=True)
@@ -2197,15 +2261,6 @@ class DeviceServicesDialog:
         self.message = tk.StringVar(value="")
         ttk.Label(self.window, textvariable=self.message, wraplength=730,
                   justify="left", padding=(14, 6)).pack(anchor="w")
-
-        footer = ttk.Frame(self.window, padding=14)
-        footer.pack(fill="x", side="bottom")
-        self.reboot_button = ttk.Button(
-            footer, text=t("Restart the device"), command=self._reboot
-        )
-        self.reboot_button.pack(side="left")
-        ttk.Button(footer, text=t("Refresh"), command=self.reload).pack(side="left", padx=8)
-        ttk.Button(footer, text=t("Close"), command=self._close).pack(side="right")
 
         self.reload()
 

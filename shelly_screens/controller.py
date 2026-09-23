@@ -108,6 +108,11 @@ RESOLVE_COOLDOWN_S = 30.0
 # rien ne le signale. Six lectures, soit une demi-minute, suffisent a
 # distinguer le gel d'une coincidence.
 FROZEN_METER_READS = 6
+# Le signal se relit a part, et rarement. Une liaison Wi-Fi ne change pas
+# d'un battement de cil, et chaque interrogation supplementaire pese sur
+# un firmware dont on a appris ce soir la fragilite : une fois par minute
+# suffit largement a voir une degradation s'installer.
+SIGNAL_REFRESH_S = 60.0
 # Apres un echec, on espace les interrogations au lieu de les maintenir.
 # On revient au rythme normal des que l'appareil repond.
 READ_BACKOFF_S = (0.0, 15.0, 30.0, 60.0)
@@ -136,6 +141,10 @@ class ScreenController:
         # Dernieres tensions relevees par prise, pour reperer une voie
         # de mesure qui ne bouge plus.
         self._meter_history: dict[str, list[float]] = {}
+        # Dernier RSSI connu par appareil, et date de la prochaine
+        # relecture. Absent tant qu'on n'a pas pu le lire.
+        self._signal: dict[str, int] = {}
+        self._signal_due: dict[str, float] = {}
         # Une seule sequence a la fois : un changement de profil manipule
         # l'alimentation et les fenetres, deux en parallele se marcheraient
         # dessus.
@@ -408,7 +417,26 @@ class ScreenController:
                 ref = f"{key}:{switch_id}"
                 states[ref] = state
                 self._note_meter(ref, state)
+            # L'appareil vient de repondre : c'est le bon moment, et le
+            # seul ou l'on est sur de ne pas le deranger pour rien.
+            if now >= self._signal_due.get(key, 0.0):
+                self._refresh_signal(key, now)
         return states
+
+    def _refresh_signal(self, key: str, now: float) -> None:
+        """Relit la puissance du signal Wi-Fi, sans jamais faire echouer."""
+        self._signal_due[key] = now + SIGNAL_REFRESH_S
+        try:
+            status = self._devices[key].call("Wifi.GetStatus") or {}
+        except Exception:  # noqa: BLE001 - une mesure de confort, pas plus
+            return
+        rssi = status.get("rssi")
+        if isinstance(rssi, (int, float)) and rssi:
+            self._signal[key] = int(rssi)
+
+    def wifi_signal(self, key: str) -> int | None:
+        """Dernier RSSI connu, en dBm, ou None s'il n'a pas ete lu."""
+        return self._signal.get(key)
 
     def _note_meter(self, ref: str, state: SwitchState) -> None:
         """Retient la tension relevee, pour juger si la voie est vivante."""

@@ -170,6 +170,31 @@ def status_for(
     return "on" if any(outlet_states) else "off"
 
 
+def load_photo(size: int = 96):
+    """Image Tk du logo, a la taille demandee, ou None si elle manque.
+
+    Rendre None plutot que lever : un logo absent est un defaut d'agrement,
+    il ne doit jamais empecher une fenetre de s'ouvrir.
+    """
+    import tkinter as tk
+
+    # Le jeu d'icones porte plus de tailles que SIZES n'en declare : ce
+    # dernier ne liste que celles du .ico. On cherche donc le fichier, et
+    # l'on retombe sur le 256 reduit d'un facteur entier -- Tk ne sait pas
+    # interpoler, mais diviser par deux ou par quatre reste net.
+    source = ASSETS / f"icon-{size}.png"
+    try:
+        if source.exists():
+            return tk.PhotoImage(file=str(source))
+        if not LARGE_PNG.exists():
+            return None
+        image = tk.PhotoImage(file=str(LARGE_PNG))
+        facteur = max(1, round(256 / max(1, size)))
+        return image.subsample(facteur, facteur) if facteur > 1 else image
+    except Exception:  # noqa: BLE001 - Tk sans support PNG, fichier illisible
+        return None
+
+
 def apply_to_window(window) -> None:
     """Pose l'icone de l'application sur une fenetre Tk et ses filles.
 
