@@ -87,6 +87,13 @@ CATALOG: dict[str, str] = {
     "Power strip": "Multiprise",
     # --- cases a cocher
     "Critical - never switched off": "Critique - jamais coupee",
+    '(always on)': '(toujours alimentee)',
+    '{count} window(s) memorised.': '{count} fenetre(s) memorisee(s).',
+    'No layout memorised yet. Arrange your windows, then save.': 'Aucune disposition memorisee. Placez vos fenetres, puis enregistrez.',
+    'a password is stored': 'un mot de passe est memorise',
+    'no password stored': 'aucun mot de passe memorise',
+    'The device refuses the current credentials ({failure}).\nEnter the right password and use « Remember only », or reset the device with its buttons.': "L'appareil refuse les identifiants actuels ({failure}).\nSaisissez le bon mot de passe et utilisez « Memoriser seulement », ou reinitialisez l'appareil par ses boutons.",
+    "Device '{key}': {state}.": "Appareil '{key}' : {state}.",
     'Signal': 'Signal',
     'excellent': 'excellent',
     'good': 'bon',

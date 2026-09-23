@@ -18,7 +18,6 @@ n'adresse pas les diffusions d'alimentation et d'affichage a ces dernieres.
 from __future__ import annotations
 
 import ctypes
-import threading
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable
@@ -33,12 +32,10 @@ WM_QUERYENDSESSION = 0x0011
 WM_ENDSESSION = 0x0016
 WM_QUIT = 0x0012
 WM_TIMER = 0x0113
-WM_COMMAND = 0x0111
 WM_DISPLAYCHANGE = 0x007E
 WM_POWERBROADCAST = 0x0218
 WM_USER = 0x0400
 WM_TRAY_CALLBACK = WM_USER + 1
-WM_INVOKE = WM_USER + 2  # execution d'une fonction dans le thread de la fenetre
 # Envoye par une seconde instance : elle ne demarre pas et demande a
 # celle-ci de se montrer, plutot que d'afficher un refus.
 WM_SHOW_SETTINGS = WM_USER + 3
@@ -61,13 +58,11 @@ NIF_INFO = 0x10
 
 IMAGE_ICON = 1
 LR_LOADFROMFILE = 0x0010
-LR_DEFAULTSIZE = 0x0040
 
 MF_STRING = 0x0000
 MF_POPUP = 0x0010
 MF_SEPARATOR = 0x0800
 MF_CHECKED = 0x0008
-MF_UNCHECKED = 0x0000
 MF_DISABLED = 0x0002
 MF_GRAYED = 0x0001
 
@@ -77,7 +72,6 @@ TPM_NONOTIFY = 0x0080
 
 CW_USEDEFAULT = -2147483648
 WS_OVERLAPPED = 0x00000000
-ENDSESSION_CLOSEAPP = 0x00000001
 
 
 class WNDCLASSEXW(ctypes.Structure):
@@ -227,8 +221,6 @@ class TrayWindow:
         self._menu_actions: dict[int, Callable[[], None]] = {}
         self._taskbar_created_message = 0
         self._thread_id = 0
-        self._pending: list[Callable[[], None]] = []
-        self._pending_lock = threading.Lock()
         # La reference doit survivre a la fonction : Windows garde le pointeur.
         self._wndproc = WNDPROC(self._window_proc)
 
@@ -284,13 +276,6 @@ class TrayWindow:
         """Demande l'arret de la boucle depuis n'importe quel thread."""
         if self._hwnd:
             user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
-
-    def invoke(self, function: Callable[[], None]) -> None:
-        """Fait executer une fonction dans le thread de la fenetre."""
-        with self._pending_lock:
-            self._pending.append(function)
-        if self._hwnd:
-            user32.PostMessageW(self._hwnd, WM_INVOKE, 0, 0)
 
     # ------------------------------------------------------------------ icone
 
@@ -471,13 +456,6 @@ class TrayWindow:
         if message == WM_SHOW_SETTINGS:
             if self.on_activate is not None:
                 self.on_activate()
-            return 0
-
-        if message == WM_INVOKE:
-            with self._pending_lock:
-                pending, self._pending = self._pending, []
-            for function in pending:
-                function()
             return 0
 
         if self._taskbar_created_message and message == self._taskbar_created_message:

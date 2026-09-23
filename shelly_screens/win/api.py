@@ -20,7 +20,6 @@ gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 LRESULT = ctypes.c_ssize_t
 LONG_PTR = ctypes.c_ssize_t
 UINT_PTR = ctypes.c_size_t
-HCURSOR = wintypes.HANDLE
 HICON = wintypes.HANDLE
 
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)

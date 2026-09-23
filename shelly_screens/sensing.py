@@ -709,43 +709,6 @@ def probe_running(controller: "ScreenController", config: AppConfig) -> bool:
 # ------------------------------------------------------------------ gardien
 
 GUARD_NAME = "pc_guard"
-KVS_GUARD_KEY = "scr_guard"
-GUARD_TEMPLATE = Path(__file__).resolve().parent / "scripts" / "pc_guard.js"
-
-
-def install_guard(controller: "ScreenController", config: AppConfig) -> int:
-    """Installe le gardien sur l'appareil qui porte l'unite centrale.
-
-    Il retablit la sortie du PC des qu'elle est coupee, quelle que soit
-    l'origine de l'ordre. Il ne l'empeche pas : le firmware n'offre pas de
-    verrou, et les quelque 180 ms de reaction arrivent bien apres qu'une
-    alimentation ATX a laché. C'est un filet, pas une garantie.
-    """
-    outlet = config.host_pc_outlet()
-    if outlet is None:
-        raise SensingError("No outlet is marked as powering the PC")
-
-    template = GUARD_TEMPLATE.read_text(encoding="utf-8")
-    payload = json.dumps(
-        {"pc": outlet.switch_id, "key": KVS_GUARD_KEY}, separators=(",", ":")
-    )
-    code = template.replace(CONFIG_MARKER, f"let CFG = {payload};", 1)
-
-    device = controller.device_for(outlet.device)
-    script_id = _find_script(device, GUARD_NAME)
-    if not script_id:
-        created = device.call("Script.Create", {"name": GUARD_NAME}) or {}
-        script_id = int(created.get("id", 0))
-        if not script_id:
-            raise SensingError("The device refused to create the guard script")
-    else:
-        device.call("Script.Stop", {"id": script_id})
-    _put_code(device, script_id, code)
-    # `enable` le fait repartir apres une coupure de courant, justement le
-    # moment ou la sortie du PC doit revenir.
-    device.call("Script.SetConfig", {"id": script_id, "config": {"enable": True}})
-    device.call("Script.Start", {"id": script_id})
-    return script_id
 
 
 def uninstall_guard(controller: "ScreenController", config: AppConfig, device_key: str) -> None:
@@ -762,34 +725,6 @@ def uninstall_guard(controller: "ScreenController", config: AppConfig, device_ke
         device.call("Script.Delete", {"id": script_id})
     except Exception:  # noqa: BLE001
         pass
-
-
-def guard_status(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
-    """Etat de la surveillance, desormais portee par le pilote lui-meme."""
-    return status(controller, config)
-
-
-def _legacy_guard_status(
-    controller: "ScreenController", config: AppConfig
-) -> ScriptStatus:
-    """Etat d'un ancien script `pc_guard`, s'il en reste un."""
-    outlet = config.host_pc_outlet()
-    if outlet is None:
-        return ScriptStatus(error="No outlet is marked as powering the PC")
-    try:
-        device = controller.device_for(outlet.device)
-        script_id = _find_script(device, GUARD_NAME)
-        if not script_id:
-            return ScriptStatus(installed=False)
-        info = device.call("Script.GetStatus", {"id": script_id}) or {}
-        return ScriptStatus(
-            installed=True,
-            running=bool(info.get("running")),
-            script_id=script_id,
-            memory_used=int(info.get("mem_used", 0)),
-        )
-    except Exception as exc:  # noqa: BLE001
-        return ScriptStatus(error=str(exc))
 
 
 def sync_guard(controller: "ScreenController", config: AppConfig) -> str:
@@ -918,6 +853,3 @@ def read_series(controller: "ScreenController", config: AppConfig) -> list[Tick]
     return decode_series(value) if isinstance(value, str) else []
 
 
-def series_capacity() -> int:
-    """Nombre de ticks que le KVS peut retenir."""
-    return PROBE_SERIES_CHARS // TICK_CHARS

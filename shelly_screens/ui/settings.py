@@ -230,11 +230,14 @@ class SettingsWindow:
         self.device_tree.heading("state", text=t("Status"))
         self.device_tree.column("#0", width=160)
         self.device_tree.column("kind", width=115)
-        self.device_tree.column("host", width=215)
+        self.device_tree.column("host", width=200)
         self.device_tree.column("ip", width=110)
         self.device_tree.column("signal", width=118)
         self.device_tree.column("outlets", width=58, anchor="center")
-        self.device_tree.column("auth", width=78, anchor="center")
+        # « Mot de passe » ne tenait pas dans les 78 pixels calibres pour
+        # « Password » ; la place est reprise sur la colonne des noms mDNS,
+        # qui en avait de trop.
+        self.device_tree.column("auth", width=100, anchor="center")
         self.device_tree.column("state", width=90)
         # La cellule d'adresse se comporte comme un lien. ttk.Treeview ne
         # sait pas styler une cellule isolee -- impossible de la souligner
@@ -488,7 +491,7 @@ class SettingsWindow:
         kind_box = ttk.Combobox(
             editor,
             textvariable=self.outlet_kind,
-            values=[KIND_LABELS[k] for k in KINDS],
+            values=[t(KIND_LABELS[k]) for k in KINDS],
             state="readonly",
             width=13,
         )
@@ -579,7 +582,7 @@ class SettingsWindow:
         if outlet is None:
             return
         self.outlet_name.set(outlet.name)
-        self.outlet_kind.set(KIND_LABELS.get(outlet.kind, KIND_LABELS[""]))
+        self.outlet_kind.set(t(KIND_LABELS.get(outlet.kind, KIND_LABELS[""])))
         self.outlet_critical.set(outlet.critical)
         self.outlet_boot.set(outlet.boot_screen)
         self.outlet_host_pc.set(outlet.host_pc)
@@ -593,7 +596,7 @@ class SettingsWindow:
         previous_kind = outlet.kind
         chosen = self.outlet_kind.get()
         for value, label in KIND_LABELS.items():
-            if label == chosen:
+            if t(label) == chosen:
                 outlet.kind = value
                 break
         outlet.critical = self.outlet_critical.get()
@@ -661,18 +664,25 @@ class SettingsWindow:
 
         ttk.Label(left, text=t("Profiles")).pack(anchor="w")
         self.profile_list = tk.Listbox(left, width=22, height=16, exportselection=False)
-        self.profile_list.pack(fill="y", expand=True)
+        # La liste occupe toute la largeur de sa colonne : remplie en
+        # hauteur seulement, elle flottait au milieu d'une colonne elargie
+        # par les boutons, decalee par rapport a son titre.
+        self.profile_list.pack(fill="both", expand=True)
         self.profile_list.bind("<<ListboxSelect>>", lambda _e: self._on_profile_selected())
 
         list_buttons = ttk.Frame(left)
         list_buttons.pack(fill="x", pady=6)
-        ttk.Button(list_buttons, text=t("New"), width=6, command=self._new_profile).pack(
+        # Pas de largeur figee : ces boutons avaient ete calibres sur
+        # « New », « Rename », « Delete », et « Supprimer » s'y retrouvait
+        # rogne en « Suppri ». Chaque libelle prend la place qu'il demande,
+        # dans toutes les langues.
+        ttk.Button(list_buttons, text=t("New"), command=self._new_profile).pack(
             side="left"
         )
-        ttk.Button(list_buttons, text=t("Rename"), width=8, command=self._rename_profile).pack(
+        ttk.Button(list_buttons, text=t("Rename"), command=self._rename_profile).pack(
             side="left", padx=3
         )
-        ttk.Button(list_buttons, text=t("Delete"), width=7, command=self._delete_profile).pack(
+        ttk.Button(list_buttons, text=t("Delete"), command=self._delete_profile).pack(
             side="left"
         )
 
@@ -753,7 +763,7 @@ class SettingsWindow:
             self.profile_outlet_vars[outlet.ref] = variable
             suffix = ""
             if outlet.never_switch_off:
-                suffix = "  (always on)"
+                suffix = "  " + t("(always on)")
             ttk.Checkbutton(
                 self.outlets_box,
                 text=f"{outlet.label}{suffix}",
@@ -779,9 +789,9 @@ class SettingsWindow:
             variable.set(always_on or ref in profile.outlets_on)
         count = len(profile.layout)
         self.layout_info.set(
-            f"{count} window(s) memorised."
+            t("{count} window(s) memorised.", count=count)
             if count
-            else "No layout memorised yet. Arrange your windows, then save."
+            else t("No layout memorised yet. Arrange your windows, then save.")
         )
 
     def _apply_profile_edits(self) -> None:
@@ -1295,7 +1305,7 @@ class SettingsWindow:
         ):
             ttk.Radiobutton(
                 row,
-                text=label,
+                text=t(label),
                 value=value,
                 variable=self.var_theme,
                 command=self._change_theme,
@@ -1971,7 +1981,7 @@ class AddDeviceDialog:
 
     def _scan(self) -> None:
         self.scan_button.state(["disabled"])
-        self.message.set("Scanning the local network...")
+        self.message.set(t("Scanning the local network..."))
 
         def worker() -> None:
             identities = discovery.scan_network_all(every_shelly=True)
@@ -2373,8 +2383,10 @@ class PasswordDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title(f"Password - {device.label}")
-        self.window.geometry("680x430")
-        self.window.minsize(640, 400)
+        # Cinq boutons, dont « Mot de passe perdu ? » : a 680 pixels le
+        # dernier arrive etait comprime.
+        self.window.geometry("780x430")
+        self.window.minsize(760, 400)
         self.window.transient(parent)
         self.window.grab_set()
         _theme_dialog(self.window, owner.palette)
@@ -2453,16 +2465,22 @@ class PasswordDialog:
             pass
 
     def _refresh_state(self) -> None:
-        stored = "a password is stored" if self.device.has_password else "no password stored"
+        stored = (
+            t("a password is stored")
+            if self.device.has_password
+            else t("no password stored")
+        )
         failure = self.app.controller.auth_failures.get(self.device.key)
         if failure:
             self.state.set(
-                f"The device refuses the current credentials ({failure}).\n"
-                "Enter the right password and use « Remember only », or reset "
-                "the device with its buttons."
+                t("The device refuses the current credentials ({failure}).\n"
+                  "Enter the right password and use « Remember only », or reset "
+                  "the device with its buttons.", failure=failure)
             )
         else:
-            self.state.set(f"Device '{self.device.key}': {stored}.")
+            self.state.set(
+                t("Device '{key}': {state}.", key=self.device.key, state=stored)
+            )
 
     def _typed(self) -> str | None:
         """Mot de passe saisi, apres verification de la confirmation."""

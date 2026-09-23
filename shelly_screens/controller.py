@@ -29,7 +29,7 @@ from typing import Callable
 
 from . import discovery
 from . import sensing
-from .config import AppConfig, DeviceConfig, OutletConfig, Profile, parse_ref
+from .config import AppConfig, DeviceConfig, Profile, parse_ref
 from .device import (
     AuthenticationFailed,
     ProtectedOutlet,
@@ -476,9 +476,6 @@ class ScreenController:
             if ref.startswith(f"{key}:"):
                 self._meter_history.pop(ref, None)
         self._log(f"Device '{key}': restart requested")
-
-    def total_power(self) -> float:
-        return sum(state.apower for state in self.read_outlets().values())
 
     # ------------------------------------------------------------- actions
 

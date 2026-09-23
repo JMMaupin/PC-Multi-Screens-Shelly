@@ -12,7 +12,6 @@ demi-watt et cinq watts, quand la marche depasse la centaine.
 from __future__ import annotations
 
 import math
-import threading
 import tkinter as tk
 from tkinter import ttk
 from typing import TYPE_CHECKING
@@ -214,9 +213,13 @@ class PowerChartDialog:
 
         for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
             age = span * fraction
+            # Centres sur leur graduation, les libelles des deux bords
+            # debordaient du cadre : « maintenant » s'y trouvait coupe en
+            # « maintena ». On les accroche vers l'interieur.
+            ancrage = "e" if fraction == 0.0 else ("w" if fraction == 1.0 else "center")
             canvas.create_text(
                 x_of(age), y1 + 12, fill=palette.text_muted, font=("", 8),
-                text=t("now") if age < 60 else _ago(age),
+                text=t("now") if age < 60 else _ago(age), anchor=ancrage,
             )
 
         # Trace en escalier : entre deux ticks la puissance n'a pas bouge,

@@ -118,5 +118,3 @@ def _install_exception_hooks(logger: logging.Logger) -> None:
     threading.excepthook = on_thread_exception
 
 
-def get_logger() -> logging.Logger:
-    return logging.getLogger(LOGGER_NAME)

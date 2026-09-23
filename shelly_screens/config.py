@@ -507,14 +507,6 @@ class AppConfig:
         for profile in self.profiles:
             profile.outlets_on = [r for r in profile.outlets_on if r in remaining]
 
-    def controllable_outlets(self) -> list[OutletConfig]:
-        """Prises qu'un profil a le droit de manoeuvrer."""
-        return [outlet for outlet in self.outlets if not outlet.never_switch_off]
-
-    def screen_outlets(self) -> list[OutletConfig]:
-        """Prises declarees comme portant un ecran."""
-        return [outlet for outlet in self.outlets if outlet.is_screen]
-
     def unclassified_outlets(self) -> list[OutletConfig]:
         """Prises dont le type n'a pas ete renseigne.
 
@@ -715,13 +707,3 @@ def load(path: Path | None = None) -> AppConfig:
     return AppConfig.from_dict(data, path=target)
 
 
-def default_profiles(refs: list[str]) -> list[Profile]:
-    """Profils proposes au premier lancement, a ajuster ensuite."""
-    first = refs[:1]
-    half = refs[: max(1, len(refs) // 2)]
-    return [
-        Profile(name="All on", outlets_on=list(refs), order=0),
-        Profile(name="Work", outlets_on=half, order=1),
-        Profile(name="Focus", outlets_on=first, order=2),
-        Profile(name="All off", outlets_on=[], order=3),
-    ]

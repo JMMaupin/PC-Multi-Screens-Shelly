@@ -107,5 +107,3 @@ def unprotect(stored: str) -> str:
     return _read(out).decode("utf-8", errors="replace")
 
 
-def is_protected(stored: str) -> bool:
-    return bool(stored) and stored.startswith(PREFIX)

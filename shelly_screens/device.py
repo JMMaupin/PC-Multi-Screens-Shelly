@@ -249,14 +249,8 @@ class ShellyDevice:
 
     # -------------------------------------------------------------- methodes
 
-    def get_device_info(self) -> dict[str, Any]:
-        return self.call("Shelly.GetDeviceInfo")
-
     def get_status(self) -> dict[str, Any]:
         return self.call("Shelly.GetStatus")
-
-    def get_switch(self, switch_id: int) -> SwitchState:
-        return SwitchState.from_rpc(self.call("Switch.GetStatus", {"id": switch_id}))
 
     def get_all_switches(self) -> dict[int, SwitchState]:
         """Lit toutes les prises en un seul appel Shelly.GetStatus."""

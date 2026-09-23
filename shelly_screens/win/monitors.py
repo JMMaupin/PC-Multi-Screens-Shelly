@@ -23,7 +23,6 @@ from .api import RECT, user32
 
 EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001
 MONITORINFOF_PRIMARY = 0x00000001
-DISPLAY_DEVICE_ACTIVE = 0x00000001
 CCHDEVICENAME = 32
 
 
@@ -95,10 +94,6 @@ class MonitorInfo:
     def height(self) -> int:
         return self.rect[3] - self.rect[1]
 
-    @property
-    def origin(self) -> tuple[int, int]:
-        return (self.rect[0], self.rect[1])
-
     def describe(self) -> str:
         """Libelle lisible, pour les menus et les journaux."""
         tag = " (primary)" if self.is_primary else ""
@@ -106,10 +101,6 @@ class MonitorInfo:
             f"{self.friendly_name} {self.width}x{self.height} "
             f"@ {self.rect[0]},{self.rect[1]}{tag}"
         )
-
-    def contains(self, x: int, y: int) -> bool:
-        left, top, right, bottom = self.rect
-        return left <= x < right and top <= y < bottom
 
 
 def list_monitors() -> list[MonitorInfo]:
@@ -189,29 +180,3 @@ def monitor_keys() -> set[str]:
     return {monitor.key for monitor in list_monitors()}
 
 
-def monitor_at(x: int, y: int) -> MonitorInfo | None:
-    """Ecran contenant le point donne, s'il y en a un."""
-    for monitor in list_monitors():
-        if monitor.contains(x, y):
-            return monitor
-    return None
-
-
-def primary_monitor() -> MonitorInfo | None:
-    for monitor in list_monitors():
-        if monitor.is_primary:
-            return monitor
-    return None
-
-
-def virtual_bounds() -> tuple[int, int, int, int]:
-    """Rectangle englobant tous les ecrans actifs."""
-    monitors = list_monitors()
-    if not monitors:
-        return (0, 0, 0, 0)
-    return (
-        min(m.rect[0] for m in monitors),
-        min(m.rect[1] for m in monitors),
-        max(m.rect[2] for m in monitors),
-        max(m.rect[3] for m in monitors),
-    )

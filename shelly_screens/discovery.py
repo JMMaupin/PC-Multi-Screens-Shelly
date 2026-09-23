@@ -68,10 +68,6 @@ class DeviceIdentity:
     firmware: str
     auth_enabled: bool
 
-    @property
-    def mdns_name(self) -> str:
-        return f"{self.device_id}.local"
-
 
 def address_of(host: str) -> str:
     """Adresse IPv4 derriere un hote, qu'il soit deja une adresse ou un nom.
