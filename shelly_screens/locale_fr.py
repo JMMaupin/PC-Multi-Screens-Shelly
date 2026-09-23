@@ -87,6 +87,10 @@ CATALOG: dict[str, str] = {
     "Power strip": "Multiprise",
     # --- cases a cocher
     "Critical - never switched off": "Critique - jamais coupee",
+    'Frozen measurement: {outlets}': 'Mesure figee : {outlets}',
+    'Shelly Screens {version} - Settings': 'Shelly Screens {version} - Reglages',
+    'On-device script is out of date': "Le script embarque n'est plus a jour",
+    'Update it now': 'Le mettre a jour maintenant',
     'stored': 'memorise',
     'unknown': 'inconnu',
     'none, stored': 'aucun, memorise',

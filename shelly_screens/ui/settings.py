@@ -22,6 +22,7 @@ from .. import i18n
 from ..i18n import t
 from ..config import KIND_LABELS, KIND_SCREEN, KINDS, OutletConfig, Profile
 from ..win import icon as icon_module
+from .. import __version__
 from ..win import monitors
 from .. import device_services
 
@@ -76,7 +77,7 @@ class SettingsWindow:
         # Avant toute construction : les widgets lisent leur texte une fois.
         i18n.set_language(self.config.settings.language)
         icon_module.apply_to_window(root)
-        root.title(t("Shelly Screens - Settings"))
+        root.title(t("Shelly Screens {version} - Settings", version=__version__))
         root.geometry("860x720")
         root.minsize(760, 600)
 

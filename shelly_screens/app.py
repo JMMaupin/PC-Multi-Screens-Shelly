@@ -27,6 +27,8 @@ from .win import icon as icon_module
 from .win import monitors
 from .win.shell import WM_SHOW_SETTINGS, MenuItem, TrayWindow
 
+from . import __version__
+
 APP_NAME = "Shelly Screens"
 REFRESH_INTERVAL_MS = 5000
 
@@ -72,7 +74,7 @@ class Application:
     # -------------------------------------------------------------- demarrage
 
     def start(self) -> None:
-        self.log(f"{APP_NAME} starting")
+        self.log(f"{APP_NAME} {__version__} starting")
         self.tray.create()
         self._update_icon()
         # La premiere connexion peut demander un balayage reseau : en tache de
@@ -260,6 +262,28 @@ class Application:
             items.append(MenuItem.info(t("No device reachable")))
             items.append(MenuItem(t("Reconnect"), action=self.reconnect))
 
+        frozen = self.controller.frozen_meters()
+        if frozen:
+            noms = ", ".join(sorted(
+                self.config.outlet(r).label
+                for r in frozen if self.config.outlet(r) is not None
+            ))
+            items.append(
+                MenuItem.info(t("Frozen measurement: {outlets}", outlets=noms))
+            )
+            items.append(
+                MenuItem(t("Restart the device"), action=self.restart_frozen)
+            )
+
+        if self.script_out_of_date:
+            # Le plus visible des emplacements : le menu s'ouvre d'un
+            # clic droit, sans savoir ou chercher. Un ecart entre les
+            # reglages et le script pose est indevinable autrement.
+            items.append(MenuItem.info(t("On-device script is out of date")))
+            items.append(
+                MenuItem(t("Update it now"), action=self.update_script)
+            )
+
         if self.busy:
             items.append(MenuItem.info(f"Busy: {self.busy}"))
 
@@ -274,6 +298,52 @@ class Application:
         items.append(MenuItem(t("Open log file"), action=self.open_log))
         items.append(MenuItem(t("Quit"), action=self.stop))
         return items
+
+    @property
+    def script_out_of_date(self) -> bool:
+        """Les reglages ont-ils change depuis la derniere installation ?
+
+        Calcule localement, sans reseau : on peut donc le demander a
+        chaque construction du menu sans rien couter a l'appareil.
+        """
+        from . import sensing
+
+        try:
+            return sensing.needs_update(self.config)
+        except Exception:  # noqa: BLE001 - un doute ne doit rien casser
+            return False
+
+    def update_script(self) -> None:
+        """Repose le script embarque avec les reglages courants."""
+        from . import sensing
+
+        def worker() -> None:
+            status = sensing.install(self.controller, self.config)
+            # `install` retient la nouvelle empreinte : il faut l'ecrire,
+            # sans quoi l'avertissement reapparaitrait au prochain demarrage.
+            self.config.save()
+            self.log(f"On-device script updated: {status.summary()}")
+
+        self._run_async("Updating script", worker)
+
+    def restart_frozen(self) -> None:
+        """Redemarre les appareils dont une voie de mesure est gelee.
+
+        C'est le seul remede connu a ce defaut du firmware, et il est sans
+        danger : relais bistables, et `initial_state` ramene la prise du PC
+        sous tension quoi qu'il arrive.
+        """
+        cles = {
+            ref.split(":")[0] for ref in self.controller.frozen_meters()
+        }
+
+        def worker() -> None:
+            for cle in sorted(cles):
+                self.controller.reboot_device(cle)
+            time.sleep(15.0)
+            self.controller.connect_all(allow_scan=False)
+
+        self._run_async("Restarting device", worker)
 
     def open_log(self) -> None:
         """Ouvre le journal dans l'editeur associe.

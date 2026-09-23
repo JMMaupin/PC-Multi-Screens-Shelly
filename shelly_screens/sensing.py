@@ -14,6 +14,7 @@ d'ou une simple liste d'index dans la table que le script embarque.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -266,6 +267,8 @@ def install(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
 
     config.sensing.script_id = script_id
     config.sensing.enabled = True
+    # Ce qui vient d'etre pose fait foi jusqu'au prochain changement.
+    config.sensing.installed_fingerprint = fingerprint(config)
     publish_profile(controller, config, config.settings.last_profile)
     return status(controller, config)
 
@@ -334,6 +337,33 @@ def installed_matches(controller: "ScreenController", config: AppConfig) -> bool
         return _get_code(device, script_id) == render(config)
     except Exception:  # noqa: BLE001 - un appareil injoignable se dit ailleurs
         return True
+
+
+def fingerprint(config: AppConfig) -> str:
+    """Empreinte du code que la configuration actuelle produirait."""
+    return hashlib.sha256(render(config).encode("utf-8")).hexdigest()
+
+
+def needs_update(config: AppConfig) -> bool:
+    """Le script pose sur l'appareil est-il devenu obsolete ?
+
+    Question posee sans toucher au reseau : on compare l'empreinte
+    retenue lors de la derniere installation a celle du code qu'on
+    ecrirait maintenant. Changer un seuil, un type de prise ou un mot de
+    passe modifie ce code -- et l'appareil, lui, continuerait d'appliquer
+    l'ancien sans rien en dire.
+    """
+    if not config.sensing.enabled or not config.sensing.pc_ref:
+        return False
+    if not config.sensing.installed_fingerprint:
+        # Rien de retenu : installation anterieure a ce suivi, ou script
+        # jamais pose. On ne crie pas au loup, la synchronisation au
+        # demarrage tranchera.
+        return False
+    try:
+        return fingerprint(config) != config.sensing.installed_fingerprint
+    except SensingError:
+        return False
 
 
 def uninstall(controller: "ScreenController", config: AppConfig) -> None:

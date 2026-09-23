@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from . import discovery
@@ -99,6 +99,15 @@ class SensingRealmMissing(RuntimeError):
 # difficulte : c'est ainsi qu'on a compte dix resolutions en dix secondes
 # pendant un reveil, au moment precis ou la multiprise saturait.
 RESOLVE_COOLDOWN_S = 30.0
+# Une tension secteur ne reste jamais parfaitement constante : elle
+# oscille toujours d'un dixieme de volt d'une mesure a l'autre. Plusieurs
+# releves rigoureusement identiques ne sont donc pas une mesure mais une
+# valeur gelee -- la voie du firmware a lache. Le symptome est sournois :
+# l'appareil repond, les prises obeissent, et seule la detection de veille
+# raisonne sur un chiffre mort. Elle ne coupe alors plus rien, sans que
+# rien ne le signale. Six lectures, soit une demi-minute, suffisent a
+# distinguer le gel d'une coincidence.
+FROZEN_METER_READS = 6
 # Apres un echec, on espace les interrogations au lieu de les maintenir.
 # On revient au rythme normal des que l'appareil repond.
 READ_BACKOFF_S = (0.0, 15.0, 30.0, 60.0)
@@ -124,6 +133,9 @@ class ScreenController:
         # de trafic, pas davantage.
         self._read_failures: dict[str, int] = {}
         self._retry_after: dict[str, float] = {}
+        # Dernieres tensions relevees par prise, pour reperer une voie
+        # de mesure qui ne bouge plus.
+        self._meter_history: dict[str, list[float]] = {}
         # Une seule sequence a la fois : un changement de profil manipule
         # l'alimentation et les fenetres, deux en parallele se marcheraient
         # dessus.
@@ -393,8 +405,49 @@ class ScreenController:
             self._retry_after.pop(key, None)
             self.auth_failures.pop(key, None)
             for switch_id, state in switches.items():
-                states[f"{key}:{switch_id}"] = state
+                ref = f"{key}:{switch_id}"
+                states[ref] = state
+                self._note_meter(ref, state)
         return states
+
+    def _note_meter(self, ref: str, state: SwitchState) -> None:
+        """Retient la tension relevee, pour juger si la voie est vivante."""
+        # Une prise coupee ne mesure rien : sa tension nulle et constante
+        # ne dit pas que le firmware a lache.
+        if not state.output or state.voltage <= 0:
+            self._meter_history.pop(ref, None)
+            return
+        lectures = self._meter_history.setdefault(ref, [])
+        lectures.append(state.voltage)
+        del lectures[:-FROZEN_METER_READS]
+
+    def frozen_meters(self) -> set[str]:
+        """Prises dont la mesure semble gelee."""
+        return {
+            ref
+            for ref, lectures in self._meter_history.items()
+            if len(lectures) >= FROZEN_METER_READS and len(set(lectures)) == 1
+        }
+
+    def reboot_device(self, key: str) -> None:
+        """Redemarre un appareil.
+
+        Sans danger pour les sorties : leurs relais sont bistables et
+        gardent leur position, et `initial_state` ramene de toute facon la
+        prise du PC et les prises critiques sous tension.
+        """
+        device = self.device_for(key)
+        try:
+            device.call("Shelly.Reboot")
+        except Exception:  # noqa: BLE001 - la reponse se perd avec la connexion
+            pass
+        # L'appareil part : on oublie tout ce qu'on croyait savoir de lui.
+        self._devices.pop(key, None)
+        self._last_resolve.pop(key, None)
+        for ref in list(self._meter_history):
+            if ref.startswith(f"{key}:"):
+                self._meter_history.pop(ref, None)
+        self._log(f"Device '{key}': restart requested")
 
     def total_power(self) -> float:
         return sum(state.apower for state in self.read_outlets().values())
@@ -416,6 +469,13 @@ class ScreenController:
         self.device_for(key).set_password(realm, password)
         device_config.set_password(password)
         self._devices[key] = ShellyDevice(device_config.host, password=password or None)
+        # L'identite est une photo prise a la connexion : sans cette mise a
+        # jour, elle continuerait d'annoncer un appareil sans mot de passe
+        # alors qu'on vient de lui en poser un. L'interface s'y fie pour
+        # afficher l'etat reel, et afficherait donc le contraire.
+        identity = self._identities.get(key)
+        if identity is not None:
+            self._identities[key] = replace(identity, auth_enabled=bool(password))
         self.auth_failures.pop(key, None)
         self._save()
         self._log(f"Device '{key}': password {'set' if password else 'removed'}")

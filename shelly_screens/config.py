@@ -292,6 +292,12 @@ class PowerSensing:
     off_delay_s: float = 90.0
     poll_interval_s: float = 2.0
     script_id: int = 0  # identifiant du script installe, 0 si aucun
+    # Empreinte du code reellement pose sur l'appareil. Comparee a celle
+    # du code qu'on produirait maintenant, elle dit si un reglage a
+    # change depuis -- un seuil, un type de prise, un mot de passe --
+    # sans avoir ete transmis. Un drapeau qu'il faudrait lever a la main
+    # finirait par etre oublie ; une empreinte ne s'oublie pas.
+    installed_fingerprint: str = ""
     # Paliers releves par l'assistant de calibration, en watts.
     measured_idle_w: float = 0.0  # PC allume, au repos
     measured_sleep_w: float = 0.0  # PC en veille
@@ -306,6 +312,7 @@ class PowerSensing:
         return cls(
             enabled=bool(data.get("enabled", defaults.enabled)),
             pc_ref=str(data.get("pc_ref", "")),
+            installed_fingerprint=str(data.get("installed_fingerprint", "")),
             on_threshold_w=float(data.get("on_threshold_w", defaults.on_threshold_w)),
             off_threshold_w=float(data.get("off_threshold_w", defaults.off_threshold_w)),
             on_delay_s=float(data.get("on_delay_s", defaults.on_delay_s)),

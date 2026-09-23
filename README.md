@@ -513,6 +513,23 @@ précédé deux réinitialisations par chien de garde.
 version 1 par une liste. Une configuration en version 1 est migrée à la
 volée, sans intervention.
 
+## Version
+
+Deux nombres, et rien de plus. Le numéro est dans
+[shelly_screens/__init__.py](shelly_screens/__init__.py), affiché dans le
+titre de la fenêtre de réglages et sur la première ligne du journal.
+
+La **majeure** change quand la configuration existante ne suffit plus telle
+quelle : un format de fichier qui évolue, un réglage dont le sens change, un
+script embarqué incompatible avec l'ancien. Autrement dit, quand une mise à
+jour demande de vérifier quelque chose plutôt que de simplement redémarrer.
+
+La **mineure** change à chaque itération — correction, ajout, mesure de
+robustesse — même pour un détail. Son rôle n'est pas de résumer l'ampleur du
+travail mais de répondre à une seule question, posée un jour de panne :
+*quelle version tourne devant moi ?* Un journal qui ne dit pas de quel code
+il parle fait perdre plus de temps qu'il n'en fait gagner.
+
 ## Dépannage
 
 | Symptôme | Piste |
@@ -523,6 +540,7 @@ volée, sans intervention.
 | Les fenêtres ne reviennent pas en place | La disposition n'a pas été enregistrée pour ce profil, ou les applications concernées ont été fermées depuis. |
 | Changement de profil très lent | Un écran attendu ne revient pas : l'attente va jusqu'au délai maximal (20 s par défaut, réglable dans `Behaviour`). |
 | Rien au démarrage du PC | Vérifier qu'une prise porte le rôle **Boot screen**, et que le concentrateur USB du clavier est **Critical**. |
+| Une veille ne coupe plus rien | La voie de mesure du firmware peut se figer : l'application le détecte et le signale dans le menu de l'icône, avec un bouton pour redémarrer la multiprise. Un redémarrage est sans danger — relais bistables, et `initial_state` ramène la prise du PC sous tension. |
 | Les écrans se coupent alors que le PC tourne | Seuil de coupure trop haut. Relancer une mesure, ou le baisser dans `PC power`. |
 | Rien ne se rallume au démarrage du PC | Vérifier dans `PC power` que le script est `running`, et qu'une prise porte le rôle **Boot screen**. |
 | Le clavier ne répond pas dans le BIOS | Son concentrateur USB doit être marqué **Critical**, pas seulement piloté par le script. |
