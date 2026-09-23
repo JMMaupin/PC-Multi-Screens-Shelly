@@ -522,6 +522,65 @@ précédé deux réinitialisations par chien de garde.
 version 1 par une liste. Une configuration en version 1 est migrée à la
 volée, sans intervention.
 
+## Historique de consommation
+
+Menu de l'icône → **Consumption history...**, ou onglet **PC power** →
+**Open history...**. Une fenêtre à part, pour relire une journée, une semaine
+ou un mois de consommation de l'unité centrale.
+
+### Ce qui est enregistré
+
+Rien n'est interrogé en plus : l'historique se nourrit des relevés que
+l'application fait déjà toutes les cinq secondes. Il ne retient que ce qui
+apprend quelque chose — une variation d'au moins 3 % ou 1 W, et un point
+d'ancrage par minute. Un mois tient en quelques centaines de kilo-octets.
+
+Pendant la veille ou l'arrêt, l'application ne tourne plus, mais le releveur
+embarqué dans la multiprise continue de mesurer. Au lancement et à chaque
+réveil, ses relevés comblent le trou. Il date désormais son dernier relevé,
+ce qui situe une veille à la seconde près plutôt qu'au quart d'heure.
+
+Les fichiers vivent dans `history/`, à côté de la configuration, un par
+prise, nommés d'après l'**adresse MAC** de la multiprise et le numéro de
+sortie — pas d'après la clé de l'appareil, qui change au gré des renommages.
+Leur profondeur se règle dans **PC power** → *Keep history for*, de 1 à
+365 jours ; au-delà, les points les plus anciens sont élagués.
+
+### Naviguer
+
+| Geste | Effet |
+| --- | --- |
+| Molette | Zoom autour du pointeur |
+| Glisser | Défilement dans le temps |
+| ◀ ▶, flèches du clavier | Recul ou avance d'une demi-fenêtre |
+| 1 h … 30 j | Durée affichée |
+| **Live**, double-clic, `Fin` | Retour au présent, qui suit alors les nouvelles mesures |
+| Survol | Heure et puissance exactes, et leur provenance |
+
+Sous le graphique : minimum, moyenne pondérée par la durée, maximum et
+**énergie consommée** sur la période visible, avec la part effectivement
+mesurée. Un pic de dix secondes ne pèse pas comme une heure de veille.
+
+Une période sans aucune mesure reste un **trou** : relier ses deux bords
+ferait croire à une consommation qu'on n'a pas vue.
+
+### Log ou linéaire
+
+L'échelle logarithmique est recadrée sur ce qui est visible. Elle s'impose
+dès que la veille et l'activité partagent l'écran : 2 W et 200 W y restent
+lisibles ensemble. Sur une plage d'activité seule, l'échelle linéaire rend
+les écarts proportionnels — la lecture la plus honnête d'une consommation,
+puisque l'énergie, elle, est linéaire. Les deux sont à un clic.
+
+### Limites
+
+Le releveur embarqué garde **84 relevés**. Une veille est plate, un point
+par quart d'heure suffit : cela couvre environ 21 heures. Un arrêt plus
+long — un week-end — ne conserve que ses dernières 21 heures.
+
+Seule la prise du PC bénéficie de ce releveur. D'autres prises pourront
+être suivies plus tard, mais uniquement quand l'application tourne.
+
 ## Version
 
 Deux nombres, et rien de plus. Le numéro est dans

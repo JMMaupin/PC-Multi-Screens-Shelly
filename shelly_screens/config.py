@@ -369,6 +369,9 @@ class Settings:
     theme: str = "system"
     # Langue de l'interface : system, en ou fr.
     language: str = "system"
+    # Profondeur de l'historique de consommation, en jours. Au-dela, les
+    # points les plus anciens sont elagues : une file, pas une archive.
+    history_days: int = 30
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -395,6 +398,7 @@ class Settings:
             ),
             theme=str(data.get("theme", defaults.theme)),
             language=str(data.get("language", defaults.language)),
+            history_days=max(1, int(data.get("history_days", defaults.history_days))),
         )
 
 

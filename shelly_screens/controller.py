@@ -400,14 +400,14 @@ class ScreenController:
                 # delai de garde de `connect_device` s'en chargera au
                 # prochain tour, une fois l'appareil calme.
                 self._devices.pop(key, None)
-                rang = self._read_failures.get(key, 0) + 1
-                self._read_failures[key] = rang
-                repit = READ_BACKOFF_S[min(rang, len(READ_BACKOFF_S) - 1)]
-                self._retry_after[key] = now + repit
-                if repit:
+                attempt = self._read_failures.get(key, 0) + 1
+                self._read_failures[key] = attempt
+                delay = READ_BACKOFF_S[min(attempt, len(READ_BACKOFF_S) - 1)]
+                self._retry_after[key] = now + delay
+                if delay:
                     self._log(
-                        f"Device '{key}' unreachable ({rang}), next try in "
-                        f"{repit:.0f} s"
+                        f"Device '{key}' unreachable ({attempt}), next try in "
+                        f"{delay:.0f} s"
                     )
                 continue
             self._read_failures.pop(key, None)
@@ -445,16 +445,16 @@ class ScreenController:
         if not state.output or state.voltage <= 0:
             self._meter_history.pop(ref, None)
             return
-        lectures = self._meter_history.setdefault(ref, [])
-        lectures.append(state.voltage)
-        del lectures[:-FROZEN_METER_READS]
+        readings = self._meter_history.setdefault(ref, [])
+        readings.append(state.voltage)
+        del readings[:-FROZEN_METER_READS]
 
     def frozen_meters(self) -> set[str]:
         """Prises dont la mesure semble gelee."""
         return {
             ref
-            for ref, lectures in self._meter_history.items()
-            if len(lectures) >= FROZEN_METER_READS and len(set(lectures)) == 1
+            for ref, readings in self._meter_history.items()
+            if len(readings) >= FROZEN_METER_READS and len(set(readings)) == 1
         }
 
     def reboot_device(self, key: str) -> None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -616,8 +617,8 @@ def suggest_thresholds(levels: Levels) -> tuple[float, float, str]:
     return on_threshold, off_threshold, warning
 
 
-def start_probe(controller: "ScreenController", config: AppConfig) -> int:
-    """Installe et demarre le releveur de paliers."""
+def render_probe(config: AppConfig) -> str:
+    """Code du releveur, configuration incluse."""
     if not config.sensing.pc_ref:
         raise SensingError("No outlet is marked as powering the PC")
     template = PROBE_TEMPLATE.read_text(encoding="utf-8")
@@ -635,8 +636,20 @@ def start_probe(controller: "ScreenController", config: AppConfig) -> int:
         },
         separators=(",", ":"),
     )
-    code = template.replace(CONFIG_MARKER, f"let CFG = {payload};", 1)
+    return template.replace(CONFIG_MARKER, f"let CFG = {payload};", 1)
 
+
+def install_probe(
+    controller: "ScreenController", config: AppConfig, fresh: bool
+) -> int:
+    """Pose le releveur ; `fresh` efface ce qu'il avait deja enregistre.
+
+    Deux usages opposes. Lancer une mesure demande une ardoise vierge : un
+    releve precedent fausserait les paliers proposes. Mettre le releveur a
+    jour, au contraire, ne doit rien perdre : ses ticks alimentent
+    l'historique de consommation, et le releveur les relit a son demarrage.
+    """
+    code = render_probe(config)
     device = controller.device_for(host_device_key(config))
     script_id = _find_script(device, PROBE_NAME)
     if not script_id:
@@ -646,11 +659,71 @@ def start_probe(controller: "ScreenController", config: AppConfig) -> int:
         device.call("Script.Stop", {"id": script_id})
     _put_code(device, script_id, code)
     device.call("Script.SetConfig", {"id": script_id, "config": {"enable": True}})
-    # Un releve precedent fausserait le nouveau.
-    _forget_key(device, KVS_PROBE_KEY)
-    _forget_key(device, KVS_SERIES_KEY)
+    if fresh:
+        _forget_key(device, KVS_PROBE_KEY)
+        _forget_key(device, KVS_SERIES_KEY)
     device.call("Script.Start", {"id": script_id})
     return script_id
+
+
+def start_probe(controller: "ScreenController", config: AppConfig) -> int:
+    """Lance une nouvelle mesure, sur une ardoise vierge."""
+    return install_probe(controller, config, fresh=True)
+
+
+def sync_probe(controller: "ScreenController", config: AppConfig) -> str:
+    """Tient le releveur a jour et en marche, sans effacer ses ticks.
+
+    Il n'est plus un simple outil de calibration : c'est lui qui voit la
+    consommation pendant que le PC dort, et l'historique en depend. On le
+    pose donc s'il manque, on le remplace si son code a vieilli, et on le
+    relance s'il s'est arrete.
+    """
+    if not config.sensing.enabled or not config.sensing.pc_ref:
+        return ""
+    device = controller.device_for(host_device_key(config))
+    script_id = _find_script(device, PROBE_NAME)
+    if not script_id:
+        install_probe(controller, config, fresh=False)
+        return "installed"
+    if _get_code(device, script_id) != render_probe(config):
+        install_probe(controller, config, fresh=False)
+        return "updated"
+    info = device.call("Script.GetStatus", {"id": script_id}) or {}
+    if not info.get("running"):
+        device.call("Script.Start", {"id": script_id})
+        return "restarted"
+    return ""
+
+
+def read_probe_timeline(
+    controller: "ScreenController", config: AppConfig
+) -> list[tuple[float, float]]:
+    """Ticks du releveur, dates en temps Unix, du plus ancien au plus recent.
+
+    Le releveur publie l'instant de son dernier tick ; les autres s'en
+    deduisent par les ecarts qu'il encode. Faute de ce repere -- releveur
+    anterieur, ou horloge pas encore synchronisee --, on prend l'heure
+    courante : l'approximation est bonne a la sortie de veille, ou le
+    dernier tick est justement celui du reveil.
+    """
+    ticks = read_series(controller, config)
+    if not ticks:
+        return []
+    reference = None
+    try:
+        device = controller.device_for(host_device_key(config))
+        raw = (device.call("KVS.Get", {"key": KVS_PROBE_KEY}) or {}).get("value")
+        data = json.loads(raw) if isinstance(raw, str) and raw.startswith("{") else {}
+        stamp = data.get("t")
+        # Un instant anterieur a 2001 est une horloge non synchronisee.
+        if isinstance(stamp, (int, float)) and stamp > 1_000_000_000:
+            reference = float(stamp)
+    except Exception:  # noqa: BLE001 - le repere est un plus, pas une condition
+        reference = None
+    if reference is None:
+        reference = time.time()
+    return [(reference - tick.age_s, tick.watts) for tick in ticks]
 
 
 def read_probe(controller: "ScreenController", config: AppConfig) -> Levels:

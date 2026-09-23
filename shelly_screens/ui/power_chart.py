@@ -216,10 +216,10 @@ class PowerChartDialog:
             # Centres sur leur graduation, les libelles des deux bords
             # debordaient du cadre : « maintenant » s'y trouvait coupe en
             # « maintena ». On les accroche vers l'interieur.
-            ancrage = "e" if fraction == 0.0 else ("w" if fraction == 1.0 else "center")
+            anchor = "e" if fraction == 0.0 else ("w" if fraction == 1.0 else "center")
             canvas.create_text(
                 x_of(age), y1 + 12, fill=palette.text_muted, font=("", 8),
-                text=t("now") if age < 60 else _ago(age), anchor=ancrage,
+                text=t("now") if age < 60 else _ago(age), anchor=anchor,
             )
 
         # Trace en escalier : entre deux ticks la puissance n'a pas bouge,

@@ -189,8 +189,8 @@ def load_photo(size: int = 96):
         if not LARGE_PNG.exists():
             return None
         image = tk.PhotoImage(file=str(LARGE_PNG))
-        facteur = max(1, round(256 / max(1, size)))
-        return image.subsample(facteur, facteur) if facteur > 1 else image
+        factor = max(1, round(256 / max(1, size)))
+        return image.subsample(factor, factor) if factor > 1 else image
     except Exception:  # noqa: BLE001 - Tk sans support PNG, fichier illisible
         return None
 

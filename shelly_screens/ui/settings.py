@@ -294,14 +294,14 @@ class SettingsWindow:
         if rssi is None:
             return "-"
         if rssi >= -60:
-            qualite = t("excellent")
+            quality = t("excellent")
         elif rssi >= -70:
-            qualite = t("good")
+            quality = t("good")
         elif rssi >= -78:
-            qualite = t("fair")
+            quality = t("fair")
         else:
-            qualite = t("weak")
-        return f"{rssi} dBm - {qualite}"
+            quality = t("weak")
+        return f"{rssi} dBm - {quality}"
 
     def _auth_label(self, device) -> str:
         """Etat du mot de passe tel que l'appareil le rapporte.
@@ -1006,6 +1006,41 @@ class SettingsWindow:
         ttk.Button(script_row, text=t("Remove"), command=self._remove_script).pack(
             side="left", padx=8
         )
+
+        history_box = ttk.LabelFrame(frame, text=t("Consumption history"), padding=10)
+        history_box.pack(fill="x", pady=(10, 0))
+        history_row = ttk.Frame(history_box)
+        history_row.pack(fill="x")
+        ttk.Label(history_row, text=t("Keep history for")).pack(side="left")
+        self.var_history_days = tk.IntVar(value=self.config.settings.history_days)
+        days = ttk.Spinbox(
+            history_row, from_=1, to=365, increment=1, width=6,
+            textvariable=self.var_history_days, command=self._apply_history_days,
+        )
+        days.pack(side="left", padx=8)
+        # Comme pour les seuils : une valeur tapee au clavier doit etre
+        # validee a la sortie du champ, les fleches ne suffisent pas.
+        days.bind("<FocusOut>", lambda _e: self._apply_history_days())
+        days.bind("<Return>", lambda _e: self._apply_history_days())
+        ttk.Label(history_row, text=t("days")).pack(side="left")
+        ttk.Button(
+            history_row, text=t("Open history..."), command=self._open_history
+        ).pack(side="right")
+
+    def _apply_history_days(self) -> None:
+        try:
+            days = int(self.var_history_days.get())
+        except (tk.TclError, ValueError):
+            return  # saisie en cours
+        days = min(max(days, 1), 365)
+        if days != self.config.settings.history_days:
+            self.config.settings.history_days = days
+            self._save()
+
+    def _open_history(self) -> None:
+        from .history_window import open_history
+
+        open_history(self.app)
 
     def refresh_sensing(self) -> None:
         """Met a jour l'onglet de detection.

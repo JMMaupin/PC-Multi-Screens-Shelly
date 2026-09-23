@@ -34,6 +34,10 @@ let sinceWrite = 0;
 let ticks = "";
 let lastLevel = -1;
 let sinceTick = 0;
+// Instant du dernier tick, en temps Unix. Les ticks n'encodent que des
+// ecarts entre eux : sans ce repere, l'application saurait ce qui s'est
+// passe pendant une veille, mais pas quand, a un quart d'heure pres.
+let lastTickTime = 0;
 
 function bucketOf(watts) {
   for (let i = 0; i < EDGES.length; i++) {
@@ -86,13 +90,19 @@ function recordTick(level, elapsed) {
     ticks = ticks.slice(ticks.length + 3 - CFG.maxChars);
   }
   ticks = ticks + encoded;
+  // L'horloge de l'appareil est synchronisee par SNTP ; tant qu'elle ne
+  // l'est pas, unixtime vaut null et l'on garde le repere precedent.
+  let sys = Shelly.getComponentStatus("sys");
+  if (sys !== null && typeof sys.unixtime === "number") {
+    lastTickTime = sys.unixtime;
+  }
 }
 
 function store() {
   sinceWrite = 0;
   Shelly.call("KVS.Set", {
     key: CFG.key,
-    value: JSON.stringify({ n: seen, mn: lowest, mx: highest, b: counts }),
+    value: JSON.stringify({ n: seen, mn: lowest, mx: highest, b: counts, t: lastTickTime }),
   });
   Shelly.call("KVS.Set", { key: CFG.seriesKey, value: ticks });
 }

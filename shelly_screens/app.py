@@ -18,6 +18,7 @@ import time
 
 from . import config as config_module
 from . import logging_setup
+from . import power_history
 from . import single_instance
 from .i18n import set_language, t
 from .config import AppConfig
@@ -39,6 +40,11 @@ class Application:
     def __init__(self, app_config: AppConfig) -> None:
         self.config = app_config
         self.controller = ScreenController(app_config, log=self.log)
+        # Historique de consommation : il se nourrit des releves que
+        # l'application fait deja, sans rien demander de plus a l'appareil.
+        self.history = power_history.HistoryRecorder(
+            app_config, self.controller, self.log
+        )
         self.tray = TrayWindow(
             tooltip=APP_NAME,
             on_suspend=self._on_suspend,
@@ -102,6 +108,11 @@ class Application:
             changed = sensing.sync_installed(self.controller, self.config)
             if changed:
                 self.log(f"On-device script {changed}")
+            # Le releveur voit la consommation pendant que le PC dort :
+            # l'historique en depend, il doit etre en place et a jour.
+            probe = sensing.sync_probe(self.controller, self.config)
+            if probe:
+                self.log(f"On-device probe {probe}")
             published = sensing.ensure_published(self.controller, self.config)
             if published:
                 self.log(f"Published outlets for the on-device script: {published}")
@@ -114,6 +125,7 @@ class Application:
             self.log(f"Startup error: {exc}")
 
     def stop(self) -> None:
+        self.history.sync()
         self.tray.stop()
 
     # ------------------------------------------------------------------ etat
@@ -123,6 +135,10 @@ class Application:
         try:
             self.states = self.controller.read_outlets()
             self.online = bool(self.states)
+            try:
+                self.history.feed(self.states)
+            except Exception as exc:  # noqa: BLE001 - jamais au detriment du pilotage
+                self.log(f"History not recorded: {exc}")
         except (NotConnected, OSError) as exc:
             self.online = False
             self.log(f"Refresh failed: {exc}")
@@ -264,12 +280,12 @@ class Application:
 
         frozen = self.controller.frozen_meters()
         if frozen:
-            noms = ", ".join(sorted(
+            names = ", ".join(sorted(
                 self.config.outlet(r).label
                 for r in frozen if self.config.outlet(r) is not None
             ))
             items.append(
-                MenuItem.info(t("Frozen measurement: {outlets}", outlets=noms))
+                MenuItem.info(t("Frozen measurement: {outlets}", outlets=names))
             )
             items.append(
                 MenuItem(t("Restart the device"), action=self.restart_frozen)
@@ -293,6 +309,9 @@ class Application:
         items.append(MenuItem(t("Outlets"), submenu=self._outlet_items()))
         items.append(MenuItem(t("Layout"), submenu=self._layout_items()))
         items.append(MenuItem.sep())
+        items.append(
+            MenuItem(t("Consumption history..."), action=self._open_history)
+        )
         items.append(MenuItem(t("Settings..."), action=self._open_settings))
         items.append(MenuItem(t("Refresh"), action=self.refresh_now))
         items.append(MenuItem(t("Open log file"), action=self.open_log))
@@ -333,13 +352,13 @@ class Application:
         danger : relais bistables, et `initial_state` ramene la prise du PC
         sous tension quoi qu'il arrive.
         """
-        cles = {
+        keys = {
             ref.split(":")[0] for ref in self.controller.frozen_meters()
         }
 
         def worker() -> None:
-            for cle in sorted(cles):
-                self.controller.reboot_device(cle)
+            for key in sorted(keys):
+                self.controller.reboot_device(key)
             time.sleep(15.0)
             self.controller.connect_all(allow_scan=False)
 
@@ -463,6 +482,10 @@ class Application:
         la main, et une coupure lancee en tache de fond n'aurait pas le temps
         d'aboutir.
         """
+        # L'historique d'abord : Windows suspend le processus des qu'on
+        # rend la main, et ce qui n'est pas sur le disque serait perdu si
+        # le PC ne se reveillait pas.
+        self.history.sync()
         if not self.config.settings.power_off_on_suspend or not self.config.devices:
             return
         if self.config.sensing.enabled:
@@ -485,6 +508,9 @@ class Application:
 
     def _on_resume(self) -> None:
         """Reveil : reappliquer le dernier profil."""
+        # Pendant la veille, seul le releveur embarque a mesure : ses
+        # ticks viendront combler le trou a la prochaine lecture.
+        self.history.request_recovery()
         if not self.config.settings.restore_on_resume:
             self._on_tick()
             return
@@ -508,6 +534,11 @@ class Application:
         self._on_suspend()
 
     # ------------------------------------------------------------- reglages
+
+    def _open_history(self) -> None:
+        from .ui.history_window import open_history
+
+        open_history(self)
 
     def _open_settings(self) -> None:
         from .ui.settings import open_settings

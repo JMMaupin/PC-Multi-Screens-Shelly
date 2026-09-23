@@ -15,6 +15,12 @@ config.json
 shelly-screens.log
 shelly-screens.log.*
 
+# Historique de consommation.
+#
+# Des mesures propres a cette installation, qui grossissent chaque jour
+# et n'apprennent rien a qui clone le depot.
+history/
+
 # Python
 __pycache__/
 *.py[cod]
