@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
-from . import discovery
+from . import device_leds, discovery
 from . import sensing
 from .config import AppConfig, DeviceConfig, Profile, parse_ref
 from .device import (
@@ -238,6 +238,7 @@ class ScreenController:
             # seul lancement de l'application, qui peut tourner depuis des
             # heures quand l'appareil, lui, vient de renaitre.
             self.enforce_power_on_state(key)
+            self.enforce_button_lock(key)
         if changed:
             self._save()
         # On ne journalise que ce qui apprend quelque chose : une premiere
@@ -271,6 +272,7 @@ class ScreenController:
         for key, device in self._devices.items():
             device.protect(self.protected_switches(key))
             self.enforce_power_on_state(key)
+            self.enforce_button_lock(key)
 
     def enforce_power_on_state(self, device_key: str) -> list[str]:
         """Pose ce que chaque sortie doit faire quand l'appareil redemarre.
@@ -313,6 +315,36 @@ class ScreenController:
         if changed:
             self._log("Power-on state corrected: " + ", ".join(changed))
         return changed
+
+    def enforce_button_lock(self, device_key: str) -> bool:
+        """Detache le bouton physique de la prise du PC ; vrai s'il l'a fallu.
+
+        Le bouton d'une Power Strip commute sa prise au moindre appui, sans
+        passer par aucune de nos protections : un coup de balai, un cable
+        qu'on range, et le PC s'eteint net. Detache, le bouton ne commande
+        plus rien -- la prise ne se pilote que par l'application.
+
+        Comme l'etat au demarrage, ce reglage vit dans l'appareil et se
+        perd a la remise a zero : on le repose a chaque connexion. Un autre
+        modele que la Power Strip n'a pas le composant, et n'est pas concerne.
+        """
+        device = self._devices.get(device_key)
+        pc = self.config.host_pc_outlet()
+        if device is None or pc is None or pc.device != device_key:
+            return False
+        try:
+            found = device_leds.read(device)
+            if found is None:
+                return False
+            _settings, buttons = found
+            if buttons.get(pc.switch_id) == device_leds.BUTTON_DETACHED:
+                return False
+            device_leds.set_button(device, pc.switch_id, detached=True)
+        except Exception as exc:  # noqa: BLE001 - ne jamais bloquer la connexion
+            self._log(f"Could not detach the button of {pc.ref}: {exc}")
+            return False
+        self._log(f"Physical button of {pc.ref} detached: it can no longer switch the PC off")
+        return True
 
     def _switch_count(self, key: str) -> int:
         """Nombre de sorties reellement presentes sur un appareil."""

@@ -147,7 +147,7 @@ Pour la disposition des fenêtres : ranger les fenêtres comme voulu, puis
 ## La prise de l'unité centrale n'est jamais coupée
 
 Couper le PC en marche lui fait perdre le travail en cours. La prise portant
-le rôle **Powers the PC** est donc protégée par cinq verrous
+le rôle **Powers the PC** est donc protégée par six verrous
 indépendants, et non par un seul.
 
 | Où | Ce qu'il fait |
@@ -157,8 +157,9 @@ indépendants, et non par un seul.
 | Assistant d'identification | ne manœuvre que les prises de type *Screen*, en écartant celles tirant plus de 80 W, et revalide avant chaque coupure |
 | Script `pc_sensing` | sur l'appareil, rétablit la sortie si l'ordre vient d'ailleurs |
 | `initial_state` de la sortie | posé à `on`, pour qu'un redémarrage de la multiprise la rende alimentée |
+| Bouton de la prise | détaché : un appui sur la multiprise ne commute plus la sortie |
 
-**Pourquoi quatre et pas un.** Le premier défaut venait de là : la seule
+**Pourquoi plusieurs et pas un.** Le premier défaut venait de là : la seule
 protection était la bonne construction de la liste des prises à couper, et
 `_switch_many` envoyait ensuite les ordres sans rien revérifier. Une liste
 mal construite suffisait. Le verrou est désormais au plus près de l'appel
@@ -199,6 +200,18 @@ Les écrans sont en `restore_last` et non en `off` pour une raison précise :
 si leur multiprise redémarrait pendant que le PC tourne, `off` les laisserait
 éteints indéfiniment — le script ne réagit qu'aux changements d'état du PC,
 et celui-ci n'aurait pas bougé.
+
+### Le sixième : le bouton de la prise
+
+Chaque prise de la Power Strip a son bouton, qui la commute au moindre appui
+— sans passer par aucune des protections ci-dessus. Un coup de balai, un
+câble qu'on range, et le PC s'éteint net.
+
+L'application **détache** donc le bouton de la prise du PC (`in_mode:
+detached`) : il ne commande plus rien, la sortie ne se pilote que par le
+logiciel. Comme `initial_state`, ce réglage vit dans l'appareil et se perd à
+la réinitialisation ; il est reposé à chaque connexion. Il s'applique à
+chaud, sans redémarrage.
 
 ## Couper vraiment tout : la détection par la consommation
 
@@ -349,6 +362,32 @@ rallume le point d'accès Wi-Fi intégré — **ouvert** sur ce modèle. Tenir l
 Une réinitialisation d'usine efface tout : mot de passe, identifiants Wi-Fi,
 scripts et noms de prises.
 
+## Anneaux lumineux et boutons
+
+Onglet **Devices** → **LEDs...**. Livrés à pleine luminosité, les anneaux des
+prises éclairent une pièce dans le noir. Le dialogue règle, sur l'appareil
+sélectionné ou d'un coup sur toutes les Power Strips :
+
+| Réglage | Effet |
+| --- | --- |
+| *Power* | la couleur suit la puissance consommée ; une luminosité |
+| *State* | une couleur allumée, une autre éteinte, chacune avec sa luminosité |
+| *Off* | anneaux éteints |
+| *Night mode* | atténue les anneaux entre deux heures — proposé à 5 % de 22:00 à 07:00 |
+| *Push buttons* | détache le bouton d'une prise, qui ne la commute plus |
+
+Le firmware n'a **qu'un jeu de couleurs**, valable pour toutes les prises :
+il refuse toute couleur propre à une prise. Les heures du mode nuit suivent
+l'horloge de l'appareil.
+
+Les réglages s'appliquent à chaud. Si l'appareil réclame malgré tout un
+redémarrage — constaté une seule fois, à la toute première activation du
+mode nuit — le bouton *Restart to apply* s'en charge ; les relais étant
+bistables, aucune prise ne bascule.
+
+La case du bouton de la prise du PC est cochée et grisée : l'application
+l'impose (voir *Le sixième : le bouton de la prise*).
+
 ## Icône
 
 Le jeu d'icônes est dans `windows-icons/`, à la racine, tel que le
@@ -452,10 +491,15 @@ config.json                  configuration (généré au premier lancement)
 shelly-screens.log           journal (généré, rotatif)
 shelly_screens/
   device.py                  client JSON-RPC Shelly Gen2+
+  device_services.py         services optionnels des appareils (Matter, Cloud...)
+  device_leds.py             anneaux lumineux et boutons des Power Strips
   discovery.py               localisation : adresse connue, mDNS, balayage
   config.py                  modèle de configuration, migration, persistance
   controller.py              enchaînement appareils / prises / écrans / fenêtres
+  sensing.py                 installation et suivi des scripts embarqués
+  power_history.py           historique de consommation (SQLite)
   app.py                     icône, menu, événements système
+  scripts/                   pc_sensing.js, pc_probe.js (exécutés sur l'appareil)
   win/
     api.py                   ctypes communs, conscience du DPI
     monitors.py              énumération des écrans, clé stable
@@ -463,6 +507,7 @@ shelly_screens/
     icon.py                  génération de l'icône
     shell.py                 fenêtre cachée, zone de notification, messages
   ui/settings.py             fenêtre de réglages (tkinter)
+  ui/history_window.py       fenêtre d'historique de consommation
 ```
 
 ## Points techniques

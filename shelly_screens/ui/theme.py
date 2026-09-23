@@ -467,6 +467,23 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
         lightcolor=p.accent,
         darkcolor=p.accent,
     )
+    # Curseurs : sans style propre, `clam` les dessine en clair une fois
+    # desactives, et le curseur inerte ressortait plus que l'actif.
+    style.configure(
+        "Horizontal.TScale",
+        background=p.accent,
+        troughcolor=p.surface_alt,
+        bordercolor=p.border,
+        lightcolor=p.accent,
+        darkcolor=p.accent,
+    )
+    style.map(
+        "Horizontal.TScale",
+        background=[("disabled", p.border), ("active", _mix(p.accent, p.text, 0.2))],
+        lightcolor=[("disabled", p.border)],
+        darkcolor=[("disabled", p.border)],
+        troughcolor=[("disabled", p.bg)],
+    )
     style.configure(
         "TScrollbar",
         background=p.surface_alt,

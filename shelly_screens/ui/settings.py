@@ -24,7 +24,7 @@ from ..config import KIND_LABELS, KIND_SCREEN, KINDS, OutletConfig, Profile
 from ..win import icon as icon_module
 from .. import __version__
 from ..win import monitors
-from .. import device_services
+from .. import device_leds, device_services
 
 if TYPE_CHECKING:
     from ..app import Application
@@ -265,22 +265,18 @@ class SettingsWindow:
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=12)
         ttk.Button(buttons, text=t("Add device..."), command=self._add_device).pack(side="left")
-        ttk.Button(buttons, text=t("Name and key..."), command=self._name_device).pack(
-            side="left", padx=8
-        )
-        ttk.Button(buttons, text=t("Password..."), command=self._device_password).pack(
-            side="left", padx=8
-        )
-        ttk.Button(buttons, text=t("Services..."), command=self._device_services).pack(
-            side="left"
-        )
-        ttk.Button(buttons, text=t("Open web UI"), command=self._open_web_ui).pack(
-            side="left", padx=8
-        )
-        ttk.Button(buttons, text=t("Reconnect"), command=self._reconnect).pack(side="left")
-        ttk.Button(buttons, text=t("Remove"), command=self._remove_device).pack(
-            side="left", padx=8
-        )
+        for caption, command in (
+            ("Name and key...", self._name_device),
+            ("Password...", self._device_password),
+            ("Services...", self._device_services),
+            ("LEDs...", self._device_leds),
+            ("Open web UI", self._open_web_ui),
+            ("Reconnect", self._reconnect),
+            ("Remove", self._remove_device),
+        ):
+            ttk.Button(buttons, text=t(caption), command=command).pack(
+                side="left", padx=(8, 0)
+            )
 
     def _signal_label(self, key: str) -> str:
         """Puissance du signal, assortie de ce qu'elle vaut.
@@ -378,6 +374,14 @@ class SettingsWindow:
             self.set_status("Select a device first")
             return
         DeviceServicesDialog(self.root, self, device)
+
+    def _device_leds(self) -> None:
+        key = self._selected_device_key()
+        device = self.config.device(key) if key else None
+        if device is None:
+            self.set_status("Select a device first")
+            return
+        DeviceLedsDialog(self.root, self, device)
 
     def _remove_device(self) -> None:
         key = self._selected_device_key()
@@ -2401,6 +2405,446 @@ class DeviceServicesDialog:
             self.window.destroy()
         except tk.TclError:
             pass
+
+
+class DeviceLedsDialog:
+    """Anneaux lumineux, mode nuit et boutons des prises d'une Power Strip.
+
+    Livres a pleine luminosite, les anneaux eclairent une piece dans le
+    noir. Le dialogue regle leur mode et leur intensite, et surtout le mode
+    nuit, qui les attenue de lui-meme aux heures choisies.
+
+    Les boutons y figurent aussi : detacher celui d'une prise l'empeche de
+    la commuter. La prise du PC l'est d'office, et l'application le repose
+    a chaque connexion -- sa case reste cochee et grisee.
+    """
+
+    MODES = (
+        (device_leds.MODE_POWER, "Power: the colour follows the load"),
+        (device_leds.MODE_SWITCH, "State: one colour when on, another when off"),
+        (device_leds.MODE_OFF, "Off"),
+    )
+
+    def __init__(self, parent: tk.Tk, owner: SettingsWindow, device) -> None:
+        self.owner = owner
+        self.app = owner.app
+        self.device = device
+        self.on_rgb = (0, 100, 0)
+        self.off_rgb = (100, 0, 0)
+        # Appareils dont les anneaux attendent un redemarrage : celui-ci,
+        # et les autres quand on a tout applique d'un coup.
+        self.pending: set[str] = set()
+
+        self.window = tk.Toplevel(parent)
+        self.window.title(t("LEDs and buttons - {device}", device=device.label))
+        self.window.geometry("780x700")
+        self.window.minsize(700, 640)
+        self.window.transient(parent)
+        _theme_dialog(self.window, owner.palette)
+
+        ttk.Label(
+            self.window,
+            text=t("Each outlet has a light ring and a push button. These "
+                   "settings are stored in the device and apply at once. "
+                   "If it asks for a restart, the button below does it "
+                   "without switching any outlet."),
+            wraplength=740,
+            justify="left",
+            padding=14,
+        ).pack(anchor="w")
+
+        # Pied de fenetre reserve avant le corps, comme partout ailleurs.
+        footer = ttk.Frame(self.window, padding=14)
+        footer.pack(fill="x", side="bottom")
+        self.reboot_button = ttk.Button(
+            footer, text=t("Restart to apply"), command=self._reboot, state="disabled"
+        )
+        self.reboot_button.pack(side="left")
+        ttk.Button(footer, text=t("Refresh"), command=self.reload).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Button(footer, text=t("Close"), command=self._close).pack(side="right")
+        self.apply_all_button = ttk.Button(
+            footer, text=t("Apply to all devices"), command=self._apply_all
+        )
+        self.apply_all_button.pack(side="right", padx=(0, 8))
+        self.apply_button = ttk.Button(footer, text=t("Apply"), command=self._apply)
+        self.apply_button.pack(side="right", padx=(0, 8))
+
+        self.message = tk.StringVar(value="")
+        ttk.Label(self.window, textvariable=self.message, wraplength=740,
+                  justify="left", padding=(14, 4)).pack(side="bottom", anchor="w")
+
+        body = ttk.Frame(self.window, padding=(14, 0))
+        body.pack(fill="both", expand=True)
+
+        # --- Anneaux
+        ring = ttk.LabelFrame(body, text=t("Light rings"), padding=10)
+        ring.pack(fill="x")
+        ring.columnconfigure(1, weight=1)
+        self.mode = tk.StringVar(value=device_leds.MODE_POWER)
+        for row, (value, wording) in enumerate(self.MODES):
+            ttk.Radiobutton(
+                ring, text=t(wording), value=value, variable=self.mode,
+                command=self._update_states,
+            ).grid(row=row, column=0, columnspan=5, sticky="w", pady=1)
+        self.brightness = tk.IntVar(value=100)
+        self.on_brightness = tk.IntVar(value=100)
+        self.off_brightness = tk.IntVar(value=100)
+        self.power_row = self._slider(ring, 3, t("Brightness"), self.brightness)
+        self.on_row = self._slider(ring, 4, t("When on"), self.on_brightness)
+        self.off_row = self._slider(ring, 5, t("When off"), self.off_brightness)
+        self.on_swatch = self._swatch(ring, 4, "on")
+        self.off_swatch = self._swatch(ring, 5, "off")
+        self.on_row += self.on_swatch
+        self.off_row += self.off_swatch
+
+        # --- Mode nuit
+        night = ttk.LabelFrame(body, text=t("Night mode"), padding=10)
+        night.pack(fill="x", pady=(12, 0))
+        night.columnconfigure(1, weight=1)
+        self.night_enabled = tk.BooleanVar(value=False)
+        self.night_box = ttk.Checkbutton(
+            night, text=t("Dim the rings between these times"),
+            variable=self.night_enabled, command=self._update_states,
+        )
+        self.night_box.grid(row=0, column=0, columnspan=5, sticky="w")
+        self.night_brightness = tk.IntVar(value=device_leds.NIGHT_BRIGHTNESS)
+        self.night_row = self._slider(night, 1, t("Brightness"), self.night_brightness)
+        hours = ttk.Frame(night)
+        hours.grid(row=2, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        self.night_start = tk.StringVar(value=device_leds.NIGHT_START)
+        self.night_end = tk.StringVar(value=device_leds.NIGHT_END)
+        ttk.Label(hours, text=t("From")).pack(side="left")
+        start = ttk.Entry(hours, textvariable=self.night_start, width=7)
+        start.pack(side="left", padx=(6, 12))
+        ttk.Label(hours, text=t("to")).pack(side="left")
+        end = ttk.Entry(hours, textvariable=self.night_end, width=7)
+        end.pack(side="left", padx=(6, 12))
+        ttk.Label(hours, text=t("HH:MM, device clock"),
+                  style="Hint.TLabel").pack(side="left")
+        self.night_row += [start, end]
+
+        # --- Boutons, remplis a la lecture : leur nombre vient de l'appareil.
+        pushes = ttk.LabelFrame(body, text=t("Push buttons"), padding=10)
+        pushes.pack(fill="x", pady=(12, 0))
+        ttk.Label(
+            pushes,
+            text=t("A detached button no longer switches its outlet: only "
+                   "this app does. Takes effect at once."),
+            wraplength=700, justify="left", style="Hint.TLabel",
+        ).pack(anchor="w")
+        self.button_rows = ttk.Frame(pushes)
+        self.button_rows.pack(fill="x", pady=(6, 0))
+
+        self._update_states()
+        self.reload()
+
+    # ------------------------------------------------------------- widgets
+
+    def _slider(self, parent, row: int, text: str, variable: tk.IntVar) -> list:
+        """Ligne libelle / curseur / valeur ; rend ses widgets reglables."""
+        label = ttk.Label(parent, text=text)
+        label.grid(row=row, column=0, sticky="w", padx=(22, 12), pady=3)
+        value = ttk.Label(parent, width=6, anchor="e")
+        value.grid(row=row, column=2, sticky="e")
+
+        def moved(_raw=None) -> None:
+            # Le curseur rend des decimales ; l'appareil veut des entiers.
+            variable.set(int(round(variable.get())))
+            value.configure(text=f"{variable.get()} %")
+
+        scale = ttk.Scale(parent, from_=0, to=100, orient="horizontal",
+                          variable=variable, command=moved)
+        scale.grid(row=row, column=1, sticky="ew", pady=3)
+        variable.trace_add("write", lambda *_: value.configure(
+            text=f"{int(round(variable.get()))} %"))
+        moved()
+        return [label, scale]
+
+    def _swatch(self, parent, row: int, state: str) -> list:
+        """Pastille de couleur et bouton pour la changer."""
+        swatch = tk.Label(parent, width=3, relief="solid", borderwidth=1)
+        swatch.grid(row=row, column=3, padx=(12, 6))
+        button = ttk.Button(parent, text=t("Colour..."),
+                            command=lambda: self._pick_colour(state))
+        button.grid(row=row, column=4, sticky="w")
+        return [swatch, button]
+
+    def _paint_swatches(self) -> None:
+        for (swatch, _button), rgb in (
+            (self.on_swatch, self.on_rgb), (self.off_swatch, self.off_rgb)
+        ):
+            swatch.configure(background=_hex_colour(rgb))
+
+    def _pick_colour(self, state: str) -> None:
+        from tkinter import colorchooser
+
+        current = self.on_rgb if state == "on" else self.off_rgb
+        chosen, _hex = colorchooser.askcolor(
+            color=_hex_colour(current), parent=self.window,
+            title=t("Ring colour when on") if state == "on"
+            else t("Ring colour when off"),
+        )
+        if chosen is None:
+            return
+        # L'appareil compte ses canaux en pourcentages, pas en octets.
+        percent = tuple(int(round(channel * 100 / 255)) for channel in chosen)
+        if state == "on":
+            self.on_rgb = percent
+        else:
+            self.off_rgb = percent
+        self._paint_swatches()
+
+    def _update_states(self) -> None:
+        """N'active que ce qui compte dans le mode choisi."""
+        mode = self.mode.get()
+
+        def enable(widgets, on: bool) -> None:
+            for widget in widgets:
+                if isinstance(widget, tk.Label):
+                    continue  # la pastille reste visible, meme inactive
+                if isinstance(widget, ttk.Label):
+                    # Un libelle desactive prend un fond clair dans ce
+                    # theme : on se contente de l'estomper.
+                    widget.configure(style="TLabel" if on else "Hint.TLabel")
+                    continue
+                widget.state(["!disabled"] if on else ["disabled"])
+
+        enable(self.power_row, mode == device_leds.MODE_POWER)
+        enable(self.on_row + self.off_row, mode == device_leds.MODE_SWITCH)
+        rings_lit = mode != device_leds.MODE_OFF
+        enable([self.night_box], rings_lit)
+        enable(self.night_row, rings_lit and self.night_enabled.get())
+
+    # ------------------------------------------------------------- lecture
+
+    def reload(self) -> None:
+        self.message.set(t("Reading the device..."))
+
+        def work():
+            handle = self.app.controller.device_for(self.device.key)
+            return device_leds.read(handle), device_services.restart_required(handle)
+
+        def done(result, error) -> None:
+            if error is not None:
+                self.message.set(t("Cannot reach the device: {error}", error=error))
+                return
+            found, pending = result
+            if found is None:
+                self.message.set(t("This device has no light rings or buttons "
+                                   "to set: it is not a Power Strip."))
+                self.apply_button.state(["disabled"])
+                return
+            settings, buttons = found
+            self.mode.set(settings.mode)
+            self.brightness.set(settings.brightness)
+            self.on_brightness.set(settings.on_brightness)
+            self.off_brightness.set(settings.off_brightness)
+            self.on_rgb, self.off_rgb = settings.on_rgb, settings.off_rgb
+            self.night_enabled.set(settings.night_enabled)
+            self.night_brightness.set(settings.night_brightness)
+            self.night_start.set(settings.night_start)
+            self.night_end.set(settings.night_end)
+            self._paint_swatches()
+            self._update_states()
+            self._fill_buttons(buttons)
+            if pending:
+                self.pending.add(self.device.key)
+            else:
+                self.pending.discard(self.device.key)
+            self._show_pending()
+
+        _run_off_thread(self.window, work, done)
+
+    def _fill_buttons(self, buttons: dict[int, str]) -> None:
+        for child in self.button_rows.winfo_children():
+            child.destroy()
+        pc = self.app.config.host_pc_outlet()
+        for switch_id in sorted(buttons):
+            outlet = next(
+                (o for o in self.app.config.outlets_of(self.device.key)
+                 if o.switch_id == switch_id), None,
+            )
+            name = outlet.label if outlet is not None else f"{self.device.key}:{switch_id}"
+            is_pc = (
+                pc is not None and pc.device == self.device.key
+                and pc.switch_id == switch_id
+            )
+            variable = tk.BooleanVar(
+                value=buttons[switch_id] == device_leds.BUTTON_DETACHED
+            )
+            box = ttk.Checkbutton(
+                self.button_rows,
+                text=(t("{outlet}: detached - it powers the PC, the app keeps "
+                        "it that way", outlet=name) if is_pc
+                      else t("{outlet}: detached", outlet=name)),
+                variable=variable,
+                command=lambda s=switch_id, v=variable: self._toggle_button(s, v),
+            )
+            box.pack(anchor="w", pady=1)
+            if is_pc:
+                box.state(["disabled"])
+
+    def _show_pending(self) -> None:
+        if self.pending:
+            self.reboot_button.state(["!disabled"])
+            names = ", ".join(sorted(
+                (self.app.config.device(key).label
+                 if self.app.config.device(key) else key)
+                for key in self.pending
+            ))
+            self.message.set(t("Restart needed for the rings to change: {devices}. "
+                               "No outlet is switched by a restart.", devices=names))
+        else:
+            self.reboot_button.state(["disabled"])
+            self.message.set("")
+
+    # ------------------------------------------------------------- actions
+
+    def _settings(self) -> "device_leds.LedSettings | None":
+        """Le reglage saisi, ou `None` apres avoir dit ce qui cloche."""
+        start, end = self.night_start.get().strip(), self.night_end.get().strip()
+        for clock in (start, end):
+            if not device_leds.valid_clock(clock):
+                self.message.set(t("'{value}' is not a time: use HH:MM, for "
+                                   "example 22:00.", value=clock))
+                return None
+        return device_leds.LedSettings(
+            mode=self.mode.get(),
+            brightness=int(self.brightness.get()),
+            on_rgb=self.on_rgb,
+            on_brightness=int(self.on_brightness.get()),
+            off_rgb=self.off_rgb,
+            off_brightness=int(self.off_brightness.get()),
+            night_enabled=self.night_enabled.get(),
+            night_brightness=int(self.night_brightness.get()),
+            night_start=start,
+            night_end=end,
+        )
+
+    def _apply(self) -> None:
+        settings = self._settings()
+        if settings is None:
+            return
+        self.message.set(t("Applying..."))
+
+        def work():
+            handle = self.app.controller.device_for(self.device.key)
+            return device_leds.apply(handle, settings)
+
+        def done(pending, error) -> None:
+            if error is not None:
+                self.message.set(t("Failed: {error}", error=error))
+                return
+            if pending:
+                self.pending.add(self.device.key)
+            self._show_pending()
+            if not self.pending:
+                self.message.set(t("Applied."))
+
+        _run_off_thread(self.window, work, done)
+
+    def _apply_all(self) -> None:
+        """Meme reglage sur toutes les Power Strips connues."""
+        settings = self._settings()
+        if settings is None:
+            return
+        self.message.set(t("Applying..."))
+        keys = [device.key for device in self.app.config.devices]
+
+        def work():
+            pending, skipped, applied = [], [], 0
+            for key in keys:
+                try:
+                    handle = self.app.controller.device_for(key)
+                    if device_leds.read(handle) is None:
+                        continue  # pas une Power Strip : rien a regler
+                    if device_leds.apply(handle, settings):
+                        pending.append(key)
+                    applied += 1
+                except Exception as exc:  # noqa: BLE001 - on poursuit avec les autres
+                    skipped.append(f"{key} ({exc})")
+            return pending, skipped, applied
+
+        def done(result, error) -> None:
+            if error is not None:
+                self.message.set(t("Failed: {error}", error=error))
+                return
+            pending, skipped, applied = result
+            self.pending.update(pending)
+            self._show_pending()
+            if not self.pending:
+                self.message.set(t("Applied to {count} device(s).", count=applied))
+            if skipped:
+                self.message.set(
+                    self.message.get() + "  "
+                    + t("Not reached: {devices}", devices=", ".join(skipped))
+                )
+
+        _run_off_thread(self.window, work, done)
+
+    def _toggle_button(self, switch_id: int, variable: tk.BooleanVar) -> None:
+        wanted = variable.get()
+        self.message.set(t("Applying..."))
+
+        def work():
+            handle = self.app.controller.device_for(self.device.key)
+            device_leds.set_button(handle, switch_id, detached=wanted)
+            return True
+
+        def done(_result, error) -> None:
+            if error is not None:
+                self.message.set(t("Failed: {error}", error=error))
+                variable.set(not wanted)  # la case suit l'appareil
+                return
+            self._show_pending()
+
+        _run_off_thread(self.window, work, done)
+
+    def _reboot(self) -> None:
+        """Redemarre les appareils en attente. Aucune sortie ne bascule :
+        relais bistables, et la prise du PC repart allumee de toute facon."""
+        keys = sorted(self.pending)
+        self.message.set(t("Restarting..."))
+        self.reboot_button.state(["disabled"])
+
+        def work():
+            for key in keys:
+                handle = self.app.controller.device_for(key)
+                # La reponse se perd avec la connexion : l'echec est attendu.
+                try:
+                    handle.call("Shelly.Reboot")
+                except Exception:  # noqa: BLE001
+                    pass
+            time.sleep(12.0)
+            for key in keys:
+                self.app.controller.connect_device(key, allow_scan=False, force=True)
+            return True
+
+        def done(_result, error) -> None:
+            if error is not None:
+                self.message.set(t("Failed: {error}", error=error))
+                self.reboot_button.state(["!disabled"])
+                return
+            self.pending.clear()
+            self.owner.refresh()
+            self.reload()
+
+        _run_off_thread(self.window, work, done)
+
+    def _close(self) -> None:
+        try:
+            self.window.destroy()
+        except tk.TclError:
+            pass
+
+
+def _hex_colour(rgb) -> str:
+    """Couleur de l'appareil (0-100 par canal) en notation Tk."""
+    return "#" + "".join(
+        f"{max(0, min(255, int(round(channel * 255 / 100)))):02x}" for channel in rgb
+    )
 
 
 def _grouped(value: int) -> str:
