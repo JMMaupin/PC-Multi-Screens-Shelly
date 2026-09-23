@@ -637,23 +637,73 @@ class HistoryWindow:
             self.cursor_x, y0, self.cursor_x, y1,
             fill=self.palette.text_muted, dash=(2, 3), tags="cursor",
         )
+        # L'heure sur l'axe du temps, sous le pointeur. Au-dela d'une
+        # journee affichee, l'heure seule ne dit plus de quel jour il s'agit.
+        clock = (
+            _stamp(moment, seconds=True)
+            if end - start > 86400
+            else time.strftime("%H:%M:%S", time.localtime(moment))
+        )
+        self._tag(self.cursor_x, y1 + 12, clock, "center", x0, x1,
+                  self.palette.surface_alt, self.palette.text)
         sample = self._value_at(moment, time.time())
         if sample is None:
+            self._tag(self.cursor_x + 12, (y0 + y1) / 2, t("no data"), "w", x0, x1,
+                      self.palette.surface_alt, self.palette.text_muted)
             self.readout.set(f"{_stamp(moment, seconds=True)}   {t('no data')}")
             return
         y = self._y(sample.watts)
+        # Un repere horizontal jusqu'a l'axe des puissances, pour lire la
+        # valeur sur la graduation autant que dans l'etiquette.
+        canvas.create_line(
+            x0, y, self.cursor_x, y,
+            fill=self.palette.text_muted, dash=(2, 3), tags="cursor",
+        )
         canvas.create_oval(
-            self.cursor_x - 4, y - 4, self.cursor_x + 4, y + 4,
-            outline=self.palette.accent, width=2, tags="cursor",
+            self.cursor_x - 5, y - 5, self.cursor_x + 5, y + 5,
+            fill=self.palette.bg, outline=self.palette.accent, width=2,
+            tags="cursor",
         )
-        origin = (
-            "   " + t("(on-device probe, PC asleep)")
-            if sample.source == power_history.SOURCE_PROBE
-            else ""
-        )
+        asleep = sample.source == power_history.SOURCE_PROBE
+        value = f"{sample.watts:.1f} W"
+        if asleep:
+            value += "  " + t("asleep")
+        # L'etiquette se colle au point, du cote ou il reste de la place.
+        # Fond sombre et liseré d'accent : un fond de la couleur de la courbe
+        # s'y fondait des qu'on la survolait, et l'etiquette devenait illisible.
+        self._tag(self.cursor_x + 12, y, value, "w", x0, x1,
+                  self.palette.bg, self.palette.text, bold=True,
+                  outline=self.palette.accent)
+        origin = "   " + t("(on-device probe, PC asleep)") if asleep else ""
         self.readout.set(
             f"{_stamp(moment, seconds=True)}   {sample.watts:.1f} W{origin}"
         )
+
+    def _tag(self, x, y, text, anchor, left, right, fill, colour, bold=False,
+             outline=""):
+        """Etiquette sur fond plein, retournee si elle deborderait du cadre."""
+        canvas = self.canvas
+        font = ("", 10, "bold") if bold else ("", 9)
+        item = canvas.create_text(
+            x, y, text=text, anchor=anchor, fill=colour, font=font, tags="cursor"
+        )
+        x_a, y_a, x_b, y_b = canvas.bbox(item)
+        # Trop pres du bord droit : on la passe de l'autre cote du pointeur.
+        if anchor == "w" and x_b > right - 4:
+            canvas.coords(item, 2 * self.cursor_x - x, y)
+            canvas.itemconfigure(item, anchor="e")
+            x_a, y_a, x_b, y_b = canvas.bbox(item)
+        # Centree sur le pointeur, elle ne doit deborder d'aucun cote.
+        if anchor == "center":
+            shift = max(0, left - x_a) - max(0, x_b - right)
+            if shift:
+                canvas.move(item, shift, 0)
+                x_a, y_a, x_b, y_b = canvas.bbox(item)
+        box = canvas.create_rectangle(
+            x_a - 6, y_a - 3, x_b + 6, y_b + 3, fill=fill, outline=outline,
+            tags="cursor",
+        )
+        canvas.tag_raise(item, box)
 
     def _export(self, regional: bool) -> None:
         """Exporte en CSV les points de la periode affichee."""

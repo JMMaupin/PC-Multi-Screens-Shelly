@@ -87,6 +87,7 @@ CATALOG: dict[str, str] = {
     "Power strip": "Multiprise",
     # --- cases a cocher
     "Critical - never switched off": "Critique - jamais coupee",
+    'asleep': 'en veille',
     'Export': 'Exporter',
     'CSV, standard (comma, decimal point)...': 'CSV standard (virgule, point decimal)...',
     'CSV for Excel, regional settings ({delimiter} and {decimal})...': 'CSV pour Excel, reglages regionaux ({delimiter} et {decimal})...',
