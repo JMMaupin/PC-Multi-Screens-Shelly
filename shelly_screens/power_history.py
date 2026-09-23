@@ -1,30 +1,36 @@
-"""Historique de consommation par prise, conserve sur le disque.
+"""Historique de consommation par prise, conserve dans une base SQLite.
 
-Chaque prise suivie a son fichier, rempli par ajouts successifs et elague
-de ses donnees les plus anciennes : une file dont la profondeur se regle en
-jours, une semaine ou un mois selon ce qu'on veut pouvoir relire.
+Chaque prise suivie alimente une meme base, elaguee de ses donnees les plus
+anciennes : une file dont la profondeur se regle en jours, une semaine ou un
+mois selon ce qu'on veut pouvoir relire.
 
 On n'enregistre pas chaque releve mais seulement ce qui apprend quelque
 chose -- le principe des ticks. Un point s'ecrit quand la puissance bouge
 nettement, et au moins une fois par minute pour que la courbe garde un
-ancrage. Un PC au repos ou en veille coute donc quelques points par heure,
-et un mois tient en quelques centaines de kilo-octets.
+ancrage. Un PC au repos ou en veille coute donc quelques points par heure.
 
-Deux sources alimentent un meme fichier. L'application releve la prise
-toutes les cinq secondes tant qu'elle tourne -- c'est-a-dire tant que le PC
-tourne. Pendant la veille ou l'arret, c'est le releveur embarque dans la
-multiprise qui continue de mesurer : a la sortie de veille ou au lancement,
-ses ticks comblent le trou. Seule la prise du PC beneficie de ce releveur ;
-les autres prises n'auront que la partie vue par l'application.
+Deux sources alimentent la base. L'application releve les prises toutes
+les cinq secondes tant qu'elle tourne -- c'est-a-dire tant que le PC tourne.
+Pendant la veille ou l'arret, c'est le releveur embarque dans la multiprise
+qui continue de mesurer : a la sortie de veille ou au lancement, ses ticks
+comblent le trou. Seule la prise du PC beneficie de ce releveur.
 
-Le fichier porte le nom de l'adresse MAC de la multiprise et du numero de
-sortie, et non la cle de l'appareil : ces cles changent au gre des
+Pourquoi SQLite. Un premier format, binaire et maison, etait compact mais
+muet : ni signature, ni version, ni description, et illisible sans le code
+qui l'avait ecrit. SQLite est un format normalise, inclus dans Python, que
+lisent aussi bien un tableur, DB Browser for SQLite, Grafana ou n'importe
+quel langage. La base se decrit elle-meme -- une table `info` dit ce que
+contient chaque colonne, et une vue `sample_readable` donne l'heure locale
+en clair --, et elle survit aux coupures grace a son journal.
+
+Une prise y est designee par l'adresse MAC de la multiprise et son numero
+de sortie, et non par la cle de l'appareil : ces cles changent au gre des
 renommages, la MAC jamais, et l'historique doit survivre aux deux.
 """
 
 from __future__ import annotations
 
-import os
+import sqlite3
 import struct
 import threading
 import time
@@ -37,9 +43,8 @@ if TYPE_CHECKING:
     from .controller import ScreenController
     from .device import SwitchState
 
-# Un enregistrement : instant Unix en secondes, puissance en watts, origine.
-# Neuf octets, sans en-tete : le fichier se lit par simple decoupage.
-RECORD = struct.Struct("<IfB")
+DB_NAME = "power_history.sqlite3"
+SCHEMA_VERSION = 1
 
 SOURCE_LIVE = 0  # releve par l'application
 SOURCE_PROBE = 1  # recupere aupres du releveur embarque
@@ -52,9 +57,49 @@ MAX_GAP_S = {SOURCE_LIVE: 180.0, SOURCE_PROBE: 20 * 60.0}
 ANCHOR_S = 60.0  # un point au moins par minute, meme si rien ne bouge
 MIN_STEP_W = 1.0  # en deca, une variation n'est pas un evenement
 MIN_STEP_RATIO = 0.03  # ... ni au-dessous de 3 % de la puissance courante
-SYNC_EVERY_S = 60.0  # frequence des ecritures forcees jusqu'au disque
 TRIM_EVERY_S = 3600.0  # frequence de l'elagage
 DEFAULT_DAYS = 30
+
+# Premier format, binaire, lu une derniere fois pour la migration.
+LEGACY_RECORD = struct.Struct("<IfB")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS info (
+    name  TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outlet (
+    id    INTEGER PRIMARY KEY,
+    key   TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS sample (
+    outlet_id INTEGER NOT NULL REFERENCES outlet(id),
+    t         REAL    NOT NULL,
+    watts     REAL    NOT NULL,
+    source    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (outlet_id, t)
+) WITHOUT ROWID;
+CREATE VIEW IF NOT EXISTS sample_readable AS
+    SELECT o.key                                   AS outlet,
+           o.label                                 AS label,
+           datetime(s.t, 'unixepoch', 'localtime') AS local_time,
+           round(s.watts, 1)                       AS watts,
+           CASE s.source WHEN 1 THEN 'probe' ELSE 'app' END AS source
+    FROM sample AS s
+    JOIN outlet AS o ON o.id = s.outlet_id;
+"""
+
+# Ce que la base dit d'elle-meme, a qui l'ouvre sans l'application.
+INFO = {
+    "schema": str(SCHEMA_VERSION),
+    "sample.t": "Unix time in seconds, UTC",
+    "sample.watts": "active power in watts",
+    "sample.source": "0 = read by the application, "
+                     "1 = recovered from the on-device probe while the PC slept",
+    "outlet.key": "MAC address of the power strip, then the switch number",
+    "sample_readable": "the same samples with local time in plain text",
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +120,10 @@ def history_dir(config: "AppConfig") -> Path:
     return Path(config.path).parent / "history"
 
 
+def db_path(config: "AppConfig") -> Path:
+    return history_dir(config) / DB_NAME
+
+
 def outlet_key(config: "AppConfig", outlet: "OutletConfig") -> str:
     """Identifiant stable d'une prise : MAC de l'appareil et sortie."""
     device = config.device(outlet.device)
@@ -82,52 +131,217 @@ def outlet_key(config: "AppConfig", outlet: "OutletConfig") -> str:
     return f"{mac.upper()}-{outlet.switch_id}"
 
 
-def history_path(config: "AppConfig", outlet: "OutletConfig") -> Path:
-    return history_dir(config) / f"{outlet_key(config, outlet)}.bin"
+class HistoryStore:
+    """La base : ajout, lecture, elagage.
 
-
-def read_samples(path: Path, offset: int = 0) -> tuple[list[Sample], int, bool]:
-    """Points a partir d'un decalage, le decalage suivant, et si le fichier
-    a ete raccourci depuis -- un elagage -- auquel cas tout a ete relu.
-
-    Un enregistrement incomplet en fin de fichier, en cours d'ecriture, est
-    laisse pour la lecture suivante.
+    `readonly` ouvre une base existante sans jamais y ecrire, pour la
+    fenetre de consultation ; elle lit pendant que l'enregistreur ecrit, ce
+    que le journal WAL de SQLite permet sans qu'aucun n'attende l'autre.
     """
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
-        return [], 0, offset > 0
-    reset = offset > size
-    if reset:
-        offset = 0
-    with open(path, "rb") as handle:
-        handle.seek(offset)
-        data = handle.read()
-    usable = len(data) - len(data) % RECORD.size
-    samples = [
-        Sample(float(t), float(w), int(s))
-        for t, w, s in RECORD.iter_unpack(data[:usable])
-    ]
-    return samples, offset + usable, reset
+
+    def __init__(self, path: Path, readonly: bool = False) -> None:
+        self.path = path
+        self._ids: dict[str, int] = {}
+        if readonly:
+            self._db = sqlite3.connect(str(path), timeout=10, check_same_thread=False)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Une connexion partagee par les fils de releve : c'est le verrou de
+        # l'enregistreur qui les met en file, pas SQLite.
+        self._db = sqlite3.connect(str(path), timeout=10, check_same_thread=False)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        # Chaque ecriture va jusqu'au disque. Elles sont rares -- quelques
+        # unes par minute --, et le PC peut etre debranche a tout instant.
+        self._db.execute("PRAGMA synchronous=FULL")
+        self._db.executescript(SCHEMA)
+        with self._db:
+            self._db.executemany(
+                "INSERT OR REPLACE INTO info(name, value) VALUES (?, ?)",
+                INFO.items(),
+            )
+        self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def close(self) -> None:
+        self._db.close()
+
+    # ------------------------------------------------------------ prises
+
+    def _find(self, key: str) -> int | None:
+        cached = self._ids.get(key)
+        if cached is not None:
+            return cached
+        try:
+            row = self._db.execute(
+                "SELECT id FROM outlet WHERE key = ?", (key,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None  # base encore vide : rien n'a ete enregistre
+        if row is not None:
+            self._ids[key] = int(row[0])
+        return self._ids.get(key)
+
+    def _outlet_id(self, key: str, label: str) -> int:
+        found = self._find(key)
+        if found is not None:
+            return found
+        with self._db:
+            self._db.execute(
+                "INSERT OR IGNORE INTO outlet(key, label) VALUES (?, ?)", (key, label)
+            )
+        return self._find(key)
+
+    # ------------------------------------------------------------ points
+
+    def append(self, key: str, label: str, samples: list[Sample]) -> None:
+        outlet_id = self._outlet_id(key, label)
+        with self._db:
+            # Un point deja present -- meme prise, meme instant -- est
+            # ignore : une migration rejouee ne cree pas de doublon.
+            self._db.executemany(
+                "INSERT OR IGNORE INTO sample(outlet_id, t, watts, source) "
+                "VALUES (?, ?, ?, ?)",
+                [(outlet_id, s.t, s.watts, s.source) for s in samples],
+            )
+
+    def last(self, key: str) -> Sample | None:
+        outlet_id = self._find(key)
+        if outlet_id is None:
+            return None
+        row = self._db.execute(
+            "SELECT t, watts, source FROM sample WHERE outlet_id = ? "
+            "ORDER BY t DESC LIMIT 1",
+            (outlet_id,),
+        ).fetchone()
+        return Sample(row[0], row[1], row[2]) if row else None
+
+    def read(
+        self, key: str, after: float | None = None, since: float | None = None
+    ) -> list[Sample]:
+        """Points d'une prise, dans l'ordre du temps.
+
+        `after` ne rend que les points posterieurs -- la lecture des
+        nouveautes --, `since` borne le passe a la profondeur voulue.
+        """
+        outlet_id = self._find(key)
+        if outlet_id is None:
+            return []
+        query = "SELECT t, watts, source FROM sample WHERE outlet_id = ?"
+        params: list[float] = [outlet_id]
+        if after is not None:
+            query += " AND t > ?"
+            params.append(after)
+        if since is not None:
+            query += " AND t >= ?"
+            params.append(since)
+        query += " ORDER BY t"
+        return [Sample(t, w, s) for t, w, s in self._db.execute(query, params)]
+
+    def trim(self, before: float) -> int:
+        with self._db:
+            cursor = self._db.execute("DELETE FROM sample WHERE t < ?", (before,))
+        return cursor.rowcount
+
+    def checkpoint(self) -> None:
+        """Verse le journal dans la base : avant une veille ou un arret."""
+        self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
-def last_sample(path: Path) -> Sample | None:
-    """Dernier point du fichier, sans le relire en entier."""
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
+CSV_COLUMNS = ("local_time", "unix_time", "watts", "source", "duration_s")
+
+
+def export_csv(
+    path: Path, samples: list[Sample], end: float,
+    delimiter: str = ",", decimal: str = ".",
+) -> int:
+    """Ecrit des points en CSV ; rend leur nombre.
+
+    Par defaut, le CSV normalise (RFC 4180) : virgule entre les champs,
+    point decimal, heure ISO 8601 avec son decalage. C'est ce que lisent
+    tous les outils -- mais pas Excel en francais, qui attend des points-
+    virgules et des virgules decimales, et entasse tout dans la premiere
+    colonne sinon. Les separateurs se passent donc en parametre.
+
+    `duration_s` dit combien de temps chaque valeur a tenu : jusqu'au point
+    suivant, ou `end` pour le dernier, sans jamais franchir un trou de
+    mesure. L'energie en watt-heures s'en deduit par une seule somme de
+    produits, sans avoir a reconstituer la chronologie.
+    """
+    import csv
+    from datetime import datetime
+
+    standard = decimal == "."
+
+    def number(value: float, digits: int) -> str:
+        text = f"{value:.{digits}f}"
+        return text if standard else text.replace(".", decimal)
+
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle, delimiter=delimiter)
+        writer.writerow(CSV_COLUMNS)
+        for index, sample in enumerate(samples):
+            following = samples[index + 1].t if index + 1 < len(samples) else end
+            duration = max(0.0, min(following, sample.t + sample.max_gap) - sample.t)
+            # Un seul arrondi pour les deux colonnes de temps : l'heure ISO
+            # tronque, le temps Unix arrondissait, et elles differaient d'une
+            # seconde pour le meme instant.
+            moment = round(sample.t)
+            local = datetime.fromtimestamp(moment).astimezone()
+            stamp = (
+                local.isoformat(timespec="seconds")
+                if standard
+                else local.strftime("%Y-%m-%d %H:%M:%S")
+            )
+            writer.writerow((
+                stamp,
+                str(moment),
+                number(sample.watts, 1),
+                "probe" if sample.source == SOURCE_PROBE else "app",
+                number(duration, 0),
+            ))
+    return len(samples)
+
+
+def open_reader(config: "AppConfig") -> HistoryStore | None:
+    """Base ouverte en lecture seule, ou None si rien n'a encore ete ecrit."""
+    path = db_path(config)
+    if not path.exists():
         return None
-    usable = size - size % RECORD.size
-    if usable == 0:
-        return None
-    with open(path, "rb") as handle:
-        handle.seek(usable - RECORD.size)
-        t, w, s = RECORD.unpack(handle.read(RECORD.size))
-    return Sample(float(t), float(w), int(s))
+    return HistoryStore(path, readonly=True)
+
+
+def migrate_legacy(
+    store: HistoryStore, directory: Path, labels: dict[str, str],
+    log: Callable[[str], None],
+) -> int:
+    """Reprend les fichiers du premier format binaire dans la base.
+
+    Chaque fichier est renomme une fois repris, et non supprime : c'est la
+    seule copie des mesures tant qu'on n'a pas verifie la base. La reprise
+    est rejouable sans risque -- un point deja present est ignore --, ce qui
+    compte : une ancienne version de l'application peut encore avoir ecrit
+    un fichier entre deux lancements.
+    """
+    total = 0
+    for legacy in sorted(directory.glob("*.bin")):
+        data = legacy.read_bytes()
+        usable = len(data) - len(data) % LEGACY_RECORD.size
+        samples = [
+            Sample(float(t), float(w), int(s))
+            for t, w, s in LEGACY_RECORD.iter_unpack(data[:usable])
+        ]
+        if samples:
+            store.append(legacy.stem, labels.get(legacy.stem, ""), samples)
+        target = legacy.with_name(legacy.name + ".migrated")
+        if target.exists():
+            target = legacy.with_name(f"{legacy.name}.migrated-{int(time.time())}")
+        legacy.rename(target)
+        total += len(samples)
+        log(f"History: {len(samples)} point(s) migrated from {legacy.name}")
+    return total
 
 
 class HistoryRecorder:
-    """Alimente les historiques a partir des releves de l'application.
+    """Alimente la base a partir des releves de l'application.
 
     Appele apres chaque lecture reussie des prises, il ne coute aucune
     requete supplementaire a la multiprise : il reutilise ce qui vient
@@ -145,9 +359,9 @@ class HistoryRecorder:
         self.controller = controller
         self._log = log
         self._lock = threading.Lock()
+        self._store: HistoryStore | None = None
         self._last: dict[str, Sample] = {}
         self._recovery_pending = True
-        self._last_sync = 0.0
         self._last_trim = 0.0
 
     # ------------------------------------------------------------ reglages
@@ -161,6 +375,18 @@ class HistoryRecorder:
         """Prises suivies. Pour l'instant, la seule prise du PC."""
         outlet = self.config.host_pc_outlet()
         return [outlet] if outlet is not None else []
+
+    def _labels(self) -> dict[str, str]:
+        return {outlet_key(self.config, o): o.label for o in self.config.outlets}
+
+    def _open(self) -> HistoryStore:
+        """Ouvre la base a la premiere ecriture, en reprenant l'ancien format."""
+        if self._store is None:
+            self._store = HistoryStore(db_path(self.config))
+            migrate_legacy(
+                self._store, history_dir(self.config), self._labels(), self._log
+            )
+        return self._store
 
     # ------------------------------------------------------------ evenements
 
@@ -179,6 +405,7 @@ class HistoryRecorder:
             return
         now = time.time()
         with self._lock:
+            self._open()
             if self._recovery_pending:
                 self._recovery_pending = False
                 self._recover(now)
@@ -190,29 +417,25 @@ class HistoryRecorder:
                 self._consider(outlet, Sample(now, watts, SOURCE_LIVE))
             if now - self._last_trim >= TRIM_EVERY_S:
                 self._last_trim = now
-                self._trim(now)
+                removed = self._store.trim(now - self.keep_seconds)
+                if removed:
+                    self._log(f"History: {removed} old point(s) trimmed")
 
     def sync(self) -> None:
-        """Force l'ecriture jusqu'au disque : avant une veille ou un arret."""
+        """Verse le journal dans la base : avant une veille ou un arret."""
         with self._lock:
-            for outlet in self.tracked():
-                path = history_path(self.config, outlet)
-                if not path.exists():
-                    continue
+            if self._store is not None:
                 try:
-                    with open(path, "ab") as handle:
-                        handle.flush()
-                        os.fsync(handle.fileno())
-                except OSError:
+                    self._store.checkpoint()
+                except sqlite3.Error:
                     pass
-            self._last_sync = time.time()
 
     # ------------------------------------------------------------ interne
 
     def _previous(self, outlet: "OutletConfig") -> Sample | None:
         key = outlet_key(self.config, outlet)
         if key not in self._last:
-            previous = last_sample(history_path(self.config, outlet))
+            previous = self._store.last(key)
             if previous is not None:
                 self._last[key] = previous
         return self._last.get(key)
@@ -229,21 +452,9 @@ class HistoryRecorder:
         self._write(outlet, [sample])
 
     def _write(self, outlet: "OutletConfig", samples: list[Sample]) -> None:
-        path = history_path(self.config, outlet)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        now = time.time()
-        # Ouvert et referme a chaque ecriture : un fichier garde ouvert ne
-        # pourrait pas etre remplace par l'elagage, Windows le refuse.
-        with open(path, "ab") as handle:
-            for sample in samples:
-                handle.write(
-                    RECORD.pack(int(sample.t), float(sample.watts), int(sample.source))
-                )
-            handle.flush()
-            if now - self._last_sync >= SYNC_EVERY_S:
-                os.fsync(handle.fileno())
-                self._last_sync = now
-        self._last[outlet_key(self.config, outlet)] = samples[-1]
+        key = outlet_key(self.config, outlet)
+        self._store.append(key, outlet.label, samples)
+        self._last[key] = samples[-1]
 
     def _recover(self, now: float) -> None:
         """Comble avec les ticks du releveur le temps ou l'application dormait."""
@@ -265,21 +476,3 @@ class HistoryRecorder:
         if recovered:
             self._write(outlet, recovered)
             self._log(f"History: {len(recovered)} point(s) recovered from the probe")
-
-    def _trim(self, now: float) -> None:
-        """Retire ce qui depasse la profondeur choisie."""
-        limit = now - self.keep_seconds
-        for outlet in self.tracked():
-            path = history_path(self.config, outlet)
-            samples, _, _ = read_samples(path)
-            kept = [s for s in samples if s.t >= limit]
-            if len(kept) == len(samples):
-                continue
-            temporary = path.with_suffix(".tmp")
-            with open(temporary, "wb") as handle:
-                for s in kept:
-                    handle.write(RECORD.pack(int(s.t), float(s.watts), int(s.source)))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-            self._log(f"History: {len(samples) - len(kept)} old point(s) trimmed")

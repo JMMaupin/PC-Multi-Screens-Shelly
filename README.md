@@ -540,11 +540,29 @@ embarqué dans la multiprise continue de mesurer. Au lancement et à chaque
 réveil, ses relevés comblent le trou. Il date désormais son dernier relevé,
 ce qui situe une veille à la seconde près plutôt qu'au quart d'heure.
 
-Les fichiers vivent dans `history/`, à côté de la configuration, un par
-prise, nommés d'après l'**adresse MAC** de la multiprise et le numéro de
-sortie — pas d'après la clé de l'appareil, qui change au gré des renommages.
+Les mesures sont dans une base **SQLite**, format normalisé et inclus
+dans Python : `history/power_history.sqlite3`, à côté de la configuration.
 Leur profondeur se règle dans **PC power** → *Keep history for*, de 1 à
 365 jours ; au-delà, les points les plus anciens sont élagués.
+
+La base se lit sans l'application — *DB Browser for SQLite*, Excel,
+Grafana ou n'importe quel langage — et se décrit elle-même :
+
+| Objet | Contenu |
+| --- | --- |
+| `sample` | Les points : prise, instant Unix UTC, watts, provenance |
+| `outlet` | Les prises, désignées par l'**adresse MAC** et le numéro de sortie |
+| `info` | Ce que contient chaque colonne, en clair |
+| `sample_readable` | Les mêmes points avec l'heure locale en texte |
+
+Une prise y est désignée par la MAC de la multiprise, pas par la clé de
+l'appareil, qui change au gré des renommages. La version du schéma est dans
+`PRAGMA user_version`. Le journal WAL permet à la fenêtre de lire pendant
+que l'application écrit, et protège la base d'une coupure de courant.
+
+Un premier format, binaire et maison, a précédé SQLite. Il est repris
+automatiquement au lancement, et chaque fichier migré est conservé, renommé
+en `.bin.migrated`, tant qu'on n'a pas vérifié la base.
 
 ### Naviguer
 
@@ -563,6 +581,24 @@ mesurée. Un pic de dix secondes ne pèse pas comme une heure de veille.
 
 Une période sans aucune mesure reste un **trou** : relier ses deux bords
 ferait croire à une consommation qu'on n'a pas vue.
+
+### Exporter
+
+Menu **Export** de la fenêtre. L'export porte sur la **période affichée** :
+ce qu'on voit est ce qu'on exporte. Deux variantes :
+
+| Variante | Séparateurs | Pour |
+| --- | --- | --- |
+| **CSV standard** | virgule, point décimal, heure ISO 8601 | tout outil — la norme RFC 4180 |
+| **CSV pour Excel** | ceux des réglages régionaux de Windows | un double-clic dans Excel |
+
+Excel en français attend des points-virgules et des virgules décimales ; un
+CSV standard s'y entasse dans la première colonne. La seconde variante lit
+les séparateurs dans les réglages de Windows pour que l'ouverture marche.
+
+Chaque ligne porte `duration_s`, le temps pendant lequel la valeur a tenu.
+L'énergie en watt-heures s'en déduit d'une seule formule —
+`SOMMEPROD(watts; duration_s) / 3600` —, sans reconstituer la chronologie.
 
 ### Log ou linéaire
 

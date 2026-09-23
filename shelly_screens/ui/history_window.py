@@ -25,8 +25,9 @@ import math
 import threading
 import time
 import tkinter as tk
-from bisect import bisect_right
-from tkinter import ttk
+from bisect import bisect_left, bisect_right
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from typing import TYPE_CHECKING
 
 from .. import power_history
@@ -120,6 +121,28 @@ def _stamp(moment: float, seconds: bool = False) -> str:
     return f"{day} {local.tm_mday:02d}/{local.tm_mon:02d} {clock}"
 
 
+def _regional_separators() -> tuple[str, str]:
+    """Separateurs de liste et decimal des reglages regionaux de Windows.
+
+    C'est ce qu'Excel applique a l'ouverture d'un CSV : les reprendre tels
+    quels est le seul moyen d'obtenir des colonnes et des nombres lus
+    correctement d'un simple double-clic.
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, r"Control Panel\International"
+        ) as key:
+            delimiter = str(winreg.QueryValueEx(key, "sList")[0]) or ";"
+            decimal = str(winreg.QueryValueEx(key, "sDecimal")[0]) or ","
+    except OSError:
+        return ";", ","
+    if delimiter == decimal:
+        return ";", ","  # reglage incoherent : on retombe sur l'usage francais
+    return delimiter, decimal
+
+
 class HistoryWindow:
     """Le graphique, sa barre d'outils et ses lectures."""
 
@@ -140,7 +163,12 @@ class HistoryWindow:
 
         self.samples: list[power_history.Sample] = []
         self.times: list[float] = []
-        self.offset = 0
+        self.key = (
+            power_history.outlet_key(self.config, self.outlet)
+            if self.outlet is not None
+            else None
+        )
+        self.store: power_history.HistoryStore | None = None
         self.span = 6 * 3600.0
         self.end = time.time()
         self.follow = True
@@ -187,6 +215,21 @@ class HistoryWindow:
             scale, text=t("Linear"), value=False, variable=self.log_scale,
             command=self.draw,
         ).pack(side="left", padx=(8, 0))
+
+        export = ttk.Menubutton(bar, text=t("Export"))
+        menu = tk.Menu(export, tearoff=False)
+        menu.add_command(
+            label=t("CSV, standard (comma, decimal point)..."),
+            command=lambda: self._export(regional=False),
+        )
+        delimiter, decimal = _regional_separators()
+        menu.add_command(
+            label=t("CSV for Excel, regional settings ({delimiter} and {decimal})...",
+                    delimiter=delimiter, decimal=decimal),
+            command=lambda: self._export(regional=True),
+        )
+        export["menu"] = menu
+        export.pack(side="right", padx=(0, 18))
 
         # Le bas se reserve avant le graphique extensible, sinon il
         # disparait quand la fenetre manque de hauteur.
@@ -238,25 +281,32 @@ class HistoryWindow:
 
     # ------------------------------------------------------------ donnees
 
-    def _path(self):
-        if self.outlet is None:
-            return None
-        return power_history.history_path(self.config, self.outlet)
+    def _reader(self) -> "power_history.HistoryStore | None":
+        """La base, ouverte a la premiere lecture qui la trouve."""
+        if self.store is None and self.key is not None:
+            self.store = power_history.open_reader(self.config)
+        return self.store
 
     def _reload(self) -> None:
-        self.samples, self.times, self.offset = [], [], 0
+        self.samples, self.times = [], []
         self._read_more()
 
     def _read_more(self) -> bool:
         """Lit ce qui a ete ajoute depuis la derniere fois."""
-        path = self._path()
-        if path is None:
+        store = self._reader()
+        if store is None:
             return False
-        new, self.offset, reset = power_history.read_samples(path, self.offset)
-        if reset:
-            self.samples, self.times = [], []
+        oldest = time.time() - self._max_span()
+        # Ce que l'elagage a retire de la base s'en va aussi de la memoire.
+        cut = bisect_left(self.times, oldest)
+        if cut:
+            del self.samples[:cut]
+            del self.times[:cut]
+        new = store.read(
+            self.key, after=self.times[-1] if self.times else None, since=oldest
+        )
         if not new:
-            return reset
+            return bool(cut)
         in_order = not self.samples or new[0].t >= self.samples[-1].t
         self.samples.extend(new)
         if not in_order:
@@ -603,6 +653,44 @@ class HistoryWindow:
         )
         self.readout.set(
             f"{_stamp(moment, seconds=True)}   {sample.watts:.1f} W{origin}"
+        )
+
+    def _export(self, regional: bool) -> None:
+        """Exporte en CSV les points de la periode affichee."""
+        if self.view is None:
+            return
+        start, end = self.view[0], self.view[1]
+        first = bisect_left(self.times, start)
+        last = bisect_right(self.times, end)
+        chosen = self.samples[first:last]
+        if not chosen:
+            messagebox.showinfo(
+                t("Export"), t("No data in this range."), parent=self.root
+            )
+            return
+        following = self.times[last] if last < len(self.times) else time.time()
+        label = "".join(c for c in (self.outlet.label if self.outlet else "") if c.isalnum())
+        name = time.strftime("consumption_{label}_%Y-%m-%d_%H%M", time.localtime(start))
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title=t("Export"),
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile=name.replace("{label}", label or "outlet") + ".csv",
+        )
+        if not path:
+            return
+        delimiter, decimal = _regional_separators() if regional else (",", ".")
+        try:
+            count = power_history.export_csv(
+                Path(path), chosen, end=min(following, time.time()),
+                delimiter=delimiter, decimal=decimal,
+            )
+        except OSError as exc:
+            messagebox.showerror(t("Export"), str(exc), parent=self.root)
+            return
+        self.readout.set(
+            t("{count} point(s) exported to {name}", count=count, name=Path(path).name)
         )
 
     # ------------------------------------------------------------ lectures
