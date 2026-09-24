@@ -362,6 +362,35 @@ rallume le point d'accès Wi-Fi intégré — **ouvert** sur ce modèle. Tenir l
 Une réinitialisation d'usine efface tout : mot de passe, identifiants Wi-Fi,
 scripts et noms de prises.
 
+## Raccourci des profils
+
+**Ctrl+Win+Alt+P**, de n'importe où : une petite fenêtre s'ouvre au premier
+plan, au centre de l'écran principal, avec un bouton par profil. Un clic
+applique le profil, sans confirmation, et la fenêtre se ferme.
+
+| Touche | Effet |
+| --- | --- |
+| ↑ ↓ (ou ← →) | déplace la sélection, en bouclant |
+| Entrée | applique le profil sélectionné |
+| 1 à 9 | applique directement l'un des neuf premiers profils |
+| Échap, ou le raccourci à nouveau | ferme sans rien changer |
+
+La sélection part du profil en cours, marqué d'une coche. Le survol à la
+souris déplace la même sélection : il n'y a jamais deux surbrillances. La
+fenêtre se ferme aussi d'elle-même dès qu'on clique ailleurs.
+
+Le raccourci se change dans **Behaviour** → **Profile shortcut** : cases
+Ctrl / Win / Alt / Shift et une touche (lettre, chiffre ou F1 à F12). Chaque
+retouche est vérifiée auprès de Windows : *disponible*, *déjà utilisé par un
+autre programme*, ou *actif*. **Apply** ne s'active que sur une combinaison
+libre, et une combinaison sans Ctrl, Alt ni Win est refusée — elle volerait
+la touche à tous les autres programmes. Si le raccourci est pris au
+démarrage, une bulle le signale.
+
+Une limite : quelques raccourcis de Windows, comme Win+L, ne passent pas par
+le mécanisme de réservation. Leur test répond « disponible », mais Windows
+les intercepte avant l'application.
+
 ## Anneaux lumineux et boutons
 
 Onglet **Devices** → **LEDs...**. Livrés à pleine luminosité, les anneaux des
@@ -477,6 +506,29 @@ Allumer avant de couper évite de se retrouver, ne serait-ce qu'un instant,
 sans aucun écran, et laisse aux dalles leurs quelques secondes
 d'initialisation.
 
+### Les fenêtres perdues sont ramenées
+
+À la fin d'un changement de profil, toute fenêtre restée hors des écrans
+allumés est ramenée sur **l'écran allumé le plus proche** — option
+*Behaviour* → *Window layout*, active par défaut.
+
+* **Écran allumé** veut dire listé par Windows **et** dont la prise n'est pas
+  coupée par le profil. Un moniteur alimenté par l'USB-C du PC reste listé
+  une fois sa prise coupée : une fenêtre posée dessus est perdue, même si
+  Windows ne le voit pas ainsi.
+* **Perdue** veut dire que sa barre de titre ne peut être attrapée sur aucun
+  écran allumé. Une fenêtre à cheval sur deux écrans, encore saisissable,
+  n'est pas touchée.
+* La fenêtre garde sa taille — réduite seulement si elle ne tient pas — et
+  se pose au plus près de sa place d'origine, sans passer au premier plan.
+  Réduite, elle le reste et reviendra au bon endroit ; agrandie, elle est
+  agrandie de nouveau sur son nouvel écran.
+* Seules les fenêtres qui se trouvaient sur un écran réel sont concernées.
+  Certains programmes garent volontairement des fenêtres très loin du
+  bureau : les faire surgir serait une nuisance.
+
+Le journal nomme chaque fenêtre ramenée.
+
 Un appareil injoignable n'empêche pas les autres de répondre : ses prises
 sont laissées telles quelles et signalées dans le menu.
 
@@ -506,8 +558,10 @@ shelly_screens/
     layout.py                capture et restauration des fenêtres
     icon.py                  génération de l'icône
     shell.py                 fenêtre cachée, zone de notification, messages
+    hotkey.py                raccourcis globaux : lecture, test de disponibilité
   ui/settings.py             fenêtre de réglages (tkinter)
   ui/history_window.py       fenêtre d'historique de consommation
+  ui/profile_picker.py       fenêtre de choix des profils (raccourci global)
 ```
 
 ## Points techniques

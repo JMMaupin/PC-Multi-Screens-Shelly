@@ -372,6 +372,12 @@ class Settings:
     # Profondeur de l'historique de consommation, en jours. Au-dela, les
     # points les plus anciens sont elagues : une file, pas une archive.
     history_days: int = 30
+    # Raccourci global qui ouvre le choix des profils, sous sa forme
+    # lisible (« Ctrl+Win+Alt+P »). Vide : pas de raccourci.
+    profile_hotkey: str = "Ctrl+Win+Alt+P"
+    # Apres un changement de profil, ramener sur l'ecran allume le plus
+    # proche les fenetres restees hors de tout ecran.
+    rescue_offscreen_windows: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -399,6 +405,10 @@ class Settings:
             theme=str(data.get("theme", defaults.theme)),
             language=str(data.get("language", defaults.language)),
             history_days=max(1, int(data.get("history_days", defaults.history_days))),
+            profile_hotkey=str(data.get("profile_hotkey", defaults.profile_hotkey)),
+            rescue_offscreen_windows=bool(
+                data.get("rescue_offscreen_windows", defaults.rescue_offscreen_windows)
+            ),
         )
 
 

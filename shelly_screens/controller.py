@@ -59,6 +59,7 @@ class ApplyReport:
     displays_waited_s: float = 0.0
     windows_restored: int = 0
     windows_unmatched: int = 0
+    windows_rescued: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -75,6 +76,8 @@ class ApplyReport:
             parts.append("no change")
         if self.windows_restored:
             parts.append(f"{self.windows_restored} window(s) restored")
+        if self.windows_rescued:
+            parts.append(f"{self.windows_rescued} window(s) brought back on screen")
         if self.errors:
             parts.append(f"{len(self.errors)} error(s)")
         return " | ".join(parts)
@@ -659,6 +662,9 @@ class ScreenController:
             # 1. Memoriser la disposition avant de toucher a quoi que ce soit.
             if manage_layout and layout_profile is not None:
                 self._remember_current_layout()
+            # Les ecrans d'avant le changement : une fenetre qui s'y trouvait
+            # et n'est plus sur aucun ecran est perdue, pas garee a dessein.
+            screens_before = [m.rect for m in monitors.list_monitors()]
 
             # Une prise dont on ne connait pas l'etat n'est pas manoeuvree :
             # son appareil ne repond pas, insister ne ferait qu'attendre.
@@ -699,6 +705,12 @@ class ScreenController:
                 report.windows_unmatched = len(result.unmatched)
                 self._log(f"Layout: {result.summary()}")
 
+            # 5. Ramener ce qui est reste hors de tout ecran allume.
+            if layout_profile is not None and self.config.settings.rescue_offscreen_windows:
+                if report.turned_off and not will_restore:
+                    time.sleep(DISPLAY_GRACE_S)  # meme pause qu'avant l'etape 4
+                report.windows_rescued = self._rescue_windows(targets, screens_before)
+
             if layout_profile is not None:
                 self.config.settings.last_profile = layout_profile.name
                 # Le script embarque doit savoir quoi rallumer au prochain
@@ -709,6 +721,40 @@ class ScreenController:
 
         self._log(report.summary())
         return report
+
+    def _rescue_windows(self, targets: dict[str, bool], screens_before: list) -> int:
+        """Ramene les fenetres perdues sur l'ecran allume le plus proche.
+
+        Un ecran que Windows voit encore n'est pas forcement allume : un
+        moniteur alimente par l'USB-C du PC reste enumere une fois sa prise
+        coupee, et une fenetre posee dessus est aussi perdue que si l'ecran
+        avait disparu. Les ecrans dont la prise est coupee par le profil ne
+        comptent donc pas comme utilisables -- sauf s'il n'en restait aucun.
+        """
+        current = monitors.list_monitors()
+        dark = set()
+        for ref, want in targets.items():
+            outlet = self.config.outlet(ref)
+            if not want and outlet is not None and outlet.monitor_key:
+                dark.add(outlet.monitor_key)
+        usable = [m for m in current if m.key not in dark] or current
+        primary = next((m for m in current if m.is_primary), None)
+        offset = (
+            (primary.work_rect[0] - primary.rect[0], primary.work_rect[1] - primary.rect[1])
+            if primary is not None
+            else (0, 0)
+        )
+        moved = layout.rescue_offscreen(
+            [m.work_rect for m in usable],
+            screens_before + [m.rect for m in current],
+            offset,
+        )
+        if moved:
+            self._log(
+                f"Brought back {len(moved)} window(s) left outside the screens: "
+                + ", ".join(entry.describe() for entry in moved)
+            )
+        return len(moved)
 
     def _switch_many(
         self, refs: list[str], on: bool, report: ApplyReport, urgent: bool = False

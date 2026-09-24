@@ -23,6 +23,7 @@ from ..i18n import t
 from ..config import KIND_LABELS, KIND_SCREEN, KINDS, OutletConfig, Profile
 from ..win import icon as icon_module
 from .. import __version__
+from ..win import hotkey as hotkey_module
 from ..win import monitors
 from .. import device_leds, device_services
 
@@ -1331,6 +1332,16 @@ class SettingsWindow:
             variable=self.var_manage_layout,
             command=self._apply_behaviour,
         ).pack(anchor="w")
+        self.var_rescue = tk.BooleanVar(value=settings.rescue_offscreen_windows)
+        ttk.Checkbutton(
+            layout_box,
+            text=t("After a profile change, bring windows left outside every "
+                   "lit screen back onto the nearest one"),
+            variable=self.var_rescue,
+            command=self._apply_behaviour,
+        ).pack(anchor="w")
+
+        self._build_hotkey_box(frame)
 
         appearance_box = ttk.LabelFrame(frame, text=t("Appearance"), padding=10)
         appearance_box.pack(fill="x", pady=(0, 12))
@@ -1403,6 +1414,97 @@ class SettingsWindow:
             command=self._apply_behaviour,
         ).grid(row=1, column=1, padx=8, pady=(6, 0))
 
+    def _build_hotkey_box(self, frame) -> None:
+        """Raccourci global qui affiche les boutons des profils.
+
+        Cases a cocher et liste plutot que saisie au clavier : Tk ne voit
+        pas la touche Windows comme un modificateur, et une combinaison
+        qu'on ne peut pas taper ne se capture pas.
+        """
+        box = ttk.LabelFrame(frame, text=t("Profile shortcut"), padding=10)
+        box.pack(fill="x", pady=(0, 12))
+        current = hotkey_module.parse(self.config.settings.profile_hotkey)
+        shown = current or hotkey_module.parse("Ctrl+Win+Alt+P")
+        row = ttk.Frame(box)
+        row.pack(anchor="w", fill="x")
+        self.hotkey_flags: dict[int, tk.BooleanVar] = {}
+        for name, flag in hotkey_module.MODIFIERS:
+            variable = tk.BooleanVar(value=bool(shown.modifiers & flag))
+            self.hotkey_flags[flag] = variable
+            ttk.Checkbutton(
+                row, text=name, variable=variable, command=self._check_hotkey
+            ).pack(side="left", padx=(0, 10))
+        ttk.Label(row, text="+").pack(side="left", padx=(0, 10))
+        self.hotkey_key = tk.StringVar(value=shown.key)
+        key_box = ttk.Combobox(
+            row, textvariable=self.hotkey_key, values=list(hotkey_module.KEYS),
+            state="readonly", width=5,
+        )
+        key_box.pack(side="left")
+        key_box.bind("<<ComboboxSelected>>", lambda _e: self._check_hotkey())
+        ttk.Button(row, text=t("Disable"), command=self._disable_hotkey).pack(
+            side="right"
+        )
+        self.hotkey_apply = ttk.Button(row, text=t("Apply"), command=self._apply_hotkey)
+        self.hotkey_apply.pack(side="right", padx=(0, 8))
+        self.hotkey_status = tk.StringVar(value="")
+        ttk.Label(
+            box, textvariable=self.hotkey_status, style="Hint.TLabel",
+            wraplength=740, justify="left",
+        ).pack(anchor="w", pady=(8, 0))
+        self._check_hotkey()
+
+    def _chosen_hotkey(self) -> "hotkey_module.Hotkey":
+        modifiers = 0
+        for flag, variable in self.hotkey_flags.items():
+            if variable.get():
+                modifiers |= flag
+        return hotkey_module.Hotkey(modifiers, self.hotkey_key.get())
+
+    def _check_hotkey(self) -> None:
+        """Dit, a chaque retouche, si la combinaison peut servir."""
+        wanted = self._chosen_hotkey()
+        active = self.app.tray.hotkey
+        ready = False
+        if not wanted.usable:
+            message = t("Add Ctrl, Alt or Win: a shortcut without them would "
+                        "take the key away from every other program.")
+        elif wanted == active:
+            message = t("Active: {hotkey} shows the profile buttons in the "
+                        "middle of the main screen.", hotkey=str(wanted))
+        elif hotkey_module.is_free(wanted):
+            message = t("{hotkey} is available. Click Apply to use it.",
+                        hotkey=str(wanted))
+            ready = True
+        else:
+            message = t("{hotkey} is already used by another program or by "
+                        "Windows.", hotkey=str(wanted))
+        if active is None and wanted != active:
+            message += "  " + t("No shortcut is active at the moment.")
+        self.hotkey_status.set(message)
+        self.hotkey_apply.state(["!disabled"] if ready else ["disabled"])
+
+    def _apply_hotkey(self) -> None:
+        wanted = self._chosen_hotkey()
+        if not self.app.tray.set_hotkey(wanted):
+            self._check_hotkey()
+            self.hotkey_status.set(
+                t("Windows refused {hotkey}: another program took it.",
+                  hotkey=str(wanted))
+            )
+            return
+        self.config.settings.profile_hotkey = str(wanted)
+        self._save()
+        self.app.log(f"Profile shortcut set to {wanted}")
+        self._check_hotkey()
+
+    def _disable_hotkey(self) -> None:
+        self.app.tray.set_hotkey(None)
+        self.config.settings.profile_hotkey = ""
+        self._save()
+        self.app.log("Profile shortcut disabled")
+        self._check_hotkey()
+
     def _change_theme(self) -> None:
         """Bascule de theme, immediatement et sans rouvrir la fenetre."""
         self.config.settings.theme = self.var_theme.get()
@@ -1460,6 +1562,7 @@ class SettingsWindow:
         settings.restore_on_resume = self.var_restore_on_resume.get()
         settings.apply_profile_on_start = self.var_apply_on_start.get()
         settings.manage_window_layout = self.var_manage_layout.get()
+        settings.rescue_offscreen_windows = self.var_rescue.get()
         try:
             settings.switch_delay_ms = max(0, int(self.var_switch_delay.get()))
             settings.display_settle_timeout_s = max(1.0, float(self.var_settle.get()))

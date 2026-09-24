@@ -24,6 +24,7 @@ from .i18n import set_language, t
 from .config import AppConfig
 from .controller import ApplyReport, NotConnected, ScreenController
 from .device import SwitchState
+from .win import hotkey as hotkey_module
 from .win import icon as icon_module
 from .win import monitors
 from .win.shell import WM_SHOW_SETTINGS, MenuItem, TrayWindow
@@ -53,6 +54,7 @@ class Application:
             on_display_change=self._on_display_change,
             on_tick=self._on_tick,
             on_activate=self._on_activate,
+            on_hotkey=self._on_hotkey,
             build_menu=self._build_menu,
             tick_interval_ms=REFRESH_INTERVAL_MS,
         )
@@ -83,6 +85,7 @@ class Application:
         self.log(f"{APP_NAME} {__version__} starting")
         self.tray.create()
         self._update_icon()
+        self._install_hotkey()
         # La premiere connexion peut demander un balayage reseau : en tache de
         # fond, pour que l'icone apparaisse tout de suite.
         threading.Thread(target=self._initial_connect, daemon=True).start()
@@ -534,6 +537,33 @@ class Application:
         self._on_suspend()
 
     # ------------------------------------------------------------- reglages
+
+    def _install_hotkey(self) -> None:
+        """Pose le raccourci des profils au demarrage, et dit s'il manque.
+
+        Un raccourci deja pris ailleurs ne se remarque pas : on presse, rien
+        ne vient, et l'on accuse l'application. D'ou la bulle, une fois.
+        """
+        text = self.config.settings.profile_hotkey
+        wanted = hotkey_module.parse(text)
+        if wanted is None:
+            if text:
+                self.log(f"Ignored unreadable profile shortcut '{text}'")
+            return
+        if self.tray.set_hotkey(wanted):
+            self.log(f"Profile shortcut {wanted} active")
+            return
+        self.log(f"Profile shortcut {wanted} is already used by another program")
+        self.tray.notify(
+            APP_NAME,
+            t("The shortcut {hotkey} is already used by another program. "
+              "Choose another one in Settings > Behaviour.", hotkey=str(wanted)),
+        )
+
+    def _on_hotkey(self) -> None:
+        from .ui.profile_picker import toggle_picker
+
+        toggle_picker(self)
 
     def _open_history(self) -> None:
         from .ui.history_window import open_history

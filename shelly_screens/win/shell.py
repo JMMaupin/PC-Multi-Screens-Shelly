@@ -18,10 +18,12 @@ n'adresse pas les diffusions d'alimentation et d'affichage a ces dernieres.
 from __future__ import annotations
 
 import ctypes
+import threading
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable
 
+from . import hotkey as hotkey_module
 from .api import HICON, LRESULT, UINT_PTR, kernel32, shell32, user32
 
 # --------------------------------------------------------------- constantes
@@ -39,6 +41,10 @@ WM_TRAY_CALLBACK = WM_USER + 1
 # Envoye par une seconde instance : elle ne demarre pas et demande a
 # celle-ci de se montrer, plutot que d'afficher un refus.
 WM_SHOW_SETTINGS = WM_USER + 3
+# Pose ou retire le raccourci global. Envoye par `set_hotkey`, depuis
+# n'importe quel thread : Windows lie un raccourci au thread qui le pose.
+WM_SET_HOTKEY = WM_USER + 4
+WM_HOTKEY = 0x0312
 
 WM_LBUTTONUP = 0x0202
 WM_LBUTTONDBLCLK = 0x0203
@@ -157,6 +163,13 @@ user32.PostMessageW.argtypes = [
     wintypes.WPARAM,
     wintypes.LPARAM,
 ]
+user32.SendMessageW.argtypes = [
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+]
+user32.SendMessageW.restype = LRESULT
 shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
@@ -192,6 +205,7 @@ class TrayWindow:
     CLASS_NAME = "ShellyScreensTrayWindow"
     WINDOW_TITLE = "Shelly Screens"
     TIMER_ID = 1
+    HOTKEY_ID = 1
 
     def __init__(
         self,
@@ -202,6 +216,7 @@ class TrayWindow:
         on_display_change: Callable[[], None] | None = None,
         on_tick: Callable[[], None] | None = None,
         on_activate: Callable[[], None] | None = None,
+        on_hotkey: Callable[[], None] | None = None,
         build_menu: Callable[[], list[MenuItem]] | None = None,
         tick_interval_ms: int = 5000,
     ) -> None:
@@ -212,6 +227,7 @@ class TrayWindow:
         self.on_display_change = on_display_change
         self.on_tick = on_tick
         self.on_activate = on_activate
+        self.on_hotkey = on_hotkey
         self.build_menu = build_menu or (lambda: [])
         self.tick_interval_ms = tick_interval_ms
 
@@ -221,6 +237,11 @@ class TrayWindow:
         self._menu_actions: dict[int, Callable[[], None]] = {}
         self._taskbar_created_message = 0
         self._thread_id = 0
+        # Raccourci effectivement tenu, et celui dont la pose est en cours :
+        # le message ne transporte que des codes, pas l'objet.
+        self.hotkey: hotkey_module.Hotkey | None = None
+        self._requested: hotkey_module.Hotkey | None = None
+        self._hotkey_lock = threading.Lock()
         # La reference doit survivre a la fonction : Windows garde le pointeur.
         self._wndproc = WNDPROC(self._window_proc)
 
@@ -276,6 +297,43 @@ class TrayWindow:
         """Demande l'arret de la boucle depuis n'importe quel thread."""
         if self._hwnd:
             user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
+
+    # --------------------------------------------------------------- raccourci
+
+    def set_hotkey(self, wanted: "hotkey_module.Hotkey | None") -> bool:
+        """Pose le raccourci global, ou le retire avec `None`.
+
+        Rend faux si Windows le refuse -- un autre programme le tient. Le
+        precedent est alors conserve : mieux vaut l'ancien raccourci que
+        plus de raccourci du tout.
+        """
+        if self._hwnd is None:
+            return False
+        with self._hotkey_lock:
+            self._requested = wanted
+            return bool(user32.SendMessageW(
+                self._hwnd,
+                WM_SET_HOTKEY,
+                wanted.modifiers if wanted else 0,
+                wanted.vk if wanted else 0,
+            ))
+
+    def _register_hotkey(self, hwnd, modifiers: int, vk: int) -> int:
+        previous = self.hotkey
+        user32.UnregisterHotKey(hwnd, self.HOTKEY_ID)
+        self.hotkey = None
+        if not vk:
+            return 1
+        flags = modifiers | hotkey_module.MOD_NOREPEAT
+        if user32.RegisterHotKey(hwnd, self.HOTKEY_ID, flags, vk):
+            self.hotkey = self._requested
+            return 1
+        if previous is not None and user32.RegisterHotKey(
+            hwnd, self.HOTKEY_ID, previous.modifiers | hotkey_module.MOD_NOREPEAT,
+            previous.vk,
+        ):
+            self.hotkey = previous
+        return 0
 
     # ------------------------------------------------------------------ icone
 
@@ -458,6 +516,14 @@ class TrayWindow:
                 self.on_activate()
             return 0
 
+        if message == WM_SET_HOTKEY:
+            return self._register_hotkey(hwnd, wparam, lparam)
+
+        if message == WM_HOTKEY and wparam == self.HOTKEY_ID:
+            if self.on_hotkey is not None:
+                self.on_hotkey()
+            return 0
+
         if self._taskbar_created_message and message == self._taskbar_created_message:
             # L'explorateur a redemarre : l'icone doit etre reposee.
             self._icon_added = False
@@ -476,6 +542,7 @@ class TrayWindow:
             return 0
 
         if message == WM_DESTROY:
+            user32.UnregisterHotKey(hwnd, self.HOTKEY_ID)
             self.remove_icon()
             user32.PostQuitMessage(0)
             return 0
