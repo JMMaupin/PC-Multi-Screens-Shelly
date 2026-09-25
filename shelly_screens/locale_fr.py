@@ -291,6 +291,61 @@ CATALOG: dict[str, str] = {
     "Screens": "Ecrans",
     "Windows": "Fenetres",
     "No screen detected": "Aucun ecran detecte",
+    "switched off": "coupe",
+    "ghost": "fantome",
+    "primary": "principal",
+    "always on": "toujours alimente",
+    "not on an outlet": "sur aucune prise",
+    "Screen positions are not known yet. Capture the layout: every screen is switched on for a few seconds.":
+        "La position des ecrans n'est pas encore connue. Relevez la disposition : tous les ecrans sont allumes quelques secondes.",
+    "Capture layout...": "Relever la disposition...",
+    "Capture screen layout": "Relever la disposition des ecrans",
+    "Link each screen to its outlet first: Outlets tab, Identify displays.":
+        "Associez d'abord chaque ecran a sa prise : onglet Prises, Identifier les ecrans.",
+    "The '{all_on}' profile will be applied and Windows will report where each screen sits. You will see the layout build up, then choose to keep '{all_on}' or go back to the previous profile.":
+        "Le profil '{all_on}' va etre applique et Windows indiquera la place de chaque ecran. Vous verrez la disposition se construire, puis choisirez de garder '{all_on}' ou de revenir au profil precedent.",
+    "Will be switched on: {screens}": "Seront allumes : {screens}",
+    "Switching the screens on...": "Allumage des ecrans...",
+    "Waiting for Windows to detect every screen...": "Attente de la detection de chaque ecran par Windows...",
+    "Checking and capturing the layout...": "Verification et releve de la disposition...",
+    "{step} {count} of {total} screen(s) detected": "{step} {count} ecran(s) detecte(s) sur {total}",
+    "Back to '{profile}'": "Revenir a '{profile}'",
+    "Back to previous state": "Revenir a l'etat precedent",
+    "Keep '{all_on}', or go back?": "Garder '{all_on}', ou revenir en arriere ?",
+    "Keep '{all_on}'": "Garder '{all_on}'",
+    "All on": "Tous en marche",
+    "▲ Move up": "▲ Monter",
+    "▼ Move down": "▼ Descendre",
+    "Profile order saved": "Ordre des profils enregistre",
+    "built-in, every outlet on": "integre, toutes les prises allumees",
+    "'{name}' is the built-in profile.": "'{name}' est le profil integre.",
+    "{outlet} is off but Windows keeps its screen on the desktop (ghost screen)":
+        "{outlet} est coupee mais Windows garde son ecran sur le bureau (ecran fantome)",
+    "Ghost screen: {screens} switched off but kept on the Windows desktop":
+        "Ecran fantome : {screens} coupe(s) mais garde(s) sur le bureau de Windows",
+    "Capturing the screen layout...": "Releve de la disposition des ecrans...",
+    "{outlet} is a screen outlet not linked to a screen: run Identify displays":
+        "{outlet} est une prise d'ecran liee a aucun ecran : lancez Identifier les ecrans",
+    "{outlet}: state unknown, its device does not answer":
+        "{outlet} : etat inconnu, son appareil ne repond pas",
+    "{outlet} is off": "{outlet} est coupee",
+    "{outlet} is on but Windows does not see its screen":
+        "{outlet} est allumee mais Windows ne voit pas son ecran",
+    "{outlets} are linked to the same screen": "{outlets} sont liees au meme ecran",
+    "Unknown screen connected ({screen}): run Identify displays":
+        "Ecran inconnu branche ({screen}) : lancez Identifier les ecrans",
+    "{lit} screen outlet(s) on, {count} physical screen(s) detected":
+        "{lit} prise(s) d'ecran allumee(s), {count} ecran(s) physique(s) detecte(s)",
+    "{screens} are mirrored": "{screens} sont en miroir",
+    "Windows is still arranging the screens": "Windows n'a pas fini de disposer les ecrans",
+    "Layout not captured: {reasons}": "Disposition non relevee : {reasons}",
+    "Screen layout captured ({count} screens)": "Disposition relevee ({count} ecrans)",
+    "No outlet is linked to a screen yet: run Identify displays first.":
+        "Aucune prise n'est encore liee a un ecran : lancez d'abord Identifier les ecrans.",
+    "unreachable: {outlets}": "injoignable(s) : {outlets}",
+    "Not captured: {reason}": "Non relevee : {reason}",
+    "(+{count} more)": "(+{count} autre(s))",
+    "Captured {when} - {count} screen(s)": "Relevee le {when} - {count} ecran(s)",
     "centre, primary": "centre, principal",
     "centre": "centre",
     "left": "gauche",

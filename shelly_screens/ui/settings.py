@@ -16,6 +16,7 @@ import webbrowser
 from tkinter import messagebox, simpledialog, ttk
 from typing import TYPE_CHECKING
 
+from . import screen_map
 from . import theme as theme_module
 from .. import discovery, sensing
 from .. import i18n
@@ -132,6 +133,15 @@ class SettingsWindow:
 
     def _schedule_refresh(self) -> None:
         self.refresh_readings()
+        # La disposition peut avoir ete relevee en arriere-plan : un profil
+        # qui allume tout, une procedure lancee depuis l'icone.
+        ghosts = list(self.app.controller.ghost_screens)
+        if self._capturing:
+            pass  # le plan se construit en direct : ne pas l'ecraser
+        elif self.config.screens != self._drawn_screens or ghosts != self._drawn_ghosts:
+            self._draw_screen_map()
+        else:
+            self._update_layout_state()
         self._follow_system_theme()
         # Le releve avance tout seul sur l'appareil : sans un rappel
         # periodique, l'interface continuerait d'annoncer « aucune mesure »
@@ -177,6 +187,7 @@ class SettingsWindow:
     def _restyle(self) -> None:
         """Recolore ce que ttk.Style ne couvre pas."""
         palette = self.palette
+        self.screen_map.draw()
         theme_module.refresh_plain_widgets(self.root, palette)
         theme_module.apply_card_styles(self.root)
         self.profile_list.configure(
@@ -674,6 +685,9 @@ class SettingsWindow:
         # par les boutons, decalee par rapport a son titre.
         self.profile_list.pack(fill="both", expand=True)
         self.profile_list.bind("<<ListboxSelect>>", lambda _e: self._on_profile_selected())
+        # Glisser un profil le deplace dans la liste ; l'ordre est celui du
+        # menu de l'icone et des touches de la fenetre du raccourci.
+        self.profile_list.bind("<B1-Motion>", self._drag_profile)
 
         list_buttons = ttk.Frame(left)
         list_buttons.pack(fill="x", pady=6)
@@ -684,28 +698,75 @@ class SettingsWindow:
         ttk.Button(list_buttons, text=t("New"), command=self._new_profile).pack(
             side="left"
         )
-        ttk.Button(list_buttons, text=t("Rename"), command=self._rename_profile).pack(
-            side="left", padx=3
+        rename = ttk.Button(list_buttons, text=t("Rename"), command=self._rename_profile)
+        rename.pack(side="left", padx=3)
+        delete = ttk.Button(list_buttons, text=t("Delete"), command=self._delete_profile)
+        delete.pack(side="left")
+        # Figes quand le profil integre est selectionne.
+        self._profile_edit_buttons = [rename, delete]
+        self._profile_rows: list[str] = []
+
+        move_buttons = ttk.Frame(left)
+        move_buttons.pack(fill="x")
+        self._move_up = ttk.Button(
+            move_buttons, text=t("▲ Move up"), command=lambda: self._move_profile(-1)
         )
-        ttk.Button(list_buttons, text=t("Delete"), command=self._delete_profile).pack(
-            side="left"
+        self._move_up.pack(side="left")
+        self._move_down = ttk.Button(
+            move_buttons, text=t("▼ Move down"), command=lambda: self._move_profile(1)
         )
+        self._move_down.pack(side="left", padx=3)
 
         right = ttk.Frame(frame)
         right.pack(side="left", fill="both", expand=True)
 
+        # Le plan des ecrans occupe le bas de la zone, sur toute sa largeur :
+        # c'est la qu'il a la place d'etre lisible. Il se reserve avant le
+        # haut, sinon il disparait quand la fenetre manque de hauteur.
+        map_box = ttk.LabelFrame(right, text=t("Screens"), padding=8)
+        map_box.pack(side="bottom", fill="both", expand=True, pady=(4, 0))
+        self.screen_map = screen_map.ScreenMap(
+            map_box,
+            palette=lambda: self.palette,
+            on_toggle=self._toggle_from_map,
+            empty_text=t("Screen positions are not known yet. Capture the layout: "
+                         "every screen is switched on for a few seconds."),
+        )
+        # Le bouton se reserve avant le plan extensible, sinon il disparait
+        # quand la fenetre manque de hauteur.
+        map_buttons = ttk.Frame(map_box)
+        map_buttons.pack(side="bottom", fill="x", pady=(6, 0))
+        ttk.Button(
+            map_buttons, text=t("Capture layout..."), command=self._capture_layout
+        ).pack(side="left")
+        # Date du releve, ou raison du dernier refus : on sait ainsi si le
+        # plan est a jour, et sinon pourquoi.
+        self.layout_state = tk.StringVar(self.root, value="")
+        ttk.Label(
+            map_buttons, textvariable=self.layout_state, style="Hint.TLabel",
+            wraplength=560, justify="left",
+        ).pack(side="left", padx=(12, 0))
+        self.screen_map.canvas.pack(fill="both", expand=True)
+        self._drawn_screens: list = []
+        self._capturing = False
+        self._capture_step = ""
+        self._drawn_ghosts: list[str] = []
+
+        top = ttk.Frame(right)
+        top.pack(side="top", fill="x")
+
         # Le logo prend la place laissee libre a droite. Sans lui, les cases
-        # s'etiraient sur toute la largeur de la
-        # fenetre : une case a cocher large d'un ecran est plus penible a
-        # viser qu'une case serree contre son libelle, et l'oeil parcourt
-        # une distance inutile entre l'intitule et la case suivante.
-        badge = ttk.Frame(right)
+        # s'etiraient sur toute la largeur de la fenetre : une case a cocher
+        # large d'un ecran est plus penible a viser qu'une case serree contre
+        # son libelle, et l'oeil parcourt une distance inutile entre
+        # l'intitule et la case suivante.
+        badge = ttk.Frame(top)
         badge.pack(side="right", fill="y", padx=(24, 0))
         self._profile_logo = icon_module.load_photo(96, self.root)
         if self._profile_logo is not None:
             ttk.Label(badge, image=self._profile_logo).pack(anchor="ne", pady=(6, 0))
 
-        content = ttk.Frame(right)
+        content = ttk.Frame(top)
         content.pack(side="left", fill="both")
 
         self.profile_title = tk.StringVar(self.root, value="No profile selected")
@@ -720,7 +781,7 @@ class SettingsWindow:
         self.profile_outlet_vars: dict[str, tk.BooleanVar] = {}
 
         apply_row = ttk.Frame(content)
-        apply_row.pack(fill="x", pady=14)
+        apply_row.pack(fill="x", pady=(4, 8))
         ttk.Button(
             apply_row, text=t("Apply this profile now"), command=self._apply_profile_now
         ).pack(side="left")
@@ -730,6 +791,7 @@ class SettingsWindow:
         for child in self.outlets_box.winfo_children():
             child.destroy()
         self.profile_outlet_vars = {}
+        self._profile_boxes: list[tuple[ttk.Checkbutton, str]] = []
 
         if not self.config.outlets:
             ttk.Label(self.outlets_box, text=t("No outlet yet - add a device first.")).pack(
@@ -753,33 +815,307 @@ class SettingsWindow:
             suffix = ""
             if outlet.never_switch_off:
                 suffix = "  " + t("(always on)")
-            ttk.Checkbutton(
+            box = ttk.Checkbutton(
                 self.outlets_box,
                 text=f"{outlet.label}{suffix}",
                 variable=variable,
                 command=self._apply_profile_edits,
                 state="disabled" if outlet.never_switch_off else "normal",
-            ).pack(anchor="w", padx=(12 if multi_device else 0, 0))
+            )
+            box.pack(anchor="w", padx=(12 if multi_device else 0, 0))
+            self._profile_boxes.append((box, outlet.ref))
 
     def _selected_profile(self) -> Profile | None:
+        # La liste affiche les noms traduits : on retrouve le profil par son
+        # rang, pas par le texte de la ligne.
         selection = self.profile_list.curselection()
-        if not selection:
+        if not selection or selection[0] >= len(self._profile_rows):
             return None
-        return self.config.profile(self.profile_list.get(selection[0]))
+        return self.config.profile(self._profile_rows[selection[0]])
 
     def _on_profile_selected(self) -> None:
         profile = self._selected_profile()
         if profile is None:
             return
-        self.profile_title.set(profile.name)
+        self.profile_title.set(
+            f"{profile.label}  -  {t('built-in, every outlet on')}"
+            if profile.builtin else profile.label
+        )
         for ref, variable in self.profile_outlet_vars.items():
             outlet = self.config.outlet(ref)
             always_on = outlet is not None and outlet.never_switch_off
             variable.set(always_on or ref in profile.outlets_on)
+        # Le profil integre ne se modifie pas : ses cases sont figees.
+        for box, ref in self._profile_boxes:
+            outlet = self.config.outlet(ref)
+            locked = profile.builtin or (outlet is not None and outlet.never_switch_off)
+            box.configure(state="disabled" if locked else "normal")
+        for button in self._profile_edit_buttons:
+            button.configure(state="disabled" if profile.builtin else "normal")
+        self._update_move_buttons(profile)
+        self._draw_screen_map()
+
+    # ------------------------------------------------------------ ordre
+
+    def _update_move_buttons(self, profile: Profile) -> None:
+        """Le profil integre reste en tete : ni lui ni les autres ne le passent."""
+        ordered = self.config.user_profiles()
+        position = next(
+            (i for i, p in enumerate(ordered) if p.name == profile.name), None
+        )
+        first = profile.builtin or position == 0
+        last = profile.builtin or position == len(ordered) - 1
+        self._move_up.configure(state="disabled" if first else "normal")
+        self._move_down.configure(state="disabled" if last else "normal")
+
+    def _move_profile(self, step: int) -> None:
+        profile = self._selected_profile()
+        if profile is None or profile.builtin:
+            return
+        ordered = self.config.user_profiles()
+        position = next(i for i, p in enumerate(ordered) if p.name == profile.name)
+        self._place_profile(profile.name, position + step)
+
+    def _place_profile(self, name: str, position: int) -> None:
+        """Met un profil utilisateur a ce rang et renumerote les autres."""
+        ordered = self.config.user_profiles()
+        moving = next((p for p in ordered if p.name == name), None)
+        position = min(max(position, 0), len(ordered) - 1)
+        if moving is None or ordered.index(moving) == position:
+            return
+        ordered.remove(moving)
+        ordered.insert(position, moving)
+        for rank, profile in enumerate(ordered):
+            profile.order = rank
+        self._save()
+        self.refresh()
+        self._select_profile(name)
+        self.set_status(t("Profile order saved"))
+
+    def _drag_profile(self, event) -> None:
+        """Pendant le glisser : le profil suit la souris, rang par rang."""
+        profile = self._selected_profile()
+        if profile is None or profile.builtin:
+            return
+        row = self.profile_list.nearest(event.y)
+        # Les profils utilisateur commencent au rang 1, sous le profil integre.
+        target = max(row, 1) - 1
+        ordered = self.config.user_profiles()
+        current = next(i for i, p in enumerate(ordered) if p.name == profile.name)
+        if target != current:
+            self._place_profile(profile.name, target)
+
+    def _draw_screen_map(self) -> None:
+        """Redessine le plan d'apres les cases du profil affiche."""
+        by_key = {o.monitor_key: o for o in self.config.outlets if o.monitor_key}
+        selected = self._selected_profile()
+        showing = selected is not None
+        # Un clic sur un ecran modifie le profil : pas le profil integre.
+        editable = showing and not selected.builtin
+        tiles = []
+        for screen in self.config.screens:
+            outlet = by_key.get(screen.key)
+            ref = None
+            if outlet is None:
+                state = screen_map.STATE_UNMANAGED
+                title = screen.name or t("Screen")
+            elif outlet.never_switch_off:
+                state, title = screen_map.STATE_FIXED, outlet.label
+            else:
+                variable = self.profile_outlet_vars.get(outlet.ref)
+                lit = variable is not None and variable.get()
+                state = screen_map.STATE_ON if lit or not showing else screen_map.STATE_OFF
+                if not lit and outlet.label in self.app.controller.ghost_screens:
+                    state = screen_map.STATE_GHOST
+                title = outlet.label
+                ref = outlet.ref if editable else None
+            tiles.append(screen_map.ScreenTile(
+                rect=screen.rect,
+                title=title,
+                detail=screen_map.describe(
+                    state, screen.width, screen.height, screen.primary, screen.scale,
+                    screen.diagonal,
+                ),
+                state=state,
+                ref=ref,
+                scale=screen.scale,
+                primary=screen.primary,
+                diagonal=screen.diagonal,
+            ))
+        self._drawn_screens = list(self.config.screens)
+        self._drawn_ghosts = list(self.app.controller.ghost_screens)
+        self.screen_map.show(tiles)
+        self._update_layout_state()
+
+    def _update_layout_state(self) -> None:
+        """Date du releve, echec du dernier releve demande, ecrans fantomes.
+
+        Les refus du releve continu n'y figurent pas : qu'il ne puisse rien
+        relever pendant que des ecrans sont eteints est la regle, pas un
+        echec -- le plan garde simplement la derniere disposition valide.
+        """
+        controller = self.app.controller
+        lines = []
+        failed = controller.capture_problems
+        if failed and controller.capture_attempted_at > self.config.screens_captured_at:
+            line = t("Not captured: {reason}", reason=failed[0])
+            if len(failed) > 1:
+                line += " " + t("(+{count} more)", count=len(failed) - 1)
+            lines.append(line)
+        elif self.config.screens_captured_at:
+            lines.append(t("Captured {when} - {count} screen(s)",
+                           when=time.strftime("%d/%m %H:%M",
+                                              time.localtime(self.config.screens_captured_at)),
+                           count=len(self.config.screens)))
+        if controller.ghost_screens:
+            lines.append(t("Ghost screen: {screens} switched off but kept on the "
+                           "Windows desktop", screens=", ".join(controller.ghost_screens)))
+        self.layout_state.set("\n".join(lines))
+
+    def _capture_layout(self) -> None:
+        """Etablit la disposition, en la montrant se construire.
+
+        Le plan s'efface, puis chaque ecran y apparait a mesure que Windows
+        le detecte. A la fin, on dit ce qui a ete appris et l'on demande s'il
+        faut rester ainsi -- tout allume -- ou revenir au profil d'avant :
+        revenir d'office donnait l'impression que rien ne s'etait passe.
+        """
+        linked = [o for o in self.config.outlets if o.monitor_key]
+        if not linked:
+            messagebox.showinfo(
+                t("Capture screen layout"),
+                t("Link each screen to its outlet first: Outlets tab, "
+                  "Identify displays."),
+                parent=self.root,
+            )
+            return
+        dark = [
+            o.label for o in linked
+            if not (self.app.states.get(o.ref) and self.app.states[o.ref].output)
+        ]
+        text = t("The '{all_on}' profile will be applied and Windows will report "
+                 "where each screen sits. You will see the layout build up, then "
+                 "choose to keep '{all_on}' or go back to the previous profile.",
+                 all_on=self.config.all_on_profile().label)
+        if dark:
+            text += "\n\n" + t("Will be switched on: {screens}", screens=", ".join(dark))
+        if not messagebox.askyesno(t("Capture screen layout"), text, parent=self.root):
+            return
+
+        self._capturing = True
+        self._capture_step = t("Switching the screens on...")
+        self._draw_live_capture()
+
+        def progress(step: str) -> None:
+            self._capture_step = step
+
+        def done(capture) -> None:
+            try:
+                self.root.after(0, lambda: self._capture_finished(capture))
+            except (tk.TclError, RuntimeError):
+                pass  # fenetre fermee entre-temps
+
+        self.app.capture_screen_layout(on_done=done, progress=progress)
+
+    def _draw_live_capture(self) -> None:
+        """Le plan tel que Windows le voit en ce moment, redessine en boucle."""
+        if not self._capturing:
+            return
+        names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
+        outputs = monitors.list_outputs() or {}
+        tiles = []
+        for m in monitors.physical_monitors(outputs):
+            diagonal = monitors.physical_diagonal(m.key)
+            output = outputs.get(m.key)
+            tiles.append(screen_map.ScreenTile(
+                rect=m.rect,
+                title=names.get(m.key) or (output.edid_name if output else m.friendly_name),
+                detail=screen_map.describe(
+                    screen_map.STATE_ON, m.width, m.height, m.is_primary, m.scale, diagonal
+                ),
+                state=screen_map.STATE_ON,
+                scale=m.scale, primary=m.is_primary, diagonal=diagonal,
+            ))
+        self.screen_map.show(tiles, empty_text=self._capture_step)
+        self.layout_state.set(t("{step} {count} of {total} screen(s) detected",
+                                step=self._capture_step, count=len(tiles),
+                                total=len({o.monitor_key for o in self.config.outlets
+                                           if o.monitor_key})))
+        self.root.after(500, self._draw_live_capture)
+
+    def _capture_finished(self, capture) -> None:
+        """Dit ce qui a ete appris, puis propose de rester ou de revenir."""
+        self._capturing = False
+        self._draw_screen_map()
+        self.set_status(capture.message)
+        if not capture.turned_on:
+            # Rien n'a ete allume pour l'occasion : il n'y a pas a choisir.
+            messagebox.showinfo(t("Capture screen layout"), capture.message,
+                                parent=self.root)
+            return
+        all_on = self.config.all_on_profile()
+        previous = self.config.profile(self.config.settings.last_profile)
+        back = (t("Back to '{profile}'", profile=previous.label)
+                if previous is not None else t("Back to previous state"))
+        question = t("Keep '{all_on}', or go back?", all_on=all_on.label)
+        if self._ask_stay_or_back(capture.message + "\n\n" + question,
+                                  t("Keep '{all_on}'", all_on=all_on.label), back):
+            self._when_idle(lambda: self.app.return_after_capture(capture))
+        else:
+            # Tout est allume : c'est « All on » qui est en cours. On le
+            # selectionne, et le plan montre ce qui est allume.
+            self._when_idle(self.app.stay_after_capture)
+            self._select_profile(all_on.name)
+
+    def _ask_stay_or_back(self, message: str, stay_label: str, back_label: str) -> bool:
+        """Petite boite a deux choix ; vrai pour revenir en arriere.
+
+        Fermer la boite laisse les choses en l'etat : ne rien commuter
+        est la reponse la plus sure a une question qu'on n'a pas tranchee.
+        """
+        window = tk.Toplevel(self.root)
+        window.title(t("Capture screen layout"))
+        window.transient(self.root)
+        window.resizable(False, False)
+        _theme_dialog(window, self.palette)
+        choice = {"back": False}
+        ttk.Label(window, text=message, wraplength=420, justify="left",
+                  padding=16).pack(anchor="w")
+        buttons = ttk.Frame(window, padding=(16, 0, 16, 14))
+        buttons.pack(fill="x")
+
+        def pick(back: bool) -> None:
+            choice["back"] = back
+            window.destroy()
+
+        back_button = ttk.Button(buttons, text=back_label, command=lambda: pick(True))
+        back_button.pack(side="right")
+        ttk.Button(buttons, text=stay_label, command=lambda: pick(False)).pack(
+            side="right", padx=(0, 8)
+        )
+        back_button.focus_set()
+        window.grab_set()
+        self.root.wait_window(window)
+        return choice["back"]
+
+    def _when_idle(self, action) -> None:
+        """Lance l'action des que l'application n'a plus de manoeuvre en cours."""
+        if self.app.busy:
+            self.root.after(300, lambda: self._when_idle(action))
+        else:
+            action()
+
+    def _toggle_from_map(self, ref: str) -> None:
+        """Un clic sur un ecran vaut un clic sur la case de sa prise."""
+        variable = self.profile_outlet_vars.get(ref)
+        if variable is None:
+            return
+        variable.set(not variable.get())
+        self._apply_profile_edits()
 
     def _apply_profile_edits(self) -> None:
         profile = self._selected_profile()
-        if profile is None:
+        if profile is None or profile.builtin:
             return
         profile.outlets_on = [
             ref
@@ -787,6 +1123,7 @@ class SettingsWindow:
             if var.get() and not (self.config.outlet(ref) or OutletConfig("", 0)).never_switch_off
         ]
         self._save()
+        self._draw_screen_map()
         self.set_status(f"Profile '{profile.name}' updated")
 
     def _new_profile(self) -> None:
@@ -794,6 +1131,10 @@ class SettingsWindow:
         if not name:
             return
         name = name.strip()
+        if self.config.is_reserved_name(name):
+            messagebox.showerror("Shelly Screens", t("'{name}' is the built-in profile.",
+                                                      name=name))
+            return
         if self.config.profile(name):
             messagebox.showerror("Shelly Screens", f"'{name}' already exists.")
             return
@@ -805,7 +1146,7 @@ class SettingsWindow:
 
     def _rename_profile(self) -> None:
         profile = self._selected_profile()
-        if profile is None:
+        if profile is None or profile.builtin:
             return
         name = simpledialog.askstring(
             "Rename profile", "New name:", initialvalue=profile.name, parent=self.root
@@ -813,6 +1154,10 @@ class SettingsWindow:
         if not name or name.strip() == profile.name:
             return
         name = name.strip()
+        if self.config.is_reserved_name(name):
+            messagebox.showerror("Shelly Screens", t("'{name}' is the built-in profile.",
+                                                      name=name))
+            return
         if self.config.profile(name):
             messagebox.showerror("Shelly Screens", f"'{name}' already exists.")
             return
@@ -825,7 +1170,7 @@ class SettingsWindow:
 
     def _delete_profile(self) -> None:
         profile = self._selected_profile()
-        if profile is None:
+        if profile is None or profile.builtin:
             return
         if not messagebox.askyesno("Shelly Screens", f"Delete profile '{profile.name}'?"):
             return
@@ -836,8 +1181,8 @@ class SettingsWindow:
         self.refresh()
 
     def _select_profile(self, name: str) -> None:
-        for index in range(self.profile_list.size()):
-            if self.profile_list.get(index) == name:
+        for index, row in enumerate(self._profile_rows):
+            if row == name:
                 self.profile_list.selection_clear(0, "end")
                 self.profile_list.selection_set(index)
                 self._on_profile_selected()
@@ -1610,10 +1955,14 @@ class SettingsWindow:
         selected_profile = self._selected_profile()
         self._rebuild_profile_outlets()
         self.profile_list.delete(0, "end")
-        for profile in self.config.sorted_profiles():
-            self.profile_list.insert("end", profile.name)
+        profiles = self.config.sorted_profiles()
+        self._profile_rows = [profile.name for profile in profiles]
+        for profile in profiles:
+            self.profile_list.insert("end", profile.label)
         if selected_profile is not None:
             self._select_profile(selected_profile.name)
+        else:
+            self._draw_screen_map()
 
         # --- resume de ce qui reste allume a l'arret
         kept = [
@@ -1891,6 +2240,10 @@ class IdentifyDialog:
                 else:
                     time.sleep(1.5)
 
+            # Tout est rallume : c'est le moment de relever la disposition.
+            if not self.cancelled:
+                self._capture_layout(controller)
+
             # 3. Revenir a l'etat de depart.
             self._say("Restoring outlets...", len(self.outlets) + 1)
             for outlet in self.outlets:
@@ -1901,6 +2254,32 @@ class IdentifyDialog:
             time.sleep(2.0)
 
         self._finish()
+
+    def _capture_layout(self, controller) -> None:
+        """Releve la disposition avec les associations qu'on vient de trouver.
+
+        C'est aussi le seul moment ou l'on peut prouver qu'un ecran ne depend
+        d'aucune prise : si chaque prise d'ecran a trouve le sien, ceux qui
+        restent sont restes allumes pendant toutes les coupures. Ils sont
+        retenus comme tels. La preuve n'est faite que si aucune prise
+        d'ecran n'a ete sautee.
+        """
+        links = {
+            o.ref: o.monitor_key for o in self.app.config.outlets if o.monitor_key
+        }
+        links.update(self.results)
+        screen_refs = [
+            o.ref for o in self.app.config.outlets
+            if o.kind == KIND_SCREEN and not o.host_pc
+        ]
+        self.unswitched: set[str] | None = None
+        if all(ref in links for ref in screen_refs):
+            outputs = monitors.list_outputs()
+            physical = {m.key for m in monitors.physical_monitors(outputs)}
+            self.unswitched = physical - set(links.values())
+        self._say(t("Capturing the screen layout..."))
+        ok, message = controller.capture_when_ready(links, self.unswitched)
+        self.layout_message = message
 
     def _deduce_last_pair(self) -> str | None:
         """Apparie le dernier couple restant, quand il n'y a plus d'ambiguite.
@@ -1935,12 +2314,16 @@ class IdentifyDialog:
                 outlet = self.app.config.outlet(ref)
                 if outlet is not None:
                     outlet.monitor_key = key
-            if self.results:
+            unswitched = getattr(self, "unswitched", None)
+            if unswitched is not None:
+                self.app.config.unswitched_screens = sorted(unswitched)
+            if self.results or unswitched is not None:
                 self.owner._save()
             self.owner.refresh()
             found = len(self.results)
             self.owner.set_status(
                 f"{found} of {len(self.outlets)} outlet(s) matched to a display"
+                + (f" - {self.layout_message}" if getattr(self, "layout_message", "") else "")
             )
             try:
                 self.window.grab_release()

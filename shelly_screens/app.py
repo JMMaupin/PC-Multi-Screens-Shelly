@@ -21,7 +21,7 @@ from . import logging_setup
 from . import power_history
 from . import single_instance
 from .i18n import set_language, t
-from .config import AppConfig
+from .config import ALL_ON_PROFILE, AppConfig
 from .controller import ApplyReport, NotConnected, ScreenController
 from .device import SwitchState
 from .win import hotkey as hotkey_module
@@ -142,6 +142,8 @@ class Application:
                 self.history.feed(self.states)
             except Exception as exc:  # noqa: BLE001 - jamais au detriment du pilotage
                 self.log(f"History not recorded: {exc}")
+            # La disposition se juge sur l'etat des prises qu'on vient de lire.
+            self._remember_screens()
         except (NotConnected, OSError) as exc:
             self.online = False
             self.log(f"Refresh failed: {exc}")
@@ -385,7 +387,7 @@ class Application:
             detail = f"{count} outlet(s)" if count else "all off"
             items.append(
                 MenuItem(
-                    label=f"{profile.name}  ({detail})",
+                    label=f"{profile.label}  ({detail})",
                     action=lambda name=profile.name: self.apply_profile(name),
                     checked=profile.name == current,
                     enabled=self.online and not self.busy,
@@ -436,9 +438,14 @@ class Application:
         """Les ecrans allumes et leur place, telle que Windows la definit."""
         names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
         placed = monitors.arrangement(monitors.list_monitors(), names)
-        if not placed:
-            return [MenuItem.info(t("No screen detected"))]
-        return [MenuItem.info(f"{name} — {where}") for _m, name, where in placed]
+        items = [MenuItem.info(f"{name} — {where}") for _m, name, where in placed]
+        if not items:
+            items = [MenuItem.info(t("No screen detected"))]
+        items.append(MenuItem.sep())
+        items.append(
+            MenuItem(t("Capture screen layout"), action=self.capture_screen_layout)
+        )
+        return items
 
     # ------------------------------------------------------- evenements systeme
 
@@ -462,6 +469,55 @@ class Application:
 
     def _on_display_change(self) -> None:
         self.log("Display configuration changed")
+        self._remember_screens()
+
+    def capture_screen_layout(self, on_done=None, progress=None) -> None:
+        """Etablit la disposition des ecrans, en tache de fond.
+
+        Depuis le menu de l'icone, sans `on_done`, tout revient en place
+        aussitot : il n'y a pas de fenetre ou poser la question. Avec
+        `on_done(capture)`, les ecrans restent allumes et l'appelant propose
+        de rester ainsi ou de revenir en arriere (`return_after_capture`).
+        Les deux rappels viennent du fil de la tache : a l'appelant de
+        repasser dans le sien.
+        """
+        def run() -> None:
+            capture = self.controller.capture_screen_layout(
+                restore=on_done is None, progress=progress
+            )
+            if on_done is None:
+                self.tray.notify(APP_NAME, capture.message)
+            else:
+                on_done(capture)
+
+        self._run_async("Capture screen layout", run)
+
+    def stay_after_capture(self) -> None:
+        """Garde tout allume : « All on » devient le profil en cours."""
+        self._run_async(
+            "Keep 'All on'", lambda: self.controller.adopt_profile(ALL_ON_PROFILE)
+        )
+
+    def return_after_capture(self, capture) -> None:
+        """Revient au profil d'avant le releve, ou a defaut a l'etat d'avant.
+
+        Reappliquer le profil plutot que recouper une a une les prises
+        allumees : c'est ce qu'on a choisi de retrouver, fenetres comprises.
+        """
+        name = self.config.settings.last_profile
+        if name and self.config.profile(name) is not None:
+            self.apply_profile(name)
+        else:
+            self._run_async("Restore outlets", lambda: self.controller.undo_capture(capture))
+
+    def _remember_screens(self) -> None:
+        """Retient la place des ecrans, sans jamais gener le reste."""
+        if self.busy:
+            return  # une manoeuvre est en cours : l'etat lu n'est deja plus le bon
+        try:
+            self.controller.remember_screens(self.states)
+        except Exception as exc:  # noqa: BLE001 - un releve rate n'est pas fatal
+            self.log(f"Screen positions not read: {exc}")
 
     def _on_suspend(self) -> None:
         """Mise en veille : couper, mais garder ce qui doit rester allume.

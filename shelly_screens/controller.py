@@ -28,8 +28,8 @@ from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from . import device_leds, discovery
-from . import sensing
-from .config import AppConfig, DeviceConfig, Profile, parse_ref
+from . import screen_layout, sensing
+from .config import AppConfig, DeviceConfig, Profile, ScreenPosition, parse_ref
 from .device import (
     AuthenticationFailed,
     ProtectedOutlet,
@@ -38,12 +38,15 @@ from .device import (
     ShellyUnreachable,
     SwitchState,
 )
+from .i18n import t
 from .win import layout, monitors
 
 # Marge laissee a la dalle apres que Windows a annonce l'ecran.
 DISPLAY_GRACE_S = 1.2
 # Periode de scrutation de la liste des ecrans.
 POLL_INTERVAL_S = 0.4
+# Ecart entre deux lectures de la disposition qui doivent concorder.
+LAYOUT_STABLE_S = 2.0
 
 LogFn = Callable[[str], None]
 
@@ -77,6 +80,17 @@ class ApplyReport:
         if self.errors:
             parts.append(f"{len(self.errors)} error(s)")
         return " | ".join(parts)
+
+
+@dataclass
+class LayoutCapture:
+    """Issue d'un releve de la disposition, et de quoi revenir en arriere."""
+
+    ok: bool
+    message: str
+    # Etat des prises avant le releve, et celles qu'il a allumees.
+    states_before: dict[str, bool] = field(default_factory=dict)
+    turned_on: list[str] = field(default_factory=list)
 
 
 class NotConnected(RuntimeError):
@@ -148,6 +162,16 @@ class ScreenController:
         # l'alimentation et les fenetres, deux en parallele se marcheraient
         # dessus.
         self._lock = threading.RLock()
+        # Derniere lecture des ecrans, pour juger de leur stabilite, et
+        # raison du dernier refus de relever la disposition.
+        self._layout_reading: tuple | None = None
+        # Resultat du dernier releve demande : ses problemes (vide s'il a
+        # reussi) et son heure. Le releve continu ne le touche pas : ses
+        # refus sont la regle des qu'un ecran est eteint, pas des echecs.
+        self.capture_problems: list[str] = []
+        self.capture_attempted_at = 0.0
+        # Prises coupees dont l'ecran reste sur le bureau de Windows.
+        self.ghost_screens: list[str] = []
 
     # ------------------------------------------------------------ connexion
 
@@ -690,6 +714,216 @@ class ScreenController:
 
         self._log(report.summary())
         return report
+
+    # ------------------------------------------------------------- ecrans
+
+    def check_screen_layout(
+        self,
+        states: dict[str, SwitchState],
+        links: dict[str, str] | None = None,
+        unswitched: set[str] | None = None,
+    ) -> tuple[list[monitors.MonitorInfo], dict, list[str]]:
+        """Ecrans physiques, sorties, et ce qui empeche d'en relever la place."""
+        outputs = monitors.list_outputs()
+        physical = monitors.physical_monitors(outputs)
+        found = screen_layout.problems(
+            self.config.outlets,
+            states,
+            {m.key for m in physical},
+            outputs or {},
+            set(self.config.unswitched_screens) if unswitched is None else unswitched,
+            links,
+        )
+        return physical, outputs or {}, found
+
+    def _record_screens(
+        self, physical: list[monitors.MonitorInfo], outputs: dict, touch: bool
+    ) -> bool:
+        """Ecrit la disposition ; vrai si elle a change.
+
+        `touch` date le releve meme sans changement : on l'a demande, et la
+        date dit alors que la disposition a ete verifiee.
+        """
+        snapshot = [
+            ScreenPosition(
+                key=m.key, rect=m.rect, primary=m.is_primary,
+                name=(outputs[m.key].edid_name if m.key in outputs else "")
+                or m.friendly_name,
+                scale=m.scale, diagonal=monitors.physical_diagonal(m.key),
+            )
+            for m in physical
+        ]
+        changed = snapshot != self.config.screens
+        if not changed and not touch:
+            return False
+        self.config.screens = snapshot
+        self.config.screens_captured_at = time.time()
+        self._save()
+        if changed:
+            self._log(
+                "Screen positions memorised: "
+                + ", ".join(f"{s.key} @ {s.rect[0]},{s.rect[1]}" for s in snapshot)
+            )
+        return changed
+
+    def _note_capture(self, found: list[str]) -> None:
+        """Retient l'issue d'un releve demande, pour l'interface."""
+        self.capture_problems = found
+        self.capture_attempted_at = time.time()
+
+    def _note_ghosts(self, ghosts: list[str]) -> None:
+        """Retient les ecrans fantomes ; ne journalise que leur apparition."""
+        appeared = [g for g in ghosts if g not in self.ghost_screens]
+        if appeared:
+            self._log(
+                "Ghost screen: outlet off but still on the Windows desktop: "
+                + ", ".join(appeared)
+            )
+        self.ghost_screens = ghosts
+
+    def remember_screens(self, states: dict[str, SwitchState]) -> bool:
+        """Releve passif : retient la disposition quand tout concorde et se tient.
+
+        Appele a chaque rafraichissement. Il faut que rien ne s'y oppose
+        (voir screen_layout) et que la lecture soit identique a la
+        precedente : quand un ecran revient, Windows reordonne le bureau en
+        plusieurs temps, et une lecture prise au milieu serait fausse.
+
+        Il s'efface devant toute manoeuvre en cours : un profil qu'on
+        applique, un releve demande. Il jugerait sinon l'etat des prises lu
+        avant la manoeuvre sur les ecrans d'apres. Ses refus ne sont pas
+        journalises : ecrans eteints, ils sont la regle.
+        """
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            physical, outputs, found = self.check_screen_layout(states)
+            self._note_ghosts(
+                screen_layout.ghosts(self.config.outlets, states, {m.key for m in physical})
+            )
+            reading = tuple((m.key, m.rect, m.scale) for m in physical)
+            stable = reading == self._layout_reading
+            self._layout_reading = reading
+            if found or not stable:
+                return False
+            return self._record_screens(physical, outputs, touch=False)
+        finally:
+            self._lock.release()
+
+    def capture_when_ready(
+        self,
+        links: dict[str, str] | None = None,
+        unswitched: set[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Attend que tout concorde et se stabilise, puis releve la disposition.
+
+        Relit prises et ecrans toutes les deux secondes, jusqu'au delai
+        d'attente des ecrans : il faut deux lectures identiques et sans
+        probleme. Au-dela, rend la raison du refus.
+        """
+        deadline = time.monotonic() + self.config.settings.display_settle_timeout_s
+        previous = None
+        while True:
+            states = self.read_outlets()
+            physical, outputs, found = self.check_screen_layout(states, links, unswitched)
+            reading = tuple((m.key, m.rect, m.scale) for m in physical)
+            if not found and reading == previous:
+                break
+            if time.monotonic() >= deadline:
+                if not found:
+                    found = [t("Windows is still arranging the screens")]
+                self._note_capture(found)
+                return False, t("Layout not captured: {reasons}",
+                                reasons="; ".join(found))
+            previous = None if found else reading
+            time.sleep(LAYOUT_STABLE_S)
+        self._note_capture([])
+        self._record_screens(physical, outputs, touch=True)
+        return True, t("Screen layout captured ({count} screens)", count=len(physical))
+
+    def capture_screen_layout(
+        self,
+        restore: bool = True,
+        progress: Callable[[str], None] | None = None,
+    ) -> "LayoutCapture":
+        """Passe en « All on » et releve la disposition des ecrans.
+
+        La disposition ne se lit qu'avec tous les ecrans allumes : c'est la
+        procedure qui l'etablit a la demande. Elle allume ce qu'allume le
+        profil integre -- toutes les prises --, sans encore le retenir comme
+        profil en cours : on peut vouloir revenir a celui d'avant
+        (`undo_capture`) ou rester ainsi (`adopt_profile`).
+
+        `restore` recoupe ensuite ce qui a ete allume pour l'occasion. Sans
+        lui, les ecrans restent allumes et l'appelant decide : l'interface
+        demande s'il faut rester ainsi ou revenir au profil d'avant, via
+        `undo_capture`. `progress` recoit les etapes, pour les afficher.
+        """
+        say = progress or (lambda _text: None)
+        capture = LayoutCapture(False, "")
+        screens = [o for o in self.config.outlets if o.monitor_key]
+        if not screens:
+            capture.message = t("No outlet is linked to a screen yet: "
+                                "run Identify displays first.")
+            self._note_capture([capture.message])
+            return capture
+        report = ApplyReport(profile="Screen layout")
+        with self._lock:
+            states = self.read_outlets()
+            capture.states_before = {ref: state.output for ref, state in states.items()}
+            unreachable = [o.label for o in screens if o.ref not in states]
+            if unreachable:
+                reason = t("unreachable: {outlets}", outlets=", ".join(unreachable))
+                self._note_capture([reason])
+                capture.message = t("Layout not captured: {reasons}", reasons=reason)
+                return capture
+            to_turn_on = [
+                ref for ref in self.config.all_on_profile().outlets_on
+                if ref in states and not states[ref].output
+            ]
+            if to_turn_on:
+                say(t("Switching the screens on..."))
+            capture.turned_on = self._switch_many(to_turn_on, True, report)
+            if capture.turned_on:
+                say(t("Waiting for Windows to detect every screen..."))
+                self._wait_for_displays({o.monitor_key for o in screens})
+
+            say(t("Checking and capturing the layout..."))
+            capture.ok, capture.message = self.capture_when_ready()
+            if restore:
+                self.undo_capture(capture)
+        if report.errors:
+            capture.ok = False
+            capture.message += " " + "; ".join(report.errors)
+        self._log(f"Screen layout: {capture.message}")
+        return capture
+
+    def adopt_profile(self, name: str) -> None:
+        """Retient comme profil en cours un profil dont les prises sont deja en place.
+
+        Apres un releve qu'on choisit de garder : tout est allume, c'est donc
+        « All on » qui est en cours -- pour le menu, pour le reveil, et pour
+        le script embarque qui rallume les ecrans au demarrage.
+        """
+        if self.config.profile(name) is None:
+            return
+        self.config.settings.last_profile = name
+        sensing.publish_profile(self, self.config, name)
+        self._save()
+        self._log(f"Profile '{name}' kept as the current one")
+
+    def undo_capture(self, capture: "LayoutCapture") -> None:
+        """Recoupe ce que le releve a allume, et ramene les fenetres egarees."""
+        if not capture.turned_on:
+            return
+        report = ApplyReport(profile="Screen layout")
+        with self._lock:
+            screens_before = [m.rect for m in monitors.list_monitors()]
+            turned_off = self._switch_many(capture.turned_on, False, report)
+            if turned_off and self.config.settings.rescue_offscreen_windows:
+                time.sleep(DISPLAY_GRACE_S)
+                self._rescue_windows(capture.states_before, screens_before)
+        capture.turned_on = []
 
     def _rescue_windows(self, targets: dict[str, bool], screens_before: list) -> int:
         """Ramene les fenetres perdues sur l'ecran allume le plus proche.

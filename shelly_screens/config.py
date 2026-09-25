@@ -23,8 +23,14 @@ from pathlib import Path
 from typing import Any
 
 from . import secrets_store
+from .i18n import t
 
 CONFIG_VERSION = 2
+
+# Le profil integre : toutes les prises allumees. Ce nom est sa cle -- dans
+# `last_profile`, dans le script embarque --, stable quelle que soit la
+# langue ; il s'affiche traduit (« Tous en marche »).
+ALL_ON_PROFILE = "All on"
 # Par defaut la configuration vit a cote du code : l'outil est mono-poste et
 # on veut pouvoir l'inspecter facilement. SHELLY_SCREENS_CONFIG permet de la
 # deplacer (par exemple vers %APPDATA%).
@@ -227,6 +233,53 @@ class OutletConfig:
         )
 
 
+@dataclass
+class ScreenPosition:
+    """Un ecran et sa place sur le bureau, telle que Windows la definit.
+
+    Windows oublie un ecran des qu'on coupe sa prise, et peut alors decaler
+    les autres. Pour savoir ou se trouve un ecran eteint, il faut donc avoir
+    retenu sa place quand tout etait allume.
+    """
+
+    key: str  # identifiant stable de l'ecran, voir win.monitors
+    rect: tuple[int, int, int, int]  # gauche, haut, droite, bas ; pixels reels
+    primary: bool = False
+    name: str = ""  # ce que le pilote annonce, faute de prise associee
+    scale: float = 1.0  # echelle reglee dans Windows : 1.25 pour 125 %
+    diagonal: float = 0.0  # pouces, lus dans l'EDID de l'ecran ; 0 si inconnue
+
+    @property
+    def width(self) -> int:
+        return self.rect[2] - self.rect[0]
+
+    @property
+    def height(self) -> int:
+        return self.rect[3] - self.rect[1]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "rect": list(self.rect),
+            "primary": self.primary,
+            "name": self.name,
+            "scale": self.scale,
+            "diagonal": self.diagonal,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ScreenPosition":
+        rect = [int(v) for v in data.get("rect", (0, 0, 0, 0))][:4]
+        return cls(
+            key=str(data.get("key", "")),
+            rect=tuple(rect + [0] * (4 - len(rect))),  # type: ignore[arg-type]
+            primary=bool(data.get("primary", False)),
+            name=str(data.get("name", "")),
+            scale=float(data.get("scale", 1.0)) or 1.0,
+            diagonal=float(data.get("diagonal", 0.0)),
+        )
+
+
 def parse_ref(ref: str) -> tuple[str, int]:
     """Decoupe une reference `cle:sortie`."""
     device, _, switch = ref.rpartition(":")
@@ -251,8 +304,16 @@ class Profile:
     # Rang d'affichage dans le menu.
     order: int = 0
 
+    # Profil integre : calcule, jamais enregistre, ni modifiable ni supprimable.
+    builtin: bool = field(default=False, compare=False)
+
     def wants(self, ref: str) -> bool:
         return ref in self.outlets_on
+
+    @property
+    def label(self) -> str:
+        """Nom affiche : traduit pour le profil integre, tel quel sinon."""
+        return t(self.name) if self.builtin else self.name
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -419,6 +480,14 @@ class AppConfig:
     profiles: list[Profile] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
     sensing: PowerSensing = field(default_factory=PowerSensing)
+    # Place des ecrans sur le bureau, relevee quand ils etaient tous allumes.
+    screens: list[ScreenPosition] = field(default_factory=list)
+    # Moment du dernier releve de la disposition (temps Unix), 0 si aucun.
+    screens_captured_at: float = 0.0
+    # Ecrans prouves hors de toute prise : restes allumes pendant que
+    # l'assistant coupait chaque prise d'ecran. Seule cette epreuve le
+    # prouve -- un ecran au mur ne se distingue pas autrement.
+    unswitched_screens: list[str] = field(default_factory=list)
     path: Path = field(default=DEFAULT_CONFIG_PATH, compare=False, repr=False)
 
     # ------------------------------------------------------------- acces
@@ -438,13 +507,31 @@ class AppConfig:
     def outlets_of(self, device_key: str) -> list[OutletConfig]:
         return [o for o in self.outlets if o.device == device_key]
 
+    def all_on_profile(self) -> Profile:
+        """Le profil integre, recalcule : il suit les prises ajoutees ou retirees."""
+        return Profile(
+            name=ALL_ON_PROFILE, outlets_on=self.refs(), order=-1, builtin=True
+        )
+
+    @staticmethod
+    def is_reserved_name(name: str) -> bool:
+        """Vrai pour le nom du profil integre, dans sa langue ou en anglais."""
+        folded = name.strip().casefold()
+        return folded in (ALL_ON_PROFILE.casefold(), t(ALL_ON_PROFILE).casefold())
+
     def profile(self, name: str) -> Profile | None:
+        if name == ALL_ON_PROFILE:
+            return self.all_on_profile()
         for profile in self.profiles:
             if profile.name == name:
                 return profile
         return None
 
     def sorted_profiles(self) -> list[Profile]:
+        """Le profil integre en tete, puis ceux de l'utilisateur dans leur ordre."""
+        return [self.all_on_profile()] + self.user_profiles()
+
+    def user_profiles(self) -> list[Profile]:
         return sorted(self.profiles, key=lambda p: (p.order, p.name.lower()))
 
     def refs(self) -> list[str]:
@@ -570,9 +657,12 @@ class AppConfig:
             "version": CONFIG_VERSION,
             "devices": [device.to_dict() for device in self.devices],
             "outlets": [outlet.to_dict() for outlet in self.outlets],
-            "profiles": [profile.to_dict() for profile in self.sorted_profiles()],
+            "profiles": [profile.to_dict() for profile in self.user_profiles()],
             "settings": self.settings.to_dict(),
             "sensing": self.sensing.to_dict(),
+            "screens": [screen.to_dict() for screen in self.screens],
+            "screens_captured_at": self.screens_captured_at,
+            "unswitched_screens": sorted(set(self.unswitched_screens)),
         }
 
     def normalise_roles(self) -> None:
@@ -626,10 +716,36 @@ class AppConfig:
             profiles=[Profile.from_dict(item) for item in data.get("profiles", [])],
             settings=Settings.from_dict(data.get("settings", {})),
             sensing=PowerSensing.from_dict(data.get("sensing", {})),
+            screens=[ScreenPosition.from_dict(item) for item in data.get("screens", [])],
+            screens_captured_at=float(data.get("screens_captured_at", 0.0)),
+            unswitched_screens=[str(k) for k in data.get("unswitched_screens", [])],
             path=path,
         )
         config.normalise_roles()
+        config._adopt_all_on()
         return config
+
+    def _adopt_all_on(self) -> None:
+        """Fait place au profil integre dans une configuration anterieure.
+
+        Un profil enregistre sous ce nom le masquerait. S'il allume deja
+        tous les ecrans, il fait double emploi et disparait ; sinon, c'est
+        un choix de l'utilisateur, et il est garde sous un autre nom.
+        """
+        screens = {
+            o.ref for o in self.outlets
+            if (o.kind == KIND_SCREEN or o.monitor_key) and not o.never_switch_off
+        }
+        for profile in list(self.profiles):
+            if not self.is_reserved_name(profile.name):
+                continue
+            if screens <= set(profile.outlets_on):
+                self.profiles.remove(profile)
+            else:
+                name = f"{ALL_ON_PROFILE} (custom)"
+                if self.settings.last_profile == profile.name:
+                    self.settings.last_profile = name
+                profile.name = name
 
     def save(self, path: Path | None = None) -> None:
         """Ecrit la configuration de facon atomique (fichier temporaire puis remplacement)."""

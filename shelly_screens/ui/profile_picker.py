@@ -116,7 +116,7 @@ class ProfilePicker:
         if not profiles:
             ttk.Label(body, text=t("No profile configured")).pack(padx=20, pady=10)
         for index, profile in enumerate(profiles):
-            label = f"{index + 1}   {profile.name}" if index < 9 else f"     {profile.name}"
+            label = f"{index + 1}   {profile.label}" if index < 9 else f"     {profile.label}"
             if profile.name == current:
                 label += "   ✓"
                 self.start = index

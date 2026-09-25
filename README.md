@@ -141,6 +141,19 @@ Onglet **Profiles** : cocher les prises alimentées par chaque profil. Les
 prises protégées y apparaissent grisées et cochées, puisqu'elles ne se
 coupent jamais.
 
+L'**ordre** des profils se règle avec **▲ Move up / ▼ Move down**, ou en
+**glissant** un profil dans la liste. C'est celui du menu de l'icône et des
+touches **1** à **9** de la fenêtre du raccourci.
+
+**All on** — *Tous en marche* en français — est un profil **intégré**,
+toujours en tête : dans les réglages, le menu de l'icône et la fenêtre du
+raccourci, où il répond à la touche **1**. Il allume **toutes les prises**,
+y compris celles ajoutées plus tard, puisqu'il est recalculé à chaque usage
+et jamais enregistré. Il ne se modifie, ne se renomme ni ne se supprime, et
+son nom est réservé, dans les deux langues. Une configuration antérieure qui
+portait un profil « All on » le voit remplacé s'il allumait déjà tous les
+écrans, et renommé « All on (custom) » sinon.
+
 Un profil dit **quels écrans sont allumés**, pas ce qu'on y fait. Sur
 *All on* se succèdent CAO, trading, développement, comptabilité, chacun avec
 ses fenêtres ; l'application ne mémorise donc aucune disposition de fenêtres
@@ -148,9 +161,95 @@ par profil — ce serait le rôle d'un profil d'activité, qu'elle ne gère pas.
 Elle se contente de ramener les fenêtres restées sur un écran coupé (voir
 *Les fenêtres perdues sont ramenées*).
 
-La position des écrans est celle que **Windows** définit, relue à chaque
-fois : menu de l'icône → **Screens**, qui la donne en clair — *UPerfect 27 —
-left*, *UPerfect 24 — top, shifted right, above LG Ultra and Acer QHD*.
+Sous les cases, le cadre **Screens** dessine les écrans **disposés comme sur
+le bureau Windows**, chacun sous le nom de sa prise. Ceux que le profil
+allume sont pleins et cernés de vert ; ceux qu'il coupe ne sont plus qu'un
+contour en pointillé. **Un clic sur un écran** allume ou coupe sa prise dans
+le profil, exactement comme sa case.
+
+Chaque écran est dessiné à sa **taille physique** : la **diagonale** que
+son **EDID** annonce — le bloc d'identification normalisé VESA que l'écran
+transmet par le câble —, dans les proportions de sa définition. Un 27″ 4K et
+un 27″ QHD ont la même taille sur le plan, comme sur le bureau. Sous le nom :
+diagonale, définition et échelle réglée dans Windows.
+
+* L'EDID est lu dans le registre
+  (`HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\…\Device Parameters\EDID`),
+  sans droits d'administrateur, et il y reste quand l'écran est éteint.
+* Il porte la taille deux fois : en millimètres dans le premier descripteur
+  de timing, en centimètres dans l'en-tête — ou `0×0`, « non définie ». On
+  prend le plus précis des deux qui soit renseigné.
+* Seule la **diagonale** en est retenue : certains écrans remplissent largeur
+  et hauteur d'un gabarit qui n'a même pas leur format (609×355 mm pour un
+  16:9), la diagonale restant, elle, plausible.
+* **L'EDID peut mentir.** Les écrans portables à contrôleur générique
+  partagent souvent le même : deux UPerfect de tailles différentes annoncent
+  ici tous deux 27,8″. Le plan dessine ce qui est annoncé.
+* Un écran sans EDID exploitable garde sa **taille effective** — sa
+  définition divisée par l'échelle Windows —, convertie à 96 points par
+  pouce, la densité que Windows suppose à 100 %.
+
+Les coordonnées de Windows étant en pixels, elles ne se recollent plus une
+fois chaque écran ramené à sa taille réelle : le plan est reconstruit de
+proche en proche depuis l'écran principal, en suivant les bords communs.
+
+La position des écrans est celle que **Windows** définit. Mais Windows oublie
+un écran dès qu'on coupe sa prise, et peut alors décaler les autres — l'écran
+principal coupé, un autre prend sa place en 0,0. L'application **retient donc
+la disposition** dans `config.json` (section `screens`), et ne la met à jour
+que lorsque **tous les écrans associés à une prise sont allumés** : c'est la
+seule qui les situe tous les uns par rapport aux autres.
+
+Trois occasions l'établissent :
+
+| Quand | Comment |
+| --- | --- |
+| **À la demande** | Bouton **Capture layout...** sous le plan. Le relevé passe en **All on** : le plan s'efface, les prises éteintes s'allument, et chaque écran **apparaît sur le plan à mesure que Windows le détecte**. Une fois la disposition relevée, une boîte dit ce qui a été appris et propose **Keep 'All on'** — qui devient le profil en cours, sélectionné dans la liste pour voir le plan allumé ; fermer la boîte revient au même — ou **Back to '<profil>'**, qui réapplique le profil d'avant, fenêtres comprises. Depuis le menu de l'icône → *Screens* → *Capture screen layout*, sans fenêtre où poser la question, tout revient aussitôt en place. Un écran que Windows ne voit pas revenir fait échouer le relevé, qui le nomme : une disposition incomplète n'est jamais retenue. |
+| **Identify displays** | L'assistant allume tout pour ses tests : il relève la disposition au passage, avant de remettre les prises dans leur état. |
+| **En continu** | Au lancement, à chaque rafraîchissement et à chaque changement d'affichage signalé par Windows, dès que tout se trouve allumé — un profil comme *All on* suffit. Deux lectures successives doivent concorder. |
+
+**Aucun relevé sans concordance.** Avant chacun, ce que disent les prises et
+ce que voit Windows doivent correspondre exactement ; sinon le relevé est
+refusé, et la raison s'affiche sous le plan :
+
+| Refus si… | Pourquoi |
+| --- | --- |
+| une prise de type *Screen* n'est liée à aucun écran | on ne saurait pas vérifier son écran |
+| l'appareil d'une prise d'écran ne répond pas | son état est inconnu |
+| **une prise d'écran est coupée** | Windows a retiré son écran et peut avoir décalé les autres — même s'il le voit encore, cas d'un écran alimenté par l'USB-C du PC |
+| **une prise d'écran allumée sans écran vu par Windows** | écran en veille, câble, écran remplacé |
+| **le compte ne tombe pas juste** : prises d'écran allumées ≠ écrans physiques détectés | résume tout le reste d'un coup d'œil |
+| un écran physique inconnu est branché | voir ci-dessous |
+| deux prises liées au même écran, ou deux écrans en miroir | la disposition serait ambiguë |
+| Windows n'a pas fini de disposer les écrans | deux lectures à 2 s d'écart diffèrent |
+
+Les écrans **virtuels et sans fil** (Parsec, Sunshine, spacedesk, Miracast)
+sont écartés avant de compter : la technologie de sortie que rapporte
+`QueryDisplayConfig` les désigne. Un dock USB (DisplayLink) compte, lui,
+comme un écran réel.
+
+**Un écran branché au mur ne se reconnaît à rien** — ni la technologie de
+sortie ni l'EDID ne disent d'où vient son courant. Seule l'épreuve de
+**Identify displays** le prouve : quand chaque prise d'écran a trouvé le
+sien, ceux qui sont restés allumés pendant toutes les coupures ne dépendent
+d'aucune. Ils sont retenus comme tels (`unswitched_screens` dans
+`config.json`), dessinés en gris *sur aucune prise*, et comptés à part. Tout
+autre écran physique non lié est **inconnu** et bloque le relevé jusqu'à un
+nouveau passage de l'assistant.
+
+Après avoir déplacé un écran ou changé son échelle dans les paramètres
+d'affichage de Windows, **Capture layout...** met le plan à jour sans
+attendre.
+
+Pourquoi tout allumer : Windows garde **une disposition par combinaison
+d'écrans branchés**. Avec seulement le LG et un UPerfect, il peut placer ce
+dernier à gauche, alors qu'il est en haut quand les quatre sont là — le plan
+en direct le montre pendant le relevé. Seule la combinaison complète dit où
+est chaque écran.
+
+Le menu de l'icône → **Screens** donne la disposition actuelle en clair —
+*UPerfect 27 — left*, *UPerfect 24 — top, shifted right, above LG Ultra and
+Acer QHD*.
 
 ## La prise de l'unité centrale n'est jamais coupée
 
@@ -558,6 +657,7 @@ shelly_screens/
   controller.py              enchaînement appareils / prises / écrans / fenêtres
   sensing.py                 installation et suivi des scripts embarqués
   power_history.py           historique de consommation (SQLite)
+  screen_layout.py           concordance prises / écrans avant un relevé
   app.py                     icône, menu, événements système
   scripts/                   pc_sensing.js, pc_probe.js (exécutés sur l'appareil)
   win/
@@ -570,6 +670,7 @@ shelly_screens/
   ui/settings.py             fenêtre de réglages (tkinter)
   ui/history_window.py       fenêtre d'historique de consommation
   ui/profile_picker.py       fenêtre de choix des profils (raccourci global)
+  ui/screen_map.py           plan des écrans de l'onglet Profiles
 ```
 
 ## Points techniques
