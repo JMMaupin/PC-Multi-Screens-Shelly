@@ -695,7 +695,7 @@ class SettingsWindow:
         right.pack(side="left", fill="both", expand=True)
 
         # Le logo prend la place laissee libre a droite. Sans lui, les cases
-        # et la zone de disposition s'etiraient sur toute la largeur de la
+        # s'etiraient sur toute la largeur de la
         # fenetre : une case a cocher large d'un ecran est plus penible a
         # viser qu'une case serree contre son libelle, et l'oeil parcourt
         # une distance inutile entre l'intitule et la case suivante.
@@ -718,22 +718,6 @@ class SettingsWindow:
         self.outlets_box = ttk.LabelFrame(content, text=t("Powered outlets"), padding=10)
         self.outlets_box.pack(fill="x", pady=10)
         self.profile_outlet_vars: dict[str, tk.BooleanVar] = {}
-
-        layout_box = ttk.LabelFrame(content, text=t("Window layout"), padding=10)
-        layout_box.pack(fill="x")
-        self.layout_info = tk.StringVar(self.root, value="")
-        ttk.Label(layout_box, textvariable=self.layout_info, wraplength=440).pack(
-            anchor="w", pady=(0, 8)
-        )
-        layout_buttons = ttk.Frame(layout_box)
-        layout_buttons.pack(fill="x")
-        ttk.Button(
-            layout_buttons, text=t("Save current layout"), command=self._save_layout
-        ).pack(side="left")
-        ttk.Button(layout_buttons, text=t("Restore now"), command=self._restore_layout).pack(
-            side="left", padx=6
-        )
-        ttk.Button(layout_buttons, text=t("Clear"), command=self._clear_layout).pack(side="left")
 
         apply_row = ttk.Frame(content)
         apply_row.pack(fill="x", pady=14)
@@ -792,12 +776,6 @@ class SettingsWindow:
             outlet = self.config.outlet(ref)
             always_on = outlet is not None and outlet.never_switch_off
             variable.set(always_on or ref in profile.outlets_on)
-        count = len(profile.layout)
-        self.layout_info.set(
-            t("{count} window(s) memorised.", count=count)
-            if count
-            else t("No layout memorised yet. Arrange your windows, then save.")
-        )
 
     def _apply_profile_edits(self) -> None:
         profile = self._selected_profile()
@@ -864,32 +842,6 @@ class SettingsWindow:
                 self.profile_list.selection_set(index)
                 self._on_profile_selected()
                 return
-
-    def _save_layout(self) -> None:
-        profile = self._selected_profile()
-        if profile is None:
-            return
-        count = self.app.controller.capture_layout(profile.name)
-        self.set_status(f"{count} window(s) memorised for '{profile.name}'")
-        self._on_profile_selected()
-
-    def _restore_layout(self) -> None:
-        profile = self._selected_profile()
-        if profile is None or not profile.layout:
-            self.set_status("Nothing to restore")
-            return
-        from ..win import layout as layout_module
-
-        result = layout_module.restore(layout_module.deserialize(profile.layout))
-        self.set_status(result.summary())
-
-    def _clear_layout(self) -> None:
-        profile = self._selected_profile()
-        if profile is None:
-            return
-        self.app.controller.clear_layout(profile.name)
-        self._on_profile_selected()
-        self.set_status(f"Layout cleared for '{profile.name}'")
 
     def _apply_profile_now(self) -> None:
         profile = self._selected_profile()
@@ -1323,18 +1275,11 @@ class SettingsWindow:
             style="Hint.TLabel",
         ).pack(anchor="w", pady=(8, 0))
 
-        layout_box = ttk.LabelFrame(frame, text=t("Window layout"), padding=10)
-        layout_box.pack(fill="x", pady=12)
-        self.var_manage_layout = tk.BooleanVar(self.root, value=settings.manage_window_layout)
-        ttk.Checkbutton(
-            layout_box,
-            text=t("Memorise and restore window positions with profiles"),
-            variable=self.var_manage_layout,
-            command=self._apply_behaviour,
-        ).pack(anchor="w")
+        windows_box = ttk.LabelFrame(frame, text=t("Windows"), padding=10)
+        windows_box.pack(fill="x", pady=12)
         self.var_rescue = tk.BooleanVar(self.root, value=settings.rescue_offscreen_windows)
         ttk.Checkbutton(
-            layout_box,
+            windows_box,
             text=t("After a profile change, bring windows left outside every "
                    "lit screen back onto the nearest one"),
             variable=self.var_rescue,
@@ -1561,7 +1506,6 @@ class SettingsWindow:
         settings.power_off_on_suspend = self.var_off_on_suspend.get()
         settings.restore_on_resume = self.var_restore_on_resume.get()
         settings.apply_profile_on_start = self.var_apply_on_start.get()
-        settings.manage_window_layout = self.var_manage_layout.get()
         settings.rescue_offscreen_windows = self.var_rescue.get()
         try:
             settings.switch_delay_ms = max(0, int(self.var_switch_delay.get()))

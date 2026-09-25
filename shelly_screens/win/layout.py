@@ -1,17 +1,15 @@
-"""Capture et restauration de la disposition des fenetres.
+"""Les fenetres restees sur un ecran qu'on vient de couper.
 
 Quand un ecran perd son alimentation, Windows le retire du bureau et rapatrie
-en vrac les fenetres qui s'y trouvaient. Le retour de l'ecran ne les remet pas
-en place. On memorise donc la disposition avant de couper, et on la rejoue
-quand les ecrans concernes sont revenus.
+en principe ses fenetres -- mais pas toujours, et pas toutes : un moniteur
+alimente par l'USB-C du PC reste enumere une fois sa prise coupee. On ramene
+donc sur l'ecran allume le plus proche toute fenetre qu'on ne peut plus
+attraper.
 
-Deux situations a distinguer pour retrouver une fenetre :
-
-* dans la meme session, le handle (HWND) est encore valable -- on s'en sert
-  directement, c'est exact et immediat ;
-* apres un redemarrage, les handles ne valent plus rien. On rapproche alors
-  les fenetres de leur trace enregistree par (executable, classe), puis par
-  titre au sein de ce groupe.
+C'est tout. L'application ne memorise pas de disposition de fenetres : un
+profil dit quels ecrans sont allumes, pas ce qu'on y fait, et sur un meme
+profil se succedent des activites qui ont chacune la leur. La position des
+ecrans, elle, est celle que Windows definit, lue a chaque fois.
 """
 
 from __future__ import annotations
@@ -19,8 +17,7 @@ from __future__ import annotations
 import ctypes
 import os
 from ctypes import wintypes
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from .api import POINT, RECT, LONG_PTR, kernel32, user32
 
@@ -35,7 +32,6 @@ WS_EX_TOOLWINDOW = 0x00000080
 DWMWA_CLOAKED = 14
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
-SW_SHOWNORMAL = 1
 SW_SHOWMINIMIZED = 2
 SW_SHOWMAXIMIZED = 3
 SW_SHOWNOACTIVATE = 4
@@ -82,8 +78,6 @@ user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 user32.GetAncestor.restype = wintypes.HWND
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowTextW.restype = ctypes.c_int
-user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-user32.GetClassNameW.restype = ctypes.c_int
 user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowLongPtrW.restype = LONG_PTR
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
@@ -116,54 +110,21 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 
 @dataclass
 class WindowEntry:
-    """Une fenetre et sa place sur le bureau, telle qu'on la memorise."""
+    """Une fenetre et sa place sur le bureau, dans l'instant."""
 
-    hwnd: int  # valable seulement dans la session courante
+    hwnd: int
     title: str
-    class_name: str
     executable: str  # chemin complet, en minuscules
     show_cmd: int  # normal / minimisee / maximisee
     normal_rect: tuple[int, int, int, int]
-    min_position: tuple[int, int]
-    max_position: tuple[int, int]
 
     @property
     def process_name(self) -> str:
         return os.path.basename(self.executable)
 
-    @property
-    def identity(self) -> tuple[str, str]:
-        """Ce qui identifie une fenetre entre deux sessions."""
-        return (self.executable, self.class_name)
-
     def describe(self) -> str:
         title = self.title if len(self.title) <= 48 else self.title[:45] + "..."
         return f"{self.process_name} | {title}"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "hwnd": self.hwnd,
-            "title": self.title,
-            "class_name": self.class_name,
-            "executable": self.executable,
-            "show_cmd": self.show_cmd,
-            "normal_rect": list(self.normal_rect),
-            "min_position": list(self.min_position),
-            "max_position": list(self.max_position),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WindowEntry":
-        return cls(
-            hwnd=int(data.get("hwnd", 0)),
-            title=str(data.get("title", "")),
-            class_name=str(data.get("class_name", "")),
-            executable=str(data.get("executable", "")),
-            show_cmd=int(data.get("show_cmd", SW_SHOWNORMAL)),
-            normal_rect=tuple(data.get("normal_rect", (0, 0, 0, 0))),
-            min_position=tuple(data.get("min_position", (-1, -1))),
-            max_position=tuple(data.get("max_position", (-1, -1))),
-        )
 
 
 def _text_of(hwnd: int, getter, size: int = 512) -> str:
@@ -239,131 +200,15 @@ def capture() -> list[WindowEntry]:
             WindowEntry(
                 hwnd=int(hwnd),
                 title=_text_of(hwnd, user32.GetWindowTextW),
-                class_name=_text_of(hwnd, user32.GetClassNameW, 256),
                 executable=_executable_of(hwnd),
                 show_cmd=int(placement.showCmd),
                 normal_rect=placement.rcNormalPosition.as_tuple(),
-                min_position=(placement.ptMinPosition.x, placement.ptMinPosition.y),
-                max_position=(placement.ptMaxPosition.x, placement.ptMaxPosition.y),
             )
         )
         return 1
 
     user32.EnumWindows(WNDENUMPROC(callback), 0)
     return entries
-
-
-def serialize(entries: list[WindowEntry]) -> list[dict[str, Any]]:
-    return [entry.to_dict() for entry in entries]
-
-
-def deserialize(data: list[dict[str, Any]]) -> list[WindowEntry]:
-    return [WindowEntry.from_dict(item) for item in data or []]
-
-
-def apply_entry(entry: WindowEntry, hwnd: int) -> bool:
-    """Repose une fenetre a l'endroit memorise."""
-    placement = WINDOWPLACEMENT()
-    placement.length = ctypes.sizeof(WINDOWPLACEMENT)
-    if not user32.GetWindowPlacement(hwnd, ctypes.byref(placement)):
-        return False
-    # WPF_ASYNCWINDOWPLACEMENT evite de bloquer si l'application est occupee.
-    placement.flags = WPF_ASYNCWINDOWPLACEMENT
-    placement.showCmd = entry.show_cmd
-    placement.ptMinPosition = POINT(entry.min_position[0], entry.min_position[1])
-    placement.ptMaxPosition = POINT(entry.max_position[0], entry.max_position[1])
-    placement.rcNormalPosition = RECT(*entry.normal_rect)
-    return bool(user32.SetWindowPlacement(hwnd, ctypes.byref(placement)))
-
-
-@dataclass
-class RestoreReport:
-    """Ce que la restauration a reellement pu faire."""
-
-    restored: int = 0
-    skipped: int = 0
-    unmatched: list[str] = field(default_factory=list)
-
-    def summary(self) -> str:
-        parts = [f"{self.restored} window(s) restored"]
-        if self.skipped:
-            parts.append(f"{self.skipped} unchanged")
-        if self.unmatched:
-            parts.append(f"{len(self.unmatched)} not found")
-        return ", ".join(parts)
-
-
-def restore(entries: list[WindowEntry]) -> RestoreReport:
-    """Rejoue une disposition memorisee sur les fenetres actuelles."""
-    report = RestoreReport()
-    if not entries:
-        return report
-    current = capture()
-    for entry, hwnd in match_entries(entries, current):
-        if hwnd is None:
-            report.unmatched.append(entry.describe())
-            continue
-        if apply_entry(entry, hwnd):
-            report.restored += 1
-        else:
-            report.skipped += 1
-    return report
-
-
-def match_entries(
-    saved: list[WindowEntry], current: list[WindowEntry]
-) -> list[tuple[WindowEntry, int | None]]:
-    """Associe chaque fenetre memorisee a une fenetre actuelle, si possible.
-
-    On procede du plus sur au plus approximatif : le handle exact d'abord,
-    puis le titre au sein d'un meme (executable, classe), puis l'ordre
-    d'apparition pour ce qu'il reste.
-    """
-    available = {entry.hwnd: entry for entry in current}
-    results: list[tuple[WindowEntry, int | None]] = []
-    pending: list[WindowEntry] = []
-
-    # 1. Meme session : le handle est encore valable et designe la meme chose.
-    for entry in saved:
-        candidate = available.get(entry.hwnd)
-        if candidate is not None and candidate.identity == entry.identity:
-            results.append((entry, entry.hwnd))
-            del available[entry.hwnd]
-        else:
-            pending.append(entry)
-
-    if not pending:
-        return results
-
-    # 2. Regroupement par (executable, classe) parmi ce qui reste libre.
-    groups: dict[tuple[str, str], list[WindowEntry]] = {}
-    for entry in available.values():
-        groups.setdefault(entry.identity, []).append(entry)
-
-    leftovers: list[WindowEntry] = []
-    for entry in pending:
-        group = groups.get(entry.identity)
-        if not group:
-            leftovers.append(entry)
-            continue
-        # Titre identique : c'est tres probablement la meme fenetre.
-        exact = next((c for c in group if c.title == entry.title), None)
-        if exact is not None:
-            group.remove(exact)
-            results.append((entry, exact.hwnd))
-        else:
-            leftovers.append(entry)
-
-    # 3. Dernier recours : apparier dans l'ordre ce qui partage l'identite.
-    for entry in leftovers:
-        group = groups.get(entry.identity)
-        if group:
-            candidate = group.pop(0)
-            results.append((entry, candidate.hwnd))
-        else:
-            results.append((entry, None))
-
-    return results
 
 
 # ------------------------------------------------------------ fenetres perdues

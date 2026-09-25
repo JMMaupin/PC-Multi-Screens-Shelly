@@ -54,9 +54,6 @@ CATALOG: dict[str, str] = {
     "New": "Nouveau",
     "Rename": "Renommer",
     "Delete": "Supprimer",
-    "Save current layout": "Memoriser la disposition",
-    "Restore now": "Restaurer maintenant",
-    "Clear": "Effacer",
     "Apply this profile now": "Appliquer ce profil",
     "Start measuring": "Lancer la mesure",
     "Stop measuring": "Arreter la mesure",
@@ -77,7 +74,6 @@ CATALOG: dict[str, str] = {
     # --- cadres
     "Selected outlet": "Prise selectionnee",
     "Powered outlets": "Prises alimentees",
-    "Window layout": "Disposition des fenetres",
     "Sleep and shutdown": "Veille et arret",
     "Appearance": "Apparence",
     "Timing": "Temporisation",
@@ -171,8 +167,6 @@ CATALOG: dict[str, str] = {
     'Sun': 'dim.',
     'No outlet is marked as powering the PC.': "Aucune prise n'est marquee comme alimentant le PC.",
     '(always on)': '(toujours alimentee)',
-    '{count} window(s) memorised.': '{count} fenetre(s) memorisee(s).',
-    'No layout memorised yet. Arrange your windows, then save.': 'Aucune disposition memorisee. Placez vos fenetres, puis enregistrez.',
     'a password is stored': 'un mot de passe est memorise',
     'no password stored': 'aucun mot de passe memorise',
     'The device refuses the current credentials ({failure}).\nEnter the right password and use « Remember only », or reset the device with its buttons.': "L'appareil refuse les identifiants actuels ({failure}).\nSaisissez le bon mot de passe et utilisez « Memoriser seulement », ou reinitialisez l'appareil par ses boutons.",
@@ -260,8 +254,6 @@ CATALOG: dict[str, str] = {
         "Reappliquer le dernier profil au reveil",
     "Re-apply the last profile when this application starts":
         "Reappliquer le dernier profil au lancement",
-    "Memorise and restore window positions with profiles":
-        "Memoriser et restaurer la position des fenetres avec les profils",
     # --- reglages
     "Delay between outlet commands (ms)":
         "Delai entre deux commandes de prise (ms)",
@@ -296,7 +288,20 @@ CATALOG: dict[str, str] = {
     "Refresh": "Rafraichir",
     "Open log file": "Ouvrir le journal",
     "Quit": "Quitter",
-    "Layout": "Disposition",
+    "Screens": "Ecrans",
+    "Windows": "Fenetres",
+    "No screen detected": "Aucun ecran detecte",
+    "centre, primary": "centre, principal",
+    "centre": "centre",
+    "left": "gauche",
+    "right": "droite",
+    "top": "en haut",
+    "bottom": "en bas",
+    "shifted right": "decale a droite",
+    "shifted left": "decale a gauche",
+    "above {names}": "au-dessus de {names}",
+    "below {names}": "au-dessous de {names}",
+    "{first} and {last}": "{first} et {last}",
     "Add a device...": "Ajouter un appareil...",
     "Fix password...": "Corriger le mot de passe...",
     "No device configured": "Aucun appareil configure",
@@ -305,8 +310,6 @@ CATALOG: dict[str, str] = {
     "No Shelly device is reachable.": "Aucun appareil Shelly n'est joignable.",
     "No outlet yet - add a device first.":
         "Aucune prise pour l'instant - ajouter d'abord un appareil.",
-    "The key must contain letters or digits.":
-        "La cle doit contenir des lettres ou des chiffres.",
     "First mark the outlet that powers the PC, in the Outlets tab.":
         "Designer d'abord la prise qui alimente le PC, dans l'onglet Prises.",
     "Select a device first": "Selectionner d'abord un appareil",

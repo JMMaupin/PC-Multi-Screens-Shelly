@@ -2,9 +2,9 @@
 
 Pilotage de l'alimentation des écrans et périphériques d'un PC par une ou
 plusieurs **Shelly Power Strip 4 Gen4**, depuis une icône dans la zone de
-notification de Windows. Des profils d'usage décident quelles prises sont
-alimentées, et la disposition des fenêtres est mémorisée puis remise en place
-avec eux.
+notification de Windows. Des profils d'écrans décident quelles prises sont
+alimentées ; les fenêtres restées sur un écran qu'on vient de couper sont
+ramenées sur un écran allumé.
 
 ## En un coup d'œil
 
@@ -141,8 +141,16 @@ Onglet **Profiles** : cocher les prises alimentées par chaque profil. Les
 prises protégées y apparaissent grisées et cochées, puisqu'elles ne se
 coupent jamais.
 
-Pour la disposition des fenêtres : ranger les fenêtres comme voulu, puis
-**Save current layout**. Elle sera rejouée à chaque retour sur ce profil.
+Un profil dit **quels écrans sont allumés**, pas ce qu'on y fait. Sur
+*All on* se succèdent CAO, trading, développement, comptabilité, chacun avec
+ses fenêtres ; l'application ne mémorise donc aucune disposition de fenêtres
+par profil — ce serait le rôle d'un profil d'activité, qu'elle ne gère pas.
+Elle se contente de ramener les fenêtres restées sur un écran coupé (voir
+*Les fenêtres perdues sont ramenées*).
+
+La position des écrans est celle que **Windows** définit, relue à chaque
+fois : menu de l'icône → **Screens**, qui la donne en clair — *UPerfect 27 —
+left*, *UPerfect 24 — top, shifted right, above LG Ultra and Acer QHD*.
 
 ## La prise de l'unité centrale n'est jamais coupée
 
@@ -498,9 +506,9 @@ bascule via `DwmSetWindowAttribute`.
   avant de suspendre le processus.
 * **Réveil** — attend trois secondes que le réseau revienne, puis réapplique
   le dernier profil.
-* **Changement de profil** — mémorise la disposition des fenêtres du profil
-  quitté, **allume** les écrans manquants, attend que Windows les voie,
-  **puis seulement** coupe le reste, et rejoue la disposition mémorisée.
+* **Changement de profil** — **allume** les écrans manquants, attend que
+  Windows les voie, **puis seulement** coupe le reste, et ramène les
+  fenêtres restées sur un écran coupé.
 
 Allumer avant de couper évite de se retrouver, ne serait-ce qu'un instant,
 sans aucun écran, et laisse aux dalles leurs quelques secondes
@@ -510,7 +518,7 @@ d'initialisation.
 
 À la fin d'un changement de profil, toute fenêtre restée hors des écrans
 allumés est ramenée sur **l'écran allumé le plus proche** — option
-*Behaviour* → *Window layout*, active par défaut.
+*Behaviour* → *Windows*, active par défaut.
 
 * **Écran allumé** veut dire listé par Windows **et** dont la prise n'est pas
   coupée par le profil. Un moniteur alimenté par l'USB-C du PC reste listé
@@ -555,7 +563,7 @@ shelly_screens/
   win/
     api.py                   ctypes communs, conscience du DPI
     monitors.py              énumération des écrans, clé stable
-    layout.py                capture et restauration des fenêtres
+    layout.py                fenêtres restées sur un écran coupé
     icon.py                  génération de l'icône
     shell.py                 fenêtre cachée, zone de notification, messages
     hotkey.py                raccourcis globaux : lecture, test de disponibilité
@@ -579,10 +587,6 @@ qui change dès qu'un écran s'allume ou s'éteint ; le modèle ne distingue pas
 deux écrans identiques. On utilise le chemin d'interface renvoyé par
 `EnumDisplayDevices` avec `EDD_GET_DEVICE_INTERFACE_NAME`, réduit à
 `<matériel>#UID<sortie>`.
-
-**Appariement des fenêtres.** Dans une même session, le handle suffit. Après
-un redémarrage il ne vaut plus rien : on rapproche alors les fenêtres par
-`(exécutable, classe)`, puis par titre, puis par ordre d'apparition.
 
 **Authentification.** Digest SHA-256, utilisateur `admin` imposé. Le calcul
 est celui du RFC 7616, avec `ha2` dérivé de la méthode et de l'URI. La
@@ -763,7 +767,7 @@ il parle fait perdre plus de temps qu'il n'en fait gagner.
 | Icône rouge | Aucun appareil joignable. `Devices` → `Reconnect`, ou vérifier l'alimentation des multiprises. |
 | Un appareil « offline » | Les autres continuent de fonctionner. Ses prises apparaissent avec un état `-` et ne sont pas manœuvrées. |
 | Une prise reste « not identified » | Normal pour un concentrateur USB ou l'unité centrale. Pour un écran : relancer l'assistant, l'écran mettait peut-être plus de douze secondes à se déconnecter. |
-| Les fenêtres ne reviennent pas en place | La disposition n'a pas été enregistrée pour ce profil, ou les applications concernées ont été fermées depuis. |
+| Une fenêtre reste sur un écran éteint | Vérifier *Behaviour* → *Windows*, et que la prise de cet écran lui est associée (**Identify displays**) : sans cela, un écran alimenté par l'USB-C du PC reste compté comme allumé. |
 | Changement de profil très lent | Un écran attendu ne revient pas : l'attente va jusqu'au délai maximal (20 s par défaut, réglable dans `Behaviour`). |
 | Rien au démarrage du PC | Vérifier qu'une prise porte le rôle **Boot screen**, et que le concentrateur USB du clavier est **Critical**. |
 | Une veille ne coupe plus rien | La voie de mesure du firmware peut se figer : l'application le détecte et le signale dans le menu de l'icône, avec un bouton pour redémarrer la multiprise. Un redémarrage est sans danger — relais bistables, et `initial_state` ramène la prise du PC sous tension. |

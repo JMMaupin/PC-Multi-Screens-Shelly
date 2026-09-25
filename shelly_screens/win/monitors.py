@@ -19,6 +19,7 @@ import re
 from ctypes import wintypes
 from dataclasses import dataclass
 
+from ..i18n import t
 from .api import RECT, user32
 
 EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001
@@ -180,3 +181,88 @@ def monitor_keys() -> set[str]:
     return {monitor.key for monitor in list_monitors()}
 
 
+# Deux bords a moins de ce nombre de pixels sont consideres comme jointifs :
+# Windows les aligne au pixel, mais une mise a l'echelle peut les decaler.
+EDGE_TOLERANCE_PX = 16
+# Un ecran du haut ou du bas dont le centre s'ecarte de celui de l'ecran
+# principal de plus de cette fraction de sa largeur est dit decale.
+OFFSET_RATIO = 0.1
+
+
+def _names(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return t("{first} and {last}", first=", ".join(items[:-1]), last=items[-1])
+
+
+def arrangement(
+    screens: list[MonitorInfo], names: dict[str, str]
+) -> list[tuple[MonitorInfo, str, str]]:
+    """La disposition des ecrans telle que Windows la definit, en clair.
+
+    Rend, pour chaque ecran, son nom et sa place : a gauche, au centre ou a
+    droite de l'ecran principal, en haut ou en bas, decale d'un cote, et
+    au-dessus -- ou au-dessous -- de quels autres ecrans. `names` donne le
+    nom de la prise qui alimente chaque ecran, par cle ; a defaut, le nom
+    du pilote et la definition.
+
+    L'application ne stocke rien de tout cela : c'est Windows qui fait
+    autorite, et on le relit a chaque fois.
+    """
+    primary = next((m for m in screens if m.is_primary), None)
+    if primary is None:
+        return []
+    tol = EDGE_TOLERANCE_PX
+    left, top, right, bottom = primary.rect
+
+    def name_of(m: MonitorInfo) -> str:
+        return names.get(m.key) or f"{m.friendly_name} {m.width}x{m.height}"
+
+    def overlap_x(a: MonitorInfo, b: MonitorInfo) -> bool:
+        return min(a.rect[2], b.rect[2]) - max(a.rect[0], b.rect[0]) > tol
+
+    result = []
+    for m in screens:
+        if m is primary:
+            result.append((m, name_of(m), t("centre, primary")))
+            continue
+        parts: list[str] = []
+        if m.rect[3] <= top + tol:
+            vertical = "top"
+        elif m.rect[1] >= bottom - tol:
+            vertical = "bottom"
+        else:
+            vertical = ""
+        if m.rect[2] <= left + tol:
+            parts.append(t("left"))
+        elif m.rect[0] >= right - tol:
+            parts.append(t("right"))
+        elif vertical:
+            # Au-dessus ou au-dessous de l'ecran principal : ce qui compte
+            # alors, c'est le cote vers lequel il deborde.
+            shift = (m.rect[0] + m.rect[2]) / 2 - (left + right) / 2
+            parts.append(t("top") if vertical == "top" else t("bottom"))
+            if shift > OFFSET_RATIO * primary.width:
+                parts.append(t("shifted right"))
+            elif shift < -OFFSET_RATIO * primary.width:
+                parts.append(t("shifted left"))
+            vertical = ""
+        else:
+            parts.append(t("centre"))
+        if vertical:
+            parts.append(t("top") if vertical == "top" else t("bottom"))
+        # Les voisins du dessous ou du dessus, bord contre bord.
+        beneath = [
+            name_of(o) for o in screens
+            if o is not m and abs(m.rect[3] - o.rect[1]) <= tol and overlap_x(m, o)
+        ]
+        above = [
+            name_of(o) for o in screens
+            if o is not m and abs(m.rect[1] - o.rect[3]) <= tol and overlap_x(m, o)
+        ]
+        if beneath:
+            parts.append(t("above {names}", names=_names(beneath)))
+        if above:
+            parts.append(t("below {names}", names=_names(above)))
+        result.append((m, name_of(m), ", ".join(parts)))
+    return result

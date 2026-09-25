@@ -235,14 +235,19 @@ def parse_ref(ref: str) -> tuple[str, int]:
 
 @dataclass
 class Profile:
-    """Un usage : quelles prises sont alimentees, et ou vont les fenetres."""
+    """Un profil d'ecrans : quelles prises sont alimentees.
+
+    Rien de plus. Un profil dit quels ecrans sont allumes, pas ce qu'on y
+    fait : sur un meme profil se succedent des activites sans rapport --
+    CAO, trading, developpement --, chacune avec ses fenetres. Memoriser
+    une disposition de fenetres par profil n'avait donc pas de sens ; une
+    ancienne configuration qui en porte une la perd au prochain
+    enregistrement.
+    """
 
     name: str
     # References de prises (`cle:sortie`) alimentees par ce profil.
     outlets_on: list[str] = field(default_factory=list)
-    # Disposition des fenetres memorisee pour ce profil ; structure produite
-    # et relue par win.layout (liste d'entrees serialisees).
-    layout: list[dict[str, Any]] = field(default_factory=list)
     # Rang d'affichage dans le menu.
     order: int = 0
 
@@ -254,7 +259,6 @@ class Profile:
             "name": self.name,
             "outlets_on": sorted(set(self.outlets_on)),
             "order": self.order,
-            "layout": self.layout,
         }
 
     @classmethod
@@ -262,7 +266,6 @@ class Profile:
         return cls(
             name=str(data["name"]),
             outlets_on=[str(x) for x in data.get("outlets_on", [])],
-            layout=list(data.get("layout", [])),
             order=int(data.get("order", 0)),
         )
 
@@ -351,8 +354,6 @@ class Settings:
     power_off_on_suspend: bool = True
     # Reappliquer le dernier profil au reveil.
     restore_on_resume: bool = True
-    # Memoriser / restaurer la position des fenetres avec les profils.
-    manage_window_layout: bool = True
     # Pause entre deux commandes de prise, pour ne pas noyer un appareil.
     switch_delay_ms: int = 250
     # Temps max d'attente de la prise en compte des ecrans par Windows.
@@ -390,9 +391,6 @@ class Settings:
                 data.get("power_off_on_suspend", defaults.power_off_on_suspend)
             ),
             restore_on_resume=bool(data.get("restore_on_resume", defaults.restore_on_resume)),
-            manage_window_layout=bool(
-                data.get("manage_window_layout", defaults.manage_window_layout)
-            ),
             switch_delay_ms=int(data.get("switch_delay_ms", defaults.switch_delay_ms)),
             display_settle_timeout_s=float(
                 data.get("display_settle_timeout_s", defaults.display_settle_timeout_s)

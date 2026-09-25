@@ -239,10 +239,6 @@ class Application:
         label = f"{outlet.label if outlet else ref} {'on' if target else 'off'}"
         self._run_async(label, lambda: self.controller.set_outlet(ref, target))
 
-    def capture_layout(self, profile_name: str) -> None:
-        count = self.controller.capture_layout(profile_name)
-        self.tray.notify(APP_NAME, f"{count} window(s) memorised for '{profile_name}'")
-
     def refresh_now(self) -> None:
         self._run_async("Refresh", lambda: None)
 
@@ -310,7 +306,7 @@ class Application:
         items.extend(self._profile_items())
         items.append(MenuItem.sep())
         items.append(MenuItem(t("Outlets"), submenu=self._outlet_items()))
-        items.append(MenuItem(t("Layout"), submenu=self._layout_items()))
+        items.append(MenuItem(t("Screens"), submenu=self._screen_items()))
         items.append(MenuItem.sep())
         items.append(
             MenuItem(t("Consumption history..."), action=self._open_history)
@@ -436,24 +432,13 @@ class Application:
             )
         return items
 
-    def _layout_items(self) -> list[MenuItem]:
-        current = self.config.settings.last_profile
-        items: list[MenuItem] = []
-        profile = self.config.profile(current) if current else None
-        if profile is not None:
-            items.append(
-                MenuItem(
-                    f"Save window layout to '{profile.name}'",
-                    action=lambda name=profile.name: self.capture_layout(name),
-                )
-            )
-            items.append(MenuItem.info(f"{len(profile.layout)} window(s) memorised"))
-        else:
-            items.append(MenuItem.info("No active profile"))
-        items.append(MenuItem.sep())
-        for monitor in monitors.list_monitors():
-            items.append(MenuItem.info(monitor.describe()))
-        return items
+    def _screen_items(self) -> list[MenuItem]:
+        """Les ecrans allumes et leur place, telle que Windows la definit."""
+        names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
+        placed = monitors.arrangement(monitors.list_monitors(), names)
+        if not placed:
+            return [MenuItem.info(t("No screen detected"))]
+        return [MenuItem.info(f"{name} — {where}") for _m, name, where in placed]
 
     # ------------------------------------------------------- evenements systeme
 

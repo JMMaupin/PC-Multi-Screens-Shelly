@@ -57,8 +57,6 @@ class ApplyReport:
     turned_off: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
     displays_waited_s: float = 0.0
-    windows_restored: int = 0
-    windows_unmatched: int = 0
     windows_rescued: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -74,8 +72,6 @@ class ApplyReport:
             parts.append(f"off: {', '.join(sorted(self.turned_off))}")
         if not self.turned_on and not self.turned_off:
             parts.append("no change")
-        if self.windows_restored:
-            parts.append(f"{self.windows_restored} window(s) restored")
         if self.windows_rescued:
             parts.append(f"{self.windows_rescued} window(s) brought back on screen")
         if self.errors:
@@ -550,8 +546,8 @@ class ScreenController:
         self.device_for(key).set_switch(switch_id, on)
         self._log(f"{ref} -> {'on' if on else 'off'}")
 
-    def apply_profile(self, name: str, restore_windows: bool | None = None) -> ApplyReport:
-        """Applique un profil : alimentation puis disposition des fenetres."""
+    def apply_profile(self, name: str) -> ApplyReport:
+        """Applique un profil : les prises, puis les fenetres a secourir."""
         profile = self.config.profile(name)
         if profile is None:
             raise KeyError(f"Unknown profile: {name}")
@@ -562,8 +558,7 @@ class ScreenController:
         return self._apply_targets(
             profile_name=profile.name,
             targets=targets,
-            layout_profile=profile,
-            restore_windows=restore_windows,
+            profile=profile,
         )
 
     def prepare_for_suspend(self) -> ApplyReport:
@@ -583,12 +578,10 @@ class ScreenController:
         self.config.settings.resume_refs = [
             ref for ref, state in states.items() if state.output and ref not in keep_on
         ]
-        self._remember_current_layout()
         return self._apply_targets(
             profile_name="Suspend",
             targets=targets,
-            layout_profile=None,
-            restore_windows=False,
+            profile=None,
             urgent=True,
         )
 
@@ -632,8 +625,7 @@ class ScreenController:
         return self._apply_targets(
             profile_name="Resume",
             targets=targets,
-            layout_profile=None,
-            restore_windows=False,
+            profile=None,
         )
 
     # ----------------------------------------------------------- sequencage
@@ -642,15 +634,9 @@ class ScreenController:
         self,
         profile_name: str,
         targets: dict[str, bool],
-        layout_profile: Profile | None,
-        restore_windows: bool | None,
+        profile: Profile | None,
         urgent: bool = False,
     ) -> ApplyReport:
-        manage_layout = (
-            self.config.settings.manage_window_layout
-            if restore_windows is None
-            else restore_windows
-        )
         report = ApplyReport(profile=profile_name)
 
         with self._lock:
@@ -659,9 +645,6 @@ class ScreenController:
                 report.errors.append("No Shelly device is reachable")
                 return report
 
-            # 1. Memoriser la disposition avant de toucher a quoi que ce soit.
-            if manage_layout and layout_profile is not None:
-                self._remember_current_layout()
             # Les ecrans d'avant le changement : une fenetre qui s'y trouvait
             # et n'est plus sur aucun ecran est perdue, pas garee a dessein.
             screens_before = [m.rect for m in monitors.list_monitors()]
@@ -681,42 +664,28 @@ class ScreenController:
             if missing:
                 report.errors.append(f"unreachable: {', '.join(sorted(missing))}")
 
-            # 2. Allumer d'abord, puis laisser Windows decouvrir les ecrans.
+            # 1. Allumer d'abord, puis laisser Windows decouvrir les ecrans.
             expected_keys = self._expected_monitor_keys(targets)
             report.turned_on = self._switch_many(to_turn_on, True, report, urgent)
             if report.turned_on and not urgent:
                 report.displays_waited_s = self._wait_for_displays(expected_keys)
 
-            # 3. Couper ce qui reste a couper.
+            # 2. Couper ce qui reste a couper.
             report.turned_off = self._switch_many(to_turn_off, False, report, urgent)
 
-            # 4. Rejouer la disposition du profil demande. La pause laisse a
-            #    Windows le temps de retirer les ecrans coupes avant qu'on ne
-            #    replace les fenetres -- inutile s'il n'y a rien a replacer.
-            will_restore = (
-                manage_layout and layout_profile is not None and bool(layout_profile.layout)
-            )
-            if report.turned_off and will_restore:
-                time.sleep(DISPLAY_GRACE_S)
-            if will_restore:
-                assert layout_profile is not None  # garanti par will_restore
-                result = layout.restore(layout.deserialize(layout_profile.layout))
-                report.windows_restored = result.restored
-                report.windows_unmatched = len(result.unmatched)
-                self._log(f"Layout: {result.summary()}")
-
-            # 5. Ramener ce qui est reste hors de tout ecran allume.
-            if layout_profile is not None and self.config.settings.rescue_offscreen_windows:
-                if report.turned_off and not will_restore:
-                    time.sleep(DISPLAY_GRACE_S)  # meme pause qu'avant l'etape 4
+            # 3. Ramener ce qui est reste hors de tout ecran allume. La pause
+            #    laisse a Windows le temps de retirer les ecrans coupes.
+            if profile is not None and self.config.settings.rescue_offscreen_windows:
+                if report.turned_off:
+                    time.sleep(DISPLAY_GRACE_S)
                 report.windows_rescued = self._rescue_windows(targets, screens_before)
 
-            if layout_profile is not None:
-                self.config.settings.last_profile = layout_profile.name
+            if profile is not None:
+                self.config.settings.last_profile = profile.name
                 # Le script embarque doit savoir quoi rallumer au prochain
                 # demarrage du PC : c'est le seul moment ou l'application
                 # peut le lui dire.
-                sensing.publish_profile(self, self.config, layout_profile.name)
+                sensing.publish_profile(self, self.config, profile.name)
             self._save()
 
         self._log(report.summary())
@@ -833,33 +802,6 @@ class ScreenController:
             if missing:
                 self._log(f"Displays still missing after {waited:.1f}s: {sorted(missing)}")
         return waited
-
-    # -------------------------------------------------------------- layout
-
-    def _remember_current_layout(self) -> None:
-        """Enregistre la disposition actuelle dans le profil en cours."""
-        current_name = self.config.settings.last_profile
-        profile = self.config.profile(current_name) if current_name else None
-        if profile is None:
-            return
-        profile.layout = layout.serialize(layout.capture())
-        self._log(f"Layout of '{profile.name}' memorised ({len(profile.layout)} window(s))")
-
-    def capture_layout(self, profile_name: str) -> int:
-        """Memorise explicitement la disposition actuelle dans un profil."""
-        profile = self.config.profile(profile_name)
-        if profile is None:
-            raise KeyError(f"Unknown profile: {profile_name}")
-        profile.layout = layout.serialize(layout.capture())
-        self._save()
-        self._log(f"Layout of '{profile.name}' captured ({len(profile.layout)} window(s))")
-        return len(profile.layout)
-
-    def clear_layout(self, profile_name: str) -> None:
-        profile = self.config.profile(profile_name)
-        if profile is not None:
-            profile.layout = []
-            self._save()
 
     # ----------------------------------------------------------------- io
 
