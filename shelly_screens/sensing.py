@@ -707,7 +707,7 @@ def read_probe_timeline(
     courante : l'approximation est bonne a la sortie de veille, ou le
     dernier tick est justement celui du reveil.
     """
-    ticks = read_series(controller, config)
+    ticks = read_series(controller, config, strict=True)
     if not ticks:
         return []
     reference = None
@@ -908,11 +908,22 @@ def decode_series(encoded: str) -> list[Tick]:
     return ticks
 
 
-def read_series(controller: "ScreenController", config: AppConfig) -> list[Tick]:
-    """Relit les ticks accumules, du plus ancien au plus recent."""
+def read_series(
+    controller: "ScreenController", config: AppConfig, strict: bool = False
+) -> list[Tick]:
+    """Relit les ticks accumules, du plus ancien au plus recent.
+
+    Par defaut, un appareil injoignable rend une liste vide : la courbe de
+    mesure se contente d'attendre le rafraichissement suivant. Avec
+    `strict`, l'echec remonte -- l'historique doit distinguer « rien a
+    recuperer » de « pas pu lire », sans quoi il abandonne des donnees
+    qu'il aurait eues une minute plus tard.
+    """
     try:
         device = controller.device_for(host_device_key(config))
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         return []
     try:
         result = device.call("KVS.Get", {"key": KVS_SERIES_KEY}) or {}
@@ -921,6 +932,8 @@ def read_series(controller: "ScreenController", config: AppConfig) -> list[Tick]
             return []
         raise
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         return []
     value = result.get("value")
     return decode_series(value) if isinstance(value, str) else []

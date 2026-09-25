@@ -34,6 +34,7 @@ import sqlite3
 import struct
 import threading
 import time
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -362,6 +363,7 @@ class HistoryRecorder:
         self._store: HistoryStore | None = None
         self._last: dict[str, Sample] = {}
         self._recovery_pending = True
+        self._recovery_warned = False
         self._last_trim = 0.0
 
     # ------------------------------------------------------------ reglages
@@ -398,6 +400,7 @@ class HistoryRecorder:
         les points s'ecrivent donc dans l'ordre chronologique.
         """
         self._recovery_pending = True
+        self._recovery_warned = False
 
     def feed(self, states: dict[str, "SwitchState"]) -> None:
         """Retient ce qui merite de l'etre dans les releves qu'on vient de lire."""
@@ -406,9 +409,13 @@ class HistoryRecorder:
         now = time.time()
         with self._lock:
             self._open()
-            if self._recovery_pending:
-                self._recovery_pending = False
-                self._recover(now)
+            # La recuperation attend que l'appareil du PC ait repondu. Au
+            # reveil, l'autre multiprise revient souvent la premiere : tenter
+            # sur sa seule reponse, c'etait interroger un releveur encore
+            # injoignable, et perdre la nuit sans un mot.
+            pc = self.config.host_pc_outlet()
+            if self._recovery_pending and pc is not None and pc.ref in states:
+                self._recovery_pending = not self._recover(now)
             for outlet in self.tracked():
                 state = states.get(outlet.ref)
                 if state is None:
@@ -454,25 +461,59 @@ class HistoryRecorder:
     def _write(self, outlet: "OutletConfig", samples: list[Sample]) -> None:
         key = outlet_key(self.config, outlet)
         self._store.append(key, outlet.label, samples)
-        self._last[key] = samples[-1]
+        # Des points recuperes peuvent etre anterieurs au dernier releve :
+        # le plus recent reste la reference des ecarts.
+        newest = max(samples, key=lambda sample: sample.t)
+        known = self._last.get(key)
+        if known is None or newest.t >= known.t:
+            self._last[key] = newest
 
-    def _recover(self, now: float) -> None:
-        """Comble avec les ticks du releveur le temps ou l'application dormait."""
+    def _recover(self, now: float) -> bool:
+        """Comble avec les ticks du releveur les trous des releves directs.
+
+        Rend faux si le releveur n'a pas pu etre lu : la tentative sera
+        refaite a la lecture suivante.
+
+        Chaque tick est juge sur place, et non par rapport au dernier point
+        enregistre : quelques releves directs pris juste apres le reveil,
+        avant que la recuperation n'aboutisse, suffisaient sinon a rejeter
+        toute la nuit comme « anterieure ». Un tick est garde s'il tombe
+        dans un trou -- aucun releve direct dans les trois minutes qui le
+        precedent -- et s'il n'a pas deja ete recupere.
+        """
         outlet = self.config.host_pc_outlet()
         if outlet is None or not self.config.sensing.enabled:
-            return
+            return True
         from . import sensing
 
         try:
             timeline = sensing.read_probe_timeline(self.controller, self.config)
         except Exception as exc:  # noqa: BLE001 - l'historique ne doit rien casser
-            self._log(f"History: sleep data unavailable ({exc})")
-            return
-        previous = self._previous(outlet)
-        start = previous.t + 1 if previous else now - self.keep_seconds
-        recovered = [
-            Sample(t, w, SOURCE_PROBE) for t, w in timeline if start < t < now - 1
-        ]
+            if not self._recovery_warned:
+                self._recovery_warned = True
+                self._log(f"History: sleep data unavailable yet, will retry ({exc})")
+            return False
+        oldest = now - self.keep_seconds
+        timeline = [(t, w) for t, w in timeline if oldest < t < now - 1]
+        if not timeline:
+            return True
+        key = outlet_key(self.config, outlet)
+        live_gap = MAX_GAP_S[SOURCE_LIVE]
+        stored = self._store.read(key, since=timeline[0][0] - live_gap)
+        live = [s.t for s in stored if s.source == SOURCE_LIVE]
+        probed = [s.t for s in stored if s.source == SOURCE_PROBE]
+
+        def covered(t: float) -> bool:
+            index = bisect_right(live, t)
+            if index and t - live[index - 1] <= live_gap:
+                return True  # l'application mesurait deja
+            # Deja recupere : les instants recalcules peuvent differer d'une
+            # fraction de seconde d'une lecture a l'autre.
+            index = bisect_left(probed, t - 2)
+            return index < len(probed) and probed[index] <= t + 2
+
+        recovered = [Sample(t, w, SOURCE_PROBE) for t, w in timeline if not covered(t)]
         if recovered:
             self._write(outlet, recovered)
             self._log(f"History: {len(recovered)} point(s) recovered from the probe")
+        return True

@@ -639,6 +639,13 @@ embarqué dans la multiprise continue de mesurer. Au lancement et à chaque
 réveil, ses relevés comblent le trou. Il date désormais son dernier relevé,
 ce qui situe une veille à la seconde près plutôt qu'au quart d'heure.
 
+La récupération attend que la multiprise du PC réponde, et se retente tant
+qu'elle échoue : au réveil, le réseau revient souvent en plusieurs temps.
+Chaque relevé du releveur est gardé s'il tombe dans un trou des relevés
+directs — aucun dans les trois minutes qui le précèdent — quelle que soit
+sa date : les premiers relevés pris après le réveil ne masquent donc pas la
+nuit qui les précède.
+
 Les mesures sont dans une base **SQLite**, format normalisé et inclus
 dans Python : `history/power_history.sqlite3`, à côté de la configuration.
 Leur profondeur se règle dans **PC power** → *Keep history for*, de 1 à
