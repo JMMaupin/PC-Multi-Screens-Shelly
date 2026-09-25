@@ -17,6 +17,9 @@ sur pieces laquelle se lit le mieux.
 
 Une periode sans aucune mesure reste un trou dans la courbe. Relier les
 deux bords laisserait croire a une consommation qu'on n'a pas vue.
+
+Chaque prise a sa courbe ; un selecteur passe de l'une a l'autre. La prise
+du PC s'ouvre d'abord, et la fenetre se souvient ensuite du dernier choix.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from . import theme as theme_module
 
 if TYPE_CHECKING:
     from ..app import Application
+    from ..config import OutletConfig
 
 # Marges du trace, en pixels.
 LEFT = 70
@@ -69,6 +73,7 @@ DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _state_lock = threading.Lock()
 _is_open = False
 _current: "HistoryWindow | None" = None
+_last_key: str | None = None  # la prise consultee en dernier
 
 
 def open_history(application: "Application") -> None:
@@ -150,29 +155,24 @@ class HistoryWindow:
         self.root = root
         self.app = application
         self.config = application.config
-        self.outlet = self.config.host_pc_outlet()
 
         icon_module.apply_to_window(root)
         self.palette = theme_module.apply(root, self.config.settings.theme)
-        root.title(
-            t("Consumption history - {outlet}",
-              outlet=self.outlet.label if self.outlet else "-")
-        )
         root.geometry("1100x620")
         root.minsize(760, 460)
 
         self.samples: list[power_history.Sample] = []
         self.times: list[float] = []
-        self.key = (
-            power_history.outlet_key(self.config, self.outlet)
-            if self.outlet is not None
-            else None
-        )
         self.store: power_history.HistoryStore | None = None
+        self.choices = self._list_outlets()
+        self.key: str | None = None
+        self.label = ""
+        self.outlet: "OutletConfig | None" = None
+        self._choose(self._initial_key())
         self.span = 6 * 3600.0
         self.end = time.time()
         self.follow = True
-        self.log_scale = tk.BooleanVar(value=True)
+        self.log_scale = tk.BooleanVar(self.root, value=True)
         self.drag: tuple[int, float] | None = None
         self.cursor_x: int | None = None
         self.view: tuple[float, float, int, int, int, int] | None = None
@@ -189,6 +189,18 @@ class HistoryWindow:
         palette = self.palette
         bar = ttk.Frame(self.root, padding=(12, 10, 12, 4))
         bar.pack(fill="x")
+
+        ttk.Label(bar, text=t("Outlet")).pack(side="left", padx=(0, 6))
+        self.outlet_box = ttk.Combobox(
+            bar, state="readonly", width=24,
+            values=[name for _key, name, _outlet in self.choices],
+        )
+        keys = [key for key, _name, _outlet in self.choices]
+        if self.key in keys:
+            self.outlet_box.current(keys.index(self.key))
+        self.outlet_box.bind("<<ComboboxSelected>>", self._on_outlet_selected)
+        self.outlet_box.pack(side="left")
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
 
         ttk.Label(bar, text=t("Span")).pack(side="left", padx=(0, 6))
         for label, seconds in PRESETS:
@@ -235,13 +247,13 @@ class HistoryWindow:
         # disparait quand la fenetre manque de hauteur.
         bottom = ttk.Frame(self.root, padding=(12, 2, 12, 10))
         bottom.pack(fill="x", side="bottom")
-        self.mode = tk.StringVar(value="")
+        self.mode = tk.StringVar(self.root, value="")
         self.mode_label = ttk.Label(bottom, textvariable=self.mode)
         self.mode_label.pack(side="left")
-        self.readout = tk.StringVar(value="")
+        self.readout = tk.StringVar(self.root, value="")
         ttk.Label(bottom, textvariable=self.readout).pack(side="right")
 
-        self.stats = tk.StringVar(value="")
+        self.stats = tk.StringVar(self.root, value="")
         ttk.Label(
             self.root, textvariable=self.stats, padding=(12, 0)
         ).pack(fill="x", side="bottom")
@@ -279,11 +291,70 @@ class HistoryWindow:
         self.root.lift()
         self.root.focus_force()
 
+    # ------------------------------------------------------------ prises
+
+    def _list_outlets(self) -> list[tuple[str, str, "OutletConfig | None"]]:
+        """Prises proposees : cle, nom affiche, configuration.
+
+        Les prises configurees d'abord, dans leur ordre ; puis celles que la
+        base connait encore mais que la configuration a oubliees -- leur
+        historique reste lisible jusqu'a ce que l'elagage l'emporte.
+        """
+        choices: list[tuple[str, str, "OutletConfig | None"]] = [
+            (power_history.outlet_key(self.config, o), o.label, o)
+            for o in self.config.outlets
+        ]
+        known = {key for key, _name, _outlet in choices}
+        store = self._reader()
+        if store is not None:
+            for key, label in store.outlets():
+                if key not in known:
+                    name = t("{outlet} (removed)", outlet=label or key)
+                    choices.append((key, name, None))
+        # Deux prises du meme nom se distinguent par leur reference.
+        names = [name for _key, name, _outlet in choices]
+        return [
+            (key, f"{name} ({outlet.ref})", outlet)
+            if outlet is not None and names.count(name) > 1
+            else (key, name, outlet)
+            for key, name, outlet in choices
+        ]
+
+    def _initial_key(self) -> str | None:
+        """La derniere prise consultee, a defaut celle du PC, a defaut la premiere."""
+        keys = [key for key, _name, _outlet in self.choices]
+        if _last_key in keys:
+            return _last_key
+        pc = self.config.host_pc_outlet()
+        if pc is not None:
+            return power_history.outlet_key(self.config, pc)
+        return keys[0] if keys else None
+
+    def _choose(self, key: str | None) -> None:
+        global _last_key
+        self.key = key
+        self.label, self.outlet = "", None
+        for choice_key, name, outlet in self.choices:
+            if choice_key == key:
+                self.label, self.outlet = name, outlet
+        _last_key = key
+        self.root.title(
+            t("Consumption history - {outlet}", outlet=self.label or "-")
+        )
+
+    def _on_outlet_selected(self, _event) -> None:
+        index = self.outlet_box.current()
+        if not 0 <= index < len(self.choices):
+            return
+        self._choose(self.choices[index][0])
+        self._reload()
+        self.draw()
+
     # ------------------------------------------------------------ donnees
 
     def _reader(self) -> "power_history.HistoryStore | None":
         """La base, ouverte a la premiere lecture qui la trouve."""
-        if self.store is None and self.key is not None:
+        if self.store is None:
             self.store = power_history.open_reader(self.config)
         return self.store
 
@@ -294,7 +365,7 @@ class HistoryWindow:
     def _read_more(self) -> bool:
         """Lit ce qui a ete ajoute depuis la derniere fois."""
         store = self._reader()
-        if store is None:
+        if store is None or self.key is None:
             return False
         oldest = time.time() - self._max_span()
         # Ce que l'elagage a retire de la base s'en va aussi de la memoire.
@@ -526,8 +597,8 @@ class HistoryWindow:
                 fill=palette.accent, width=2,
             )
 
-        if self.outlet is None:
-            message = t("No outlet is marked as powering the PC.")
+        if self.key is None:
+            message = t("No outlet configured.")
         elif not self.samples:
             message = t("No data recorded yet.")
         elif not values:
@@ -606,7 +677,9 @@ class HistoryWindow:
     def _draw_thresholds(self, x0: int, x1: int) -> None:
         """Les seuils de la detection, pour situer la veille d'un coup d'oeil."""
         sensing = self.config.sensing
-        if not sensing.enabled or self.outlet is None:
+        # Les seuils ne valent que pour la prise dont la consommation dit si
+        # le PC tourne.
+        if not sensing.enabled or self.outlet is None or not self.outlet.host_pc:
             return
         low, high = self.y_range
         for watts, colour, label in (
@@ -719,7 +792,7 @@ class HistoryWindow:
             )
             return
         following = self.times[last] if last < len(self.times) else time.time()
-        label = "".join(c for c in (self.outlet.label if self.outlet else "") if c.isalnum())
+        label = "".join(c for c in self.label if c.isalnum())
         name = time.strftime("consumption_{label}_%Y-%m-%d_%H%M", time.localtime(start))
         path = filedialog.asksaveasfilename(
             parent=self.root,

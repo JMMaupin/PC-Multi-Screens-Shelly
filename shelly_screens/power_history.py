@@ -9,11 +9,15 @@ chose -- le principe des ticks. Un point s'ecrit quand la puissance bouge
 nettement, et au moins une fois par minute pour que la courbe garde un
 ancrage. Un PC au repos ou en veille coute donc quelques points par heure.
 
-Deux sources alimentent la base. L'application releve les prises toutes
-les cinq secondes tant qu'elle tourne -- c'est-a-dire tant que le PC tourne.
+Toutes les prises configurees sont suivies, chacune sous son nom. Deux
+sources alimentent la base. L'application releve les prises toutes les cinq
+secondes tant qu'elle tourne -- c'est-a-dire tant que le PC tourne.
 Pendant la veille ou l'arret, c'est le releveur embarque dans la multiprise
 qui continue de mesurer : a la sortie de veille ou au lancement, ses ticks
-comblent le trou. Seule la prise du PC beneficie de ce releveur.
+comblent le trou. Seule la prise du PC beneficie de ce releveur. Les autres
+n'ont que les releves directs : pendant la veille, les ecrans sont coupes
+et seuls quelques concentrateurs USB consomment, ce qui ne vaut pas d'user
+la memoire flash des multiprises a le noter.
 
 Pourquoi SQLite. Un premier format, binaire et maison, etait compact mais
 muet : ni signature, ni version, ni description, et illisible sans le code
@@ -143,6 +147,7 @@ class HistoryStore:
     def __init__(self, path: Path, readonly: bool = False) -> None:
         self.path = path
         self._ids: dict[str, int] = {}
+        self._labels: dict[str, str] = {}
         if readonly:
             self._db = sqlite3.connect(str(path), timeout=10, check_same_thread=False)
             return
@@ -173,23 +178,48 @@ class HistoryStore:
             return cached
         try:
             row = self._db.execute(
-                "SELECT id FROM outlet WHERE key = ?", (key,)
+                "SELECT id, label FROM outlet WHERE key = ?", (key,)
             ).fetchone()
         except sqlite3.OperationalError:
             return None  # base encore vide : rien n'a ete enregistre
         if row is not None:
             self._ids[key] = int(row[0])
+            self._labels[key] = str(row[1])
         return self._ids.get(key)
 
     def _outlet_id(self, key: str, label: str) -> int:
+        """Identifiant de la prise, creee au besoin, son nom tenu a jour.
+
+        Le nom suit les renommages : c'est lui qu'on lit en ouvrant la base
+        sans l'application, et une prise renommee doit s'y retrouver.
+        """
         found = self._find(key)
-        if found is not None:
-            return found
-        with self._db:
-            self._db.execute(
-                "INSERT OR IGNORE INTO outlet(key, label) VALUES (?, ?)", (key, label)
-            )
-        return self._find(key)
+        if found is None:
+            with self._db:
+                self._db.execute(
+                    "INSERT OR IGNORE INTO outlet(key, label) VALUES (?, ?)",
+                    (key, label),
+                )
+            return self._find(key)
+        if label and self._labels.get(key) != label:
+            with self._db:
+                self._db.execute(
+                    "UPDATE outlet SET label = ? WHERE id = ?", (label, found)
+                )
+            self._labels[key] = label
+        return found
+
+    def outlets(self) -> list[tuple[str, str]]:
+        """Prises presentes dans la base : cle et nom."""
+        try:
+            return [
+                (str(key), str(label))
+                for key, label in self._db.execute(
+                    "SELECT key, label FROM outlet ORDER BY id"
+                )
+            ]
+        except sqlite3.OperationalError:
+            return []
 
     # ------------------------------------------------------------ points
 
@@ -202,6 +232,25 @@ class HistoryStore:
                 "INSERT OR IGNORE INTO sample(outlet_id, t, watts, source) "
                 "VALUES (?, ?, ?, ?)",
                 [(outlet_id, s.t, s.watts, s.source) for s in samples],
+            )
+
+    def append_batch(self, entries: list[tuple[str, str, Sample]]) -> None:
+        """Ecrit les points de plusieurs prises en une seule transaction.
+
+        Un releve concerne toutes les prises a la fois : une transaction
+        par prise multipliait d'autant les ecritures forcees sur le disque.
+        """
+        # Les prises nouvelles se creent avant : leur insertion validerait
+        # sinon la transaction des points en cours de route.
+        rows = [
+            (self._outlet_id(key, label), s.t, s.watts, s.source)
+            for key, label, s in entries
+        ]
+        with self._db:
+            self._db.executemany(
+                "INSERT OR IGNORE INTO sample(outlet_id, t, watts, source) "
+                "VALUES (?, ?, ?, ?)",
+                rows,
             )
 
     def last(self, key: str) -> Sample | None:
@@ -374,9 +423,8 @@ class HistoryRecorder:
         return max(1, int(days)) * 86400.0
 
     def tracked(self) -> list["OutletConfig"]:
-        """Prises suivies. Pour l'instant, la seule prise du PC."""
-        outlet = self.config.host_pc_outlet()
-        return [outlet] if outlet is not None else []
+        """Prises suivies : toutes celles de la configuration."""
+        return list(self.config.outlets)
 
     def _labels(self) -> dict[str, str]:
         return {outlet_key(self.config, o): o.label for o in self.config.outlets}
@@ -416,12 +464,19 @@ class HistoryRecorder:
             pc = self.config.host_pc_outlet()
             if self._recovery_pending and pc is not None and pc.ref in states:
                 self._recovery_pending = not self._recover(now)
+            # Une prise muette -- son appareil n'a pas repondu -- laisse un
+            # trou, plutot qu'un zero qu'on n'a pas mesure.
+            worth = []
             for outlet in self.tracked():
                 state = states.get(outlet.ref)
                 if state is None:
                     continue
                 watts = float(state.apower) if state.output else 0.0
-                self._consider(outlet, Sample(now, watts, SOURCE_LIVE))
+                sample = Sample(now, watts, SOURCE_LIVE)
+                if self._worth_keeping(outlet, sample):
+                    worth.append((outlet, sample))
+            if worth:
+                self._write_batch(worth)
             if now - self._last_trim >= TRIM_EVERY_S:
                 self._last_trim = now
                 removed = self._store.trim(now - self.keep_seconds)
@@ -447,16 +502,21 @@ class HistoryRecorder:
                 self._last[key] = previous
         return self._last.get(key)
 
-    def _consider(self, outlet: "OutletConfig", sample: Sample) -> None:
-        """Ecrit le point s'il apprend quelque chose, l'ignore sinon."""
+    def _worth_keeping(self, outlet: "OutletConfig", sample: Sample) -> bool:
+        """Vrai si le point apprend quelque chose : un ecart, ou l'ancrage de la minute."""
         previous = self._previous(outlet)
-        if previous is not None:
-            quiet = sample.t - previous.t < ANCHOR_S
-            step = max(MIN_STEP_W, MIN_STEP_RATIO * abs(previous.watts))
-            negligible = abs(sample.watts - previous.watts) < step
-            if quiet and negligible:
-                return
-        self._write(outlet, [sample])
+        if previous is None:
+            return True
+        quiet = sample.t - previous.t < ANCHOR_S
+        step = max(MIN_STEP_W, MIN_STEP_RATIO * abs(previous.watts))
+        negligible = abs(sample.watts - previous.watts) < step
+        return not (quiet and negligible)
+
+    def _write_batch(self, entries: list[tuple["OutletConfig", Sample]]) -> None:
+        keyed = [(outlet_key(self.config, o), o.label, s) for o, s in entries]
+        self._store.append_batch(keyed)
+        for key, _label, sample in keyed:
+            self._last[key] = sample
 
     def _write(self, outlet: "OutletConfig", samples: list[Sample]) -> None:
         key = outlet_key(self.config, outlet)

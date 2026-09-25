@@ -89,7 +89,7 @@ class PowerChartDialog:
         self.canvas.bind("<ButtonRelease-1>", lambda _e: self._drop())
         self.canvas.bind("<Motion>", self._hover)
 
-        self.status = tk.StringVar(value="")
+        self.status = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.status, padding=(12, 6)).pack(anchor="w")
 
         buttons = ttk.Frame(self.window, padding=12)

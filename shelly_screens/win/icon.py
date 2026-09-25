@@ -170,11 +170,15 @@ def status_for(
     return "on" if any(outlet_states) else "off"
 
 
-def load_photo(size: int = 96):
+def load_photo(size: int = 96, master=None):
     """Image Tk du logo, a la taille demandee, ou None si elle manque.
 
     Rendre None plutot que lever : un logo absent est un defaut d'agrement,
     il ne doit jamais empecher une fenetre de s'ouvrir.
+
+    `master` est la fenetre qui l'affichera : chaque fenetre de
+    l'application a son propre interprete Tk, et une image creee dans un
+    autre y est introuvable.
     """
     import tkinter as tk
 
@@ -185,10 +189,10 @@ def load_photo(size: int = 96):
     source = ASSETS / f"icon-{size}.png"
     try:
         if source.exists():
-            return tk.PhotoImage(file=str(source))
+            return tk.PhotoImage(master=master, file=str(source))
         if not LARGE_PNG.exists():
             return None
-        image = tk.PhotoImage(file=str(LARGE_PNG))
+        image = tk.PhotoImage(master=master, file=str(LARGE_PNG))
         factor = max(1, round(256 / max(1, size)))
         return image.subsample(factor, factor) if factor > 1 else image
     except Exception:  # noqa: BLE001 - Tk sans support PNG, fichier illisible
@@ -211,7 +215,7 @@ def apply_to_window(window) -> None:
     except tk.TclError:
         pass
     try:
-        photo = tk.PhotoImage(file=str(LARGE_PNG))
+        photo = tk.PhotoImage(master=window, file=str(LARGE_PNG))
         # La reference doit survivre a l'appel, sinon Tk libere l'image.
         window._app_icon = photo  # type: ignore[attr-defined]
         window.iconphoto(True, photo)

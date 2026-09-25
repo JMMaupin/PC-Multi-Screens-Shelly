@@ -141,6 +141,8 @@ CATALOG: dict[str, str] = {
     'days': 'jours',
     'Open history...': "Ouvrir l'historique...",
     'Span': 'Duree',
+    '{outlet} (removed)': '{outlet} (supprimee)',
+    'No outlet configured.': "Aucune prise n'est configuree.",
     '1 h': '1 h',
     '6 h': '6 h',
     '24 h': '24 h',

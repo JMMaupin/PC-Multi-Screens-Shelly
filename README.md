@@ -625,14 +625,26 @@ volée, sans intervention.
 
 Menu de l'icône → **Consumption history...**, ou onglet **PC power** →
 **Open history...**. Une fenêtre à part, pour relire une journée, une semaine
-ou un mois de consommation de l'unité centrale.
+ou un mois de consommation, **prise par prise** : un sélecteur *Outlet* en
+haut à gauche passe de l'une à l'autre. La prise du PC s'ouvre d'abord, puis
+la fenêtre retient le dernier choix.
 
 ### Ce qui est enregistré
 
-Rien n'est interrogé en plus : l'historique se nourrit des relevés que
-l'application fait déjà toutes les cinq secondes. Il ne retient que ce qui
-apprend quelque chose — une variation d'au moins 3 % ou 1 W, et un point
-d'ancrage par minute. Un mois tient en quelques centaines de kilo-octets.
+**Toutes les prises configurées** sont suivies, chacune sous son nom, dans
+une seule base. Rien n'est interrogé en plus : l'historique se nourrit des
+relevés que l'application fait déjà toutes les cinq secondes. Il ne retient
+que ce qui apprend quelque chose — une variation d'au moins 3 % ou 1 W, et un
+point d'ancrage par minute. Les points d'un même relevé s'écrivent en une
+seule transaction. Compter environ 1 à 4 Mo par prise et par mois.
+
+Une prise dont l'appareil ne répond pas laisse un trou, pas un zéro : on
+n'invente pas une mesure qu'on n'a pas faite.
+
+**Seule la prise du PC est suivie pendant la veille.** Les autres ne le sont
+qu'en direct, tant que l'application tourne : pendant la veille, les écrans
+sont coupés et seuls quelques concentrateurs USB consomment, ce qui ne vaut
+pas d'user la mémoire flash des multiprises à le noter.
 
 Pendant la veille ou l'arrêt, l'application ne tourne plus, mais le releveur
 embarqué dans la multiprise continue de mesurer. Au lancement et à chaque
@@ -662,7 +674,11 @@ Grafana ou n'importe quel langage — et se décrit elle-même :
 | `sample_readable` | Les mêmes points avec l'heure locale en texte |
 
 Une prise y est désignée par la MAC de la multiprise, pas par la clé de
-l'appareil, qui change au gré des renommages. La version du schéma est dans
+l'appareil, qui change au gré des renommages. Son **nom** (`outlet.label`)
+suit, lui, les renommages de la prise : c'est ce qu'on lit en ouvrant la base
+sans l'application. Une prise retirée de la configuration reste consultable,
+marquée *(removed)*, jusqu'à ce que l'élagage emporte ses points. La version
+du schéma est dans
 `PRAGMA user_version`. Le journal WAL permet à la fenêtre de lire pendant
 que l'application écrit, et protège la base d'une coupure de courant.
 

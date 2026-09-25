@@ -106,7 +106,7 @@ class SettingsWindow:
         # Sans cet appel, Ctrl+Tab et Alt+lettre ne changent pas d'onglet.
         notebook.enable_traversal()
 
-        self.status = tk.StringVar(value="")
+        self.status = tk.StringVar(self.root, value="")
         ttk.Label(root, textvariable=self.status, anchor="w", padding=(12, 6)).pack(
             fill="x", side="bottom"
         )
@@ -252,7 +252,7 @@ class SettingsWindow:
         # Bandeau d'alerte : masque tant que tout va bien, il apparait des
         # qu'un appareil refuse le mot de passe et mene a la marche a suivre.
         self.auth_banner = ttk.Frame(frame)
-        self.auth_alert = tk.StringVar(value="")
+        self.auth_alert = tk.StringVar(self.root, value="")
         ttk.Label(
             self.auth_banner,
             textvariable=self.auth_alert,
@@ -485,14 +485,14 @@ class SettingsWindow:
         editor.pack(fill="x", pady=10)
 
         ttk.Label(editor, text=t("Name")).grid(row=0, column=0, sticky="w")
-        self.outlet_name = tk.StringVar()
+        self.outlet_name = tk.StringVar(self.root)
         name_entry = ttk.Entry(editor, textvariable=self.outlet_name, width=26)
         name_entry.grid(row=0, column=1, sticky="w", padx=(8, 24))
         name_entry.bind("<FocusOut>", lambda _e: self._apply_outlet_edits())
         name_entry.bind("<Return>", lambda _e: self._apply_outlet_edits())
 
         ttk.Label(editor, text=t("Type")).grid(row=0, column=2, sticky="e", padx=(0, 8))
-        self.outlet_kind = tk.StringVar()
+        self.outlet_kind = tk.StringVar(self.root)
         kind_box = ttk.Combobox(
             editor,
             textvariable=self.outlet_kind,
@@ -503,7 +503,7 @@ class SettingsWindow:
         kind_box.grid(row=0, column=3, sticky="w")
         kind_box.bind("<<ComboboxSelected>>", lambda _e: self._apply_outlet_edits())
 
-        self.outlet_critical = tk.BooleanVar()
+        self.outlet_critical = tk.BooleanVar(self.root)
         ttk.Checkbutton(
             editor,
             text=t("Critical - never switched off"),
@@ -511,7 +511,7 @@ class SettingsWindow:
             command=self._apply_outlet_edits,
         ).grid(row=1, column=1, columnspan=3, sticky="w", pady=(8, 0))
 
-        self.outlet_boot = tk.BooleanVar()
+        self.outlet_boot = tk.BooleanVar(self.root)
         ttk.Checkbutton(
             editor,
             text=t("Boot screen - fallback if the stored profile is unusable"),
@@ -519,7 +519,7 @@ class SettingsWindow:
             command=self._apply_outlet_edits,
         ).grid(row=2, column=1, columnspan=3, sticky="w", pady=(4, 0))
 
-        self.outlet_host_pc = tk.BooleanVar()
+        self.outlet_host_pc = tk.BooleanVar(self.root)
         ttk.Checkbutton(
             editor,
             text=t("Powers the PC itself - never switched off"),
@@ -527,7 +527,7 @@ class SettingsWindow:
             command=self._apply_outlet_edits,
         ).grid(row=3, column=1, columnspan=3, sticky="w", pady=(4, 0))
 
-        self.outlet_cut_on_sleep = tk.BooleanVar()
+        self.outlet_cut_on_sleep = tk.BooleanVar(self.root)
         ttk.Checkbutton(
             editor,
             text=t("Follows the PC - switched off while it sleeps"),
@@ -701,14 +701,14 @@ class SettingsWindow:
         # une distance inutile entre l'intitule et la case suivante.
         badge = ttk.Frame(right)
         badge.pack(side="right", fill="y", padx=(24, 0))
-        self._profile_logo = icon_module.load_photo(96)
+        self._profile_logo = icon_module.load_photo(96, self.root)
         if self._profile_logo is not None:
             ttk.Label(badge, image=self._profile_logo).pack(anchor="ne", pady=(6, 0))
 
         content = ttk.Frame(right)
         content.pack(side="left", fill="both")
 
-        self.profile_title = tk.StringVar(value="No profile selected")
+        self.profile_title = tk.StringVar(self.root, value="No profile selected")
         ttk.Label(content, textvariable=self.profile_title, style="Title.TLabel").pack(
             anchor="w"
         )
@@ -721,7 +721,7 @@ class SettingsWindow:
 
         layout_box = ttk.LabelFrame(content, text=t("Window layout"), padding=10)
         layout_box.pack(fill="x")
-        self.layout_info = tk.StringVar(value="")
+        self.layout_info = tk.StringVar(self.root, value="")
         ttk.Label(layout_box, textvariable=self.layout_info, wraplength=440).pack(
             anchor="w", pady=(0, 8)
         )
@@ -764,7 +764,7 @@ class SettingsWindow:
                     text=device.label if device else current_device,
                     style="Section.TLabel",
                 ).pack(anchor="w", pady=(6, 2))
-            variable = tk.BooleanVar()
+            variable = tk.BooleanVar(self.root)
             self.profile_outlet_vars[outlet.ref] = variable
             suffix = ""
             if outlet.never_switch_off:
@@ -915,7 +915,7 @@ class SettingsWindow:
             justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
-        self.sensing_state = tk.StringVar(value="")
+        self.sensing_state = tk.StringVar(self.root, value="")
         ttk.Label(frame, textvariable=self.sensing_state, wraplength=760,
                   justify="left").pack(anchor="w", pady=(0, 10))
 
@@ -932,7 +932,7 @@ class SettingsWindow:
             justify="left",
             style="Hint.TLabel",
         ).pack(anchor="w", pady=(0, 8))
-        self.probe_result = tk.StringVar(value=t("No measurement yet."))
+        self.probe_result = tk.StringVar(self.root, value=t("No measurement yet."))
         ttk.Label(measure, textvariable=self.probe_result, wraplength=730,
                   justify="left").pack(anchor="w", pady=(0, 8))
         probe_row = ttk.Frame(measure)
@@ -954,10 +954,10 @@ class SettingsWindow:
 
         limits = ttk.LabelFrame(frame, text=t("Thresholds and delays"), padding=10)
         limits.pack(fill="x", pady=10)
-        self.var_on_w = tk.DoubleVar(value=self.config.sensing.on_threshold_w)
-        self.var_off_w = tk.DoubleVar(value=self.config.sensing.off_threshold_w)
-        self.var_on_s = tk.DoubleVar(value=self.config.sensing.on_delay_s)
-        self.var_off_s = tk.DoubleVar(value=self.config.sensing.off_delay_s)
+        self.var_on_w = tk.DoubleVar(self.root, value=self.config.sensing.on_threshold_w)
+        self.var_off_w = tk.DoubleVar(self.root, value=self.config.sensing.off_threshold_w)
+        self.var_on_s = tk.DoubleVar(self.root, value=self.config.sensing.on_delay_s)
+        self.var_off_s = tk.DoubleVar(self.root, value=self.config.sensing.off_delay_s)
         rows = (
             (t("PC seen as running above"), self.var_on_w, "W", 0, 1000, 1),
             (t("PC seen as off below"), self.var_off_w, "W", 0, 1000, 1),
@@ -993,14 +993,14 @@ class SettingsWindow:
             style="Hint.TLabel",
         ).grid(row=len(rows), column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        self.sensing_warning = tk.StringVar(value="")
+        self.sensing_warning = tk.StringVar(self.root, value="")
         ttk.Label(limits, textvariable=self.sensing_warning, wraplength=730,
                   justify="left").grid(row=len(rows) + 1, column=0, columnspan=3,
                                        sticky="w", pady=(6, 0))
 
         script_box = ttk.LabelFrame(frame, text=t("On-device script"), padding=10)
         script_box.pack(fill="x")
-        self.script_state = tk.StringVar(value="")
+        self.script_state = tk.StringVar(self.root, value="")
         ttk.Label(script_box, textvariable=self.script_state, wraplength=730,
                   justify="left").pack(anchor="w", pady=(0, 8))
         script_row = ttk.Frame(script_box)
@@ -1017,7 +1017,7 @@ class SettingsWindow:
         history_row = ttk.Frame(history_box)
         history_row.pack(fill="x")
         ttk.Label(history_row, text=t("Keep history for")).pack(side="left")
-        self.var_history_days = tk.IntVar(value=self.config.settings.history_days)
+        self.var_history_days = tk.IntVar(self.root, value=self.config.settings.history_days)
         days = ttk.Spinbox(
             history_row, from_=1, to=365, increment=1, width=6,
             textvariable=self.var_history_days, command=self._apply_history_days,
@@ -1290,7 +1290,7 @@ class SettingsWindow:
         power_box = ttk.LabelFrame(frame, text=t("Sleep and shutdown"), padding=10)
         power_box.pack(fill="x")
 
-        self.var_off_on_suspend = tk.BooleanVar(value=settings.power_off_on_suspend)
+        self.var_off_on_suspend = tk.BooleanVar(self.root, value=settings.power_off_on_suspend)
         ttk.Checkbutton(
             power_box,
             text=t("Switch outlets off when the PC sleeps or shuts down"),
@@ -1298,7 +1298,7 @@ class SettingsWindow:
             command=self._apply_behaviour,
         ).pack(anchor="w")
 
-        self.var_restore_on_resume = tk.BooleanVar(value=settings.restore_on_resume)
+        self.var_restore_on_resume = tk.BooleanVar(self.root, value=settings.restore_on_resume)
         ttk.Checkbutton(
             power_box,
             text=t("Re-apply the last profile on wake-up"),
@@ -1306,7 +1306,7 @@ class SettingsWindow:
             command=self._apply_behaviour,
         ).pack(anchor="w")
 
-        self.var_apply_on_start = tk.BooleanVar(value=settings.apply_profile_on_start)
+        self.var_apply_on_start = tk.BooleanVar(self.root, value=settings.apply_profile_on_start)
         ttk.Checkbutton(
             power_box,
             text=t("Re-apply the last profile when this application starts"),
@@ -1314,7 +1314,7 @@ class SettingsWindow:
             command=self._apply_behaviour,
         ).pack(anchor="w")
 
-        self.shutdown_summary = tk.StringVar(value="")
+        self.shutdown_summary = tk.StringVar(self.root, value="")
         ttk.Label(
             power_box,
             textvariable=self.shutdown_summary,
@@ -1325,14 +1325,14 @@ class SettingsWindow:
 
         layout_box = ttk.LabelFrame(frame, text=t("Window layout"), padding=10)
         layout_box.pack(fill="x", pady=12)
-        self.var_manage_layout = tk.BooleanVar(value=settings.manage_window_layout)
+        self.var_manage_layout = tk.BooleanVar(self.root, value=settings.manage_window_layout)
         ttk.Checkbutton(
             layout_box,
             text=t("Memorise and restore window positions with profiles"),
             variable=self.var_manage_layout,
             command=self._apply_behaviour,
         ).pack(anchor="w")
-        self.var_rescue = tk.BooleanVar(value=settings.rescue_offscreen_windows)
+        self.var_rescue = tk.BooleanVar(self.root, value=settings.rescue_offscreen_windows)
         ttk.Checkbutton(
             layout_box,
             text=t("After a profile change, bring windows left outside every "
@@ -1345,7 +1345,7 @@ class SettingsWindow:
 
         appearance_box = ttk.LabelFrame(frame, text=t("Appearance"), padding=10)
         appearance_box.pack(fill="x", pady=(0, 12))
-        self.var_theme = tk.StringVar(value=self.config.settings.theme)
+        self.var_theme = tk.StringVar(self.root, value=self.config.settings.theme)
         row = ttk.Frame(appearance_box)
         row.pack(anchor="w")
         for value, label in (
@@ -1365,7 +1365,7 @@ class SettingsWindow:
         )
         language_row = ttk.Frame(appearance_box)
         language_row.pack(anchor="w")
-        self.var_language = tk.StringVar(value=self.config.settings.language)
+        self.var_language = tk.StringVar(self.root, value=self.config.settings.language)
         for value in i18n.LANGUAGES:
             ttk.Radiobutton(
                 language_row,
@@ -1375,7 +1375,7 @@ class SettingsWindow:
                 command=self._change_language,
             ).pack(side="left", padx=(0, 18))
 
-        self.theme_hint = tk.StringVar(value="")
+        self.theme_hint = tk.StringVar(self.root, value="")
         ttk.Label(
             appearance_box,
             textvariable=self.theme_hint,
@@ -1389,7 +1389,7 @@ class SettingsWindow:
         ttk.Label(timing_box, text=t("Delay between outlet commands (ms)")).grid(
             row=0, column=0, sticky="w"
         )
-        self.var_switch_delay = tk.IntVar(value=settings.switch_delay_ms)
+        self.var_switch_delay = tk.IntVar(self.root, value=settings.switch_delay_ms)
         ttk.Spinbox(
             timing_box,
             from_=0,
@@ -1403,7 +1403,7 @@ class SettingsWindow:
         ttk.Label(timing_box, text=t("Max wait for displays to appear (s)")).grid(
             row=1, column=0, sticky="w", pady=(6, 0)
         )
-        self.var_settle = tk.DoubleVar(value=settings.display_settle_timeout_s)
+        self.var_settle = tk.DoubleVar(self.root, value=settings.display_settle_timeout_s)
         ttk.Spinbox(
             timing_box,
             from_=1,
@@ -1429,13 +1429,13 @@ class SettingsWindow:
         row.pack(anchor="w", fill="x")
         self.hotkey_flags: dict[int, tk.BooleanVar] = {}
         for name, flag in hotkey_module.MODIFIERS:
-            variable = tk.BooleanVar(value=bool(shown.modifiers & flag))
+            variable = tk.BooleanVar(self.root, value=bool(shown.modifiers & flag))
             self.hotkey_flags[flag] = variable
             ttk.Checkbutton(
                 row, text=name, variable=variable, command=self._check_hotkey
             ).pack(side="left", padx=(0, 10))
         ttk.Label(row, text="+").pack(side="left", padx=(0, 10))
-        self.hotkey_key = tk.StringVar(value=shown.key)
+        self.hotkey_key = tk.StringVar(self.root, value=shown.key)
         key_box = ttk.Combobox(
             row, textvariable=self.hotkey_key, values=list(hotkey_module.KEYS),
             state="readonly", width=5,
@@ -1447,7 +1447,7 @@ class SettingsWindow:
         )
         self.hotkey_apply = ttk.Button(row, text=t("Apply"), command=self._apply_hotkey)
         self.hotkey_apply.pack(side="right", padx=(0, 8))
-        self.hotkey_status = tk.StringVar(value="")
+        self.hotkey_status = tk.StringVar(self.root, value="")
         ttk.Label(
             box, textvariable=self.hotkey_status, style="Hint.TLabel",
             wraplength=740, justify="left",
@@ -1836,7 +1836,7 @@ class IdentifyDialog:
         self.window.protocol("WM_DELETE_WINDOW", self._cancel)
         _theme_dialog(self.window, owner.palette)
 
-        self.message = tk.StringVar(value="Preparing...")
+        self.message = tk.StringVar(self.window, value="Preparing...")
         ttk.Label(self.window, textvariable=self.message, wraplength=440, padding=14).pack(
             anchor="w"
         )
@@ -2059,7 +2059,7 @@ class AddDeviceDialog:
         manual = ttk.Frame(self.window, padding=(12, 0))
         manual.pack(fill="x")
         ttk.Label(manual, text=t("Address or mDNS name")).pack(side="left")
-        self.host = tk.StringVar()
+        self.host = tk.StringVar(self.window)
         entry = ttk.Entry(manual, textvariable=self.host, width=32)
         entry.pack(side="left", padx=8)
         entry.bind("<Return>", lambda _e: self._probe_host())
@@ -2070,7 +2070,7 @@ class AddDeviceDialog:
         # premier prend tout ce qui reste, et les boutons poses ensuite se
         # font rogner des que la fenetre manque de hauteur. Ils etaient
         # invisibles depuis le premier jour.
-        self.message = tk.StringVar(value="")
+        self.message = tk.StringVar(self.window, value="")
         buttons = ttk.Frame(self.window, padding=12)
         buttons.pack(fill="x", side="bottom")
         self.scan_button = ttk.Button(buttons, text=t("Scan network"), command=self._scan)
@@ -2260,11 +2260,11 @@ class DeviceNamingDialog:
         form = ttk.Frame(self.window, padding=14)
         form.pack(fill="x")
         ttk.Label(form, text=t("Label")).grid(row=0, column=0, sticky="w", pady=4)
-        self.label_var = tk.StringVar(value=device.name)
+        self.label_var = tk.StringVar(self.window, value=device.name)
         entry = ttk.Entry(form, textvariable=self.label_var, width=34)
         entry.grid(row=0, column=1, padx=8, sticky="w")
         ttk.Label(form, text=t("Key")).grid(row=1, column=0, sticky="w", pady=4)
-        self.key_var = tk.StringVar(value=device.key)
+        self.key_var = tk.StringVar(self.window, value=device.key)
         ttk.Entry(form, textvariable=self.key_var, width=18).grid(
             row=1, column=1, padx=8, sticky="w"
         )
@@ -2274,7 +2274,7 @@ class DeviceNamingDialog:
             style="Hint.TLabel",
         ).grid(row=2, column=1, padx=8, sticky="w")
 
-        self.message = tk.StringVar(value="")
+        self.message = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.message, wraplength=570,
                   justify="left", padding=(14, 4)).pack(anchor="w")
 
@@ -2350,7 +2350,7 @@ class DeviceServicesDialog:
             padding=14,
         ).pack(anchor="w")
 
-        self.memory = tk.StringVar(value="")
+        self.memory = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.memory, padding=(14, 0),
                   style="Hint.TLabel").pack(anchor="w")
 
@@ -2372,7 +2372,7 @@ class DeviceServicesDialog:
             block = ttk.Frame(body)
             block.grid(row=row, column=0, sticky="ew", pady=(0, 9))
             block.columnconfigure(0, weight=1)
-            variable = tk.BooleanVar()
+            variable = tk.BooleanVar(self.window)
             self.vars[service.key] = variable
             box = ttk.Checkbutton(
                 block,
@@ -2390,7 +2390,7 @@ class DeviceServicesDialog:
             # Certains firmwares n'exposent pas le reglage. Une case grise
             # et vide laisserait croire a un service eteint et verrouille :
             # on dit plutot que l'appareil ne permet pas d'y toucher.
-            note = tk.StringVar(value="")
+            note = tk.StringVar(self.window, value="")
             self.notes[service.key] = note
             ttk.Label(
                 block, textvariable=note, wraplength=700,
@@ -2410,7 +2410,7 @@ class DeviceServicesDialog:
             padding=(14, 4),
         ).pack(anchor="w")
 
-        self.message = tk.StringVar(value="")
+        self.message = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.message, wraplength=730,
                   justify="left", padding=(14, 6)).pack(anchor="w")
 
@@ -2574,7 +2574,7 @@ class DeviceLedsDialog:
         self.apply_button = ttk.Button(footer, text=t("Apply"), command=self._apply)
         self.apply_button.pack(side="right", padx=(0, 8))
 
-        self.message = tk.StringVar(value="")
+        self.message = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.message, wraplength=740,
                   justify="left", padding=(14, 4)).pack(side="bottom", anchor="w")
 
@@ -2585,15 +2585,15 @@ class DeviceLedsDialog:
         ring = ttk.LabelFrame(body, text=t("Light rings"), padding=10)
         ring.pack(fill="x")
         ring.columnconfigure(1, weight=1)
-        self.mode = tk.StringVar(value=device_leds.MODE_POWER)
+        self.mode = tk.StringVar(self.window, value=device_leds.MODE_POWER)
         for row, (value, wording) in enumerate(self.MODES):
             ttk.Radiobutton(
                 ring, text=t(wording), value=value, variable=self.mode,
                 command=self._update_states,
             ).grid(row=row, column=0, columnspan=5, sticky="w", pady=1)
-        self.brightness = tk.IntVar(value=100)
-        self.on_brightness = tk.IntVar(value=100)
-        self.off_brightness = tk.IntVar(value=100)
+        self.brightness = tk.IntVar(self.window, value=100)
+        self.on_brightness = tk.IntVar(self.window, value=100)
+        self.off_brightness = tk.IntVar(self.window, value=100)
         self.power_row = self._slider(ring, 3, t("Brightness"), self.brightness)
         self.on_row = self._slider(ring, 4, t("When on"), self.on_brightness)
         self.off_row = self._slider(ring, 5, t("When off"), self.off_brightness)
@@ -2606,18 +2606,18 @@ class DeviceLedsDialog:
         night = ttk.LabelFrame(body, text=t("Night mode"), padding=10)
         night.pack(fill="x", pady=(12, 0))
         night.columnconfigure(1, weight=1)
-        self.night_enabled = tk.BooleanVar(value=False)
+        self.night_enabled = tk.BooleanVar(self.window, value=False)
         self.night_box = ttk.Checkbutton(
             night, text=t("Dim the rings between these times"),
             variable=self.night_enabled, command=self._update_states,
         )
         self.night_box.grid(row=0, column=0, columnspan=5, sticky="w")
-        self.night_brightness = tk.IntVar(value=device_leds.NIGHT_BRIGHTNESS)
+        self.night_brightness = tk.IntVar(self.window, value=device_leds.NIGHT_BRIGHTNESS)
         self.night_row = self._slider(night, 1, t("Brightness"), self.night_brightness)
         hours = ttk.Frame(night)
         hours.grid(row=2, column=0, columnspan=5, sticky="w", pady=(6, 0))
-        self.night_start = tk.StringVar(value=device_leds.NIGHT_START)
-        self.night_end = tk.StringVar(value=device_leds.NIGHT_END)
+        self.night_start = tk.StringVar(self.window, value=device_leds.NIGHT_START)
+        self.night_end = tk.StringVar(self.window, value=device_leds.NIGHT_END)
         ttk.Label(hours, text=t("From")).pack(side="left")
         start = ttk.Entry(hours, textvariable=self.night_start, width=7)
         start.pack(side="left", padx=(6, 12))
@@ -2775,6 +2775,7 @@ class DeviceLedsDialog:
                 and pc.switch_id == switch_id
             )
             variable = tk.BooleanVar(
+                self.window,
                 value=buttons[switch_id] == device_leds.BUTTON_DETACHED
             )
             box = ttk.Checkbutton(
@@ -2986,19 +2987,19 @@ class PasswordDialog:
             padding=14,
         ).pack(anchor="w")
 
-        self.state = tk.StringVar(value="")
+        self.state = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.state, wraplength=640,
                   justify="left", padding=(14, 0)).pack(anchor="w")
 
         form = ttk.Frame(self.window, padding=14)
         form.pack(fill="x")
         ttk.Label(form, text=t("Password")).grid(row=0, column=0, sticky="w", pady=3)
-        self.first = tk.StringVar()
+        self.first = tk.StringVar(self.window)
         ttk.Entry(form, textvariable=self.first, show="*", width=32).grid(
             row=0, column=1, padx=8
         )
         ttk.Label(form, text=t("Confirm")).grid(row=1, column=0, sticky="w", pady=3)
-        self.second = tk.StringVar()
+        self.second = tk.StringVar(self.window)
         ttk.Entry(form, textvariable=self.second, show="*", width=32).grid(
             row=1, column=1, padx=8
         )
@@ -3017,7 +3018,7 @@ class PasswordDialog:
             padding=(14, 0),
         ).pack(anchor="w")
 
-        self.message = tk.StringVar(value="")
+        self.message = tk.StringVar(self.window, value="")
         ttk.Label(self.window, textvariable=self.message, wraplength=640,
                   justify="left", padding=(14, 8)).pack(anchor="w")
 
