@@ -23,7 +23,7 @@ from .. import i18n
 from ..i18n import t
 from ..config import KIND_LABELS, KIND_SCREEN, KINDS, OutletConfig, Profile
 from ..win import icon as icon_module
-from .. import __version__
+from .. import __version__, product, wifi_setup
 from ..win import hotkey as hotkey_module
 from ..win import monitors
 from .. import device_leds, device_services
@@ -99,11 +99,13 @@ class SettingsWindow:
         self.profiles_tab = ttk.Frame(notebook, padding=12)
         self.behaviour_tab = ttk.Frame(notebook, padding=12)
         self.sensing_tab = ttk.Frame(notebook, padding=12)
+        self.about_tab = ttk.Frame(notebook, padding=24)
         notebook.add(self.devices_tab, text=t("Devices"))
         notebook.add(self.outlets_tab, text=t("Outlets"))
         notebook.add(self.profiles_tab, text=t("Profiles"))
         notebook.add(self.sensing_tab, text=t("PC power"))
         notebook.add(self.behaviour_tab, text=t("Behaviour"))
+        notebook.add(self.about_tab, text=t("About"))
         # Sans cet appel, Ctrl+Tab et Alt+lettre ne changent pas d'onglet.
         notebook.enable_traversal()
 
@@ -117,6 +119,7 @@ class SettingsWindow:
         self._build_profiles_tab()
         self._build_sensing_tab()
         self._build_behaviour_tab()
+        self._build_about_tab()
 
         self.refresh()
         notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -301,15 +304,7 @@ class SettingsWindow:
         rssi = self.app.controller.wifi_signal(key)
         if rssi is None:
             return "-"
-        if rssi >= -60:
-            quality = t("excellent")
-        elif rssi >= -70:
-            quality = t("good")
-        elif rssi >= -78:
-            quality = t("fair")
-        else:
-            quality = t("weak")
-        return f"{rssi} dBm - {quality}"
+        return f"{rssi} dBm - {wifi_setup.signal_quality(rssi)}"
 
     def _auth_label(self, device) -> str:
         """Etat du mot de passe tel que l'appareil le rapporte.
@@ -671,6 +666,64 @@ class SettingsWindow:
         self._save()
         self.refresh()
 
+    # ------------------------------------------------------------ onglet a propos
+
+    def _build_about_tab(self) -> None:
+        """Logo, nom, version, auteur, appareils valides, page des versions.
+
+        Pas de cadres ici : un lien pose sur une carte y garderait le fond de
+        la fenetre. De simples titres de section suffisent.
+        """
+        frame = self.about_tab
+        header = ttk.Frame(frame)
+        header.pack(fill="x")
+        self._about_logo = icon_module.load_photo(128, self.root)
+        if self._about_logo is not None:
+            ttk.Label(header, image=self._about_logo).pack(side="left", padx=(0, 20))
+        identity = ttk.Frame(header)
+        identity.pack(side="left", anchor="center")
+        ttk.Label(identity, text="Shelly Screens", style="Banner.TLabel").pack(anchor="w")
+        ttk.Label(identity, text=t("Version {version}", version=__version__)).pack(
+            anchor="w", pady=(4, 0)
+        )
+        ttk.Label(identity, text=t("Author: {author}", author=product.AUTHOR)).pack(
+            anchor="w"
+        )
+
+        ttk.Label(frame, text=t("Validated devices"), style="Section.TLabel").pack(
+            anchor="w", pady=(28, 4)
+        )
+        for device in product.VALIDATED_DEVICES:
+            row = ttk.Frame(frame)
+            row.pack(anchor="w", padx=(12, 0))
+            self._link(row, device.name, device.search_url).pack(side="left")
+            ttk.Label(
+                row, style="Hint.TLabel",
+                text="   " + t("model {model}, firmware {firmware}",
+                               model=device.model, firmware=device.firmware),
+            ).pack(side="left")
+        ttk.Label(
+            frame, style="Hint.TLabel", wraplength=720, justify="left",
+            text=t("Other Shelly devices with switchable outputs may work, but have "
+                   "not been tested."),
+        ).pack(anchor="w", padx=(12, 0), pady=(4, 0))
+
+        ttk.Label(frame, text=t("Releases"), style="Section.TLabel").pack(
+            anchor="w", pady=(24, 4)
+        )
+        row = ttk.Frame(frame)
+        row.pack(anchor="w", padx=(12, 0))
+        self._link(row, product.RELEASES_URL, product.RELEASES_URL).pack(side="left")
+        ttk.Label(row, text="   " + t("(coming soon)"), style="Hint.TLabel").pack(
+            side="left"
+        )
+
+    def _link(self, parent: tk.Misc, text: str, url: str) -> ttk.Label:
+        """Une etiquette qui ouvre une adresse dans le navigateur."""
+        label = ttk.Label(parent, text=text, style="Link.TLabel", cursor="hand2")
+        label.bind("<Button-1>", lambda _e: webbrowser.open(url))
+        return label
+
     # ------------------------------------------------------------ onglet profils
 
     def _build_profiles_tab(self) -> None:
@@ -907,41 +960,20 @@ class SettingsWindow:
 
     def _draw_screen_map(self) -> None:
         """Redessine le plan d'apres les cases du profil affiche."""
-        by_key = {o.monitor_key: o for o in self.config.outlets if o.monitor_key}
         selected = self._selected_profile()
-        showing = selected is not None
+
+        def lit(ref: str) -> bool | None:
+            if selected is None:
+                return None  # aucun profil affiche : rien a dire des prises
+            variable = self.profile_outlet_vars.get(ref)
+            return variable is not None and variable.get()
+
         # Un clic sur un ecran modifie le profil : pas le profil integre.
-        editable = showing and not selected.builtin
-        tiles = []
-        for screen in self.config.screens:
-            outlet = by_key.get(screen.key)
-            ref = None
-            if outlet is None:
-                state = screen_map.STATE_UNMANAGED
-                title = screen.name or t("Screen")
-            elif outlet.never_switch_off:
-                state, title = screen_map.STATE_FIXED, outlet.label
-            else:
-                variable = self.profile_outlet_vars.get(outlet.ref)
-                lit = variable is not None and variable.get()
-                state = screen_map.STATE_ON if lit or not showing else screen_map.STATE_OFF
-                if not lit and outlet.label in self.app.controller.ghost_screens:
-                    state = screen_map.STATE_GHOST
-                title = outlet.label
-                ref = outlet.ref if editable else None
-            tiles.append(screen_map.ScreenTile(
-                rect=screen.rect,
-                title=title,
-                detail=screen_map.describe(
-                    state, screen.width, screen.height, screen.primary, screen.scale,
-                    screen.diagonal,
-                ),
-                state=state,
-                ref=ref,
-                scale=screen.scale,
-                primary=screen.primary,
-                diagonal=screen.diagonal,
-            ))
+        tiles = screen_map.build_tiles(
+            self.config, lit,
+            editable=selected is not None and not selected.builtin,
+            ghosts=self.app.controller.ghost_screens,
+        )
         self._drawn_screens = list(self.config.screens)
         self._drawn_ghosts = list(self.app.controller.ghost_screens)
         self.screen_map.show(tiles)
@@ -2403,6 +2435,9 @@ class AddDeviceDialog:
         self.scan_button = ttk.Button(buttons, text=t("Scan network"), command=self._scan)
         self.scan_button.pack(side="left")
         ttk.Button(buttons, text=t("Add selected"), command=self._adopt).pack(side="left", padx=8)
+        ttk.Button(
+            buttons, text=t("First setup of a new device..."), command=self._first_setup
+        ).pack(side="left")
         ttk.Button(buttons, text=t("Close"), command=self._close).pack(side="right")
         ttk.Label(
             self.window, textvariable=self.message, padding=(12, 0)
@@ -2419,8 +2454,11 @@ class AddDeviceDialog:
         self.tree.column("app", width=85)
         self.tree.column("id", width=230)
         self.tree.pack(fill="both", expand=True, padx=12, pady=12)
-
-        self._scan()
+        # Le scan ne part pas tout seul : vingt secondes a balayer le reseau,
+        # c'est a l'utilisateur de les decider -- l'adresse saisie suffit
+        # souvent. Seule la premiere mise en service le lance, a sa fin.
+        self._expected_mac = ""
+        self._expected_ip = ""
 
     def _close(self) -> None:
         try:
@@ -2459,6 +2497,8 @@ class AddDeviceDialog:
                 self._show(identities)
                 self.message.set(f"{len(identities)} Shelly device(s) found")
                 self.scan_button.state(["!disabled"])
+                if self._expected_mac:
+                    self._select_expected()
 
             try:
                 self.window.after(0, done)
@@ -2467,7 +2507,46 @@ class AddDeviceDialog:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _probe_host(self) -> None:
+    # ------------------------------------------------------ mise en service
+
+    def _first_setup(self) -> None:
+        from .first_setup import FirstSetupDialog
+
+        self.window.grab_release()  # l'assistant prend la main
+        FirstSetupDialog(self.window, self.owner.palette, _theme_dialog, self._found_new)
+
+    def _found_new(self, mac: str, ip: str) -> None:
+        """L'appareil a rejoint le Wi-Fi : on le cherche, et on le presente."""
+        try:
+            self.window.grab_set()
+        except tk.TclError:
+            return
+        self._expected_mac = mac.replace(":", "").upper()
+        self._expected_ip = ip
+        self._scan()
+
+    def _select_expected(self) -> None:
+        """Selectionne l'appareil qu'on vient de mettre en service.
+
+        Pas trouve par le scan -- le reseau met parfois quelques secondes a
+        le connaitre --, on l'interroge a l'adresse qu'il a annoncee.
+        """
+        mac = self._expected_mac
+        for index, identity in enumerate(self.found):
+            if identity.mac.replace(":", "").upper() == mac:
+                self.tree.selection_set(str(index))
+                self.tree.see(str(index))
+                self.message.set(t("New device found: check it, then Add selected."))
+                self._expected_mac = ""
+                return
+        if self._expected_ip:
+            self.host.set(self._expected_ip)
+            self._expected_ip = ""
+            self._probe_host(select_expected=True)
+            return
+        self._expected_mac = ""
+
+    def _probe_host(self, select_expected: bool = False) -> None:
         host = self.host.get().strip()
         if not host:
             return
@@ -2482,6 +2561,8 @@ class AddDeviceDialog:
                 else:
                     self._show([identity])
                     self.message.set(f"Found {identity.model} at {identity.host}")
+                    if select_expected:
+                        self._select_expected()
 
             try:
                 self.window.after(0, done)

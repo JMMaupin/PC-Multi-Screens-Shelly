@@ -585,6 +585,27 @@ class ScreenController:
             profile=profile,
         )
 
+    def apply_outlets(self, targets: dict[str, bool]) -> ApplyReport:
+        """Applique une configuration ponctuelle, hors profils.
+
+        Aucun profil n'est modifie ni retenu comme profil en cours.
+
+        Meme enchainement qu'un profil -- allumer d'abord, couper ensuite,
+        ramener les fenetres egarees --, mais aucun profil n'est plus « en
+        cours » : au reveil, on rendra les prises telles qu'elles etaient
+        avant la veille, plutot qu'un profil qu'on a quitte.
+        """
+        for ref in list(targets):
+            outlet = self.config.outlet(ref)
+            if outlet is not None and outlet.never_switch_off:
+                targets[ref] = True
+        report = self._apply_targets(
+            profile_name="Custom", targets=targets, profile=None, rescue=True
+        )
+        self.config.settings.last_profile = ""
+        self._save()
+        return report
+
     def prepare_for_suspend(self) -> ApplyReport:
         """Coupe les ecrans a la mise en veille, sauf ce qui doit rester.
 
@@ -660,6 +681,7 @@ class ScreenController:
         targets: dict[str, bool],
         profile: Profile | None,
         urgent: bool = False,
+        rescue: bool = False,
     ) -> ApplyReport:
         report = ApplyReport(profile=profile_name)
 
@@ -699,7 +721,7 @@ class ScreenController:
 
             # 3. Ramener ce qui est reste hors de tout ecran allume. La pause
             #    laisse a Windows le temps de retirer les ecrans coupes.
-            if profile is not None and self.config.settings.rescue_offscreen_windows:
+            if (profile is not None or rescue) and self.config.settings.rescue_offscreen_windows:
                 if report.turned_off:
                     time.sleep(DISPLAY_GRACE_S)
                 report.windows_rescued = self._rescue_windows(targets, screens_before)

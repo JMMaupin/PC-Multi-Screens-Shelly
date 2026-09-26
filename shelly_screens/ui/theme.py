@@ -50,7 +50,8 @@ class Palette:
     accent_text: str  # texte pose sur l'accent
     on: str  # prise alimentee
     off: str  # prise coupee
-    warn: str  # appareil injoignable
+    warn: str  # appareil injoignable, signal mauvais
+    caution: str  # entre les deux : un signal seulement bon
 
 
 LIGHT = Palette(
@@ -68,6 +69,7 @@ LIGHT = Palette(
     on="#128a3c",
     off="#8a8a8a",
     warn="#b3261e",
+    caution="#b35c00",
 )
 
 DARK = Palette(
@@ -85,6 +87,7 @@ DARK = Palette(
     on="#4ade80",
     off="#767676",
     warn="#ff7a6b",
+    caution="#ffb347",
 )
 
 
@@ -327,6 +330,11 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
                     font=("", 11, "bold"))
     style.configure("Section.TLabel", background=p.bg, foreground=p.text,
                     font=("", 9, "bold"))
+    # Un lien : la couleur d'accent et le souligne, comme dans un navigateur.
+    style.configure("Link.TLabel", background=p.bg, foreground=p.accent,
+                    font=("", 9, "underline"))
+    style.configure("Banner.TLabel", background=p.bg, foreground=p.text,
+                    font=("", 16, "bold"))
     style.configure("TLabelframe", background=p.bg, bordercolor=p.border)
     style.configure("TLabelframe.Label", background=p.bg, foreground=p.text_muted)
 

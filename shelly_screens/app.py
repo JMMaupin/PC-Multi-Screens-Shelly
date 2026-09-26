@@ -492,6 +492,10 @@ class Application:
 
         self._run_async("Capture screen layout", run)
 
+    def apply_outlets(self, targets: dict[str, bool]) -> None:
+        """Applique une selection de prises hors profil, en tache de fond."""
+        self._run_async("Screen selection", lambda: self.controller.apply_outlets(targets))
+
     def stay_after_capture(self) -> None:
         """Garde tout allume : « All on » devient le profil en cours."""
         self._run_async(

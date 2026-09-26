@@ -16,4 +16,4 @@ ne dit pas de quel code il parle fait perdre plus de temps qu'il n'en fait
 gagner.
 """
 
-__version__ = "1.14"
+__version__ = "1.15"

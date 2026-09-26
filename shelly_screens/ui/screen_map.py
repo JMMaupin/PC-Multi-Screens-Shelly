@@ -23,10 +23,13 @@ from __future__ import annotations
 import math
 import tkinter as tk
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from ..i18n import t
 from .theme import Palette
+
+if TYPE_CHECKING:
+    from ..config import AppConfig
 
 STATE_ON = "on"  # alimente par le profil
 STATE_OFF = "off"  # coupe par le profil
@@ -132,13 +135,18 @@ class ScreenMap:
         palette: Callable[[], Palette],
         on_toggle: Callable[[str], None],
         empty_text: str,
+        compact: bool = False,
+        height: int = 150,
     ) -> None:
+        # `compact` : le nom seul, sans la ligne de details -- pour un plan
+        # reduit, ou elle ne tiendrait pas.
+        self._compact = compact
         self._palette = palette
         self._on_toggle = on_toggle
         self._empty_text = empty_text
         self._tiles: list[ScreenTile] = []
         self._hits: list[tuple[tuple[float, float, float, float], str]] = []
-        self.canvas = tk.Canvas(parent, highlightthickness=0, height=150)
+        self.canvas = tk.Canvas(parent, highlightthickness=0, height=height)
         self.canvas.bind("<Configure>", lambda _e: self.draw())
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<Motion>", self._on_motion)
@@ -215,6 +223,12 @@ class ScreenMap:
         centre_x = (x0 + x1) / 2
         centre_y = (y0 + y1) / 2
         wrap = max(20, x1 - x0 - 10)
+        if self._compact:
+            canvas.create_text(
+                centre_x, centre_y, text=tile.title, fill=title_colour,
+                font=("", 8, "bold"), width=wrap, justify="center",
+            )
+            return
         canvas.create_text(
             centre_x, centre_y - 2, anchor="s", text=tile.title, fill=title_colour,
             font=("", 10, "bold"), width=wrap, justify="center",
@@ -262,3 +276,47 @@ def describe(
     elif state == STATE_UNMANAGED:
         parts.append(t("not on an outlet"))
     return "  ·  ".join(parts)
+
+
+def build_tiles(
+    config: "AppConfig",
+    lit: Callable[[str], bool | None],
+    editable: bool,
+    ghosts: tuple[str, ...] | list[str] = (),
+) -> list[ScreenTile]:
+    """Les ecrans memorises, prets a dessiner.
+
+    `lit(ref)` dit si la prise d'un ecran est allumee -- None : a montrer
+    allume, faute de savoir. `editable` rend les ecrans cliquables. Commun
+    au plan des reglages et a celui de la fenetre du raccourci : meme
+    dessin, memes regles.
+    """
+    by_key = {o.monitor_key: o for o in config.outlets if o.monitor_key}
+    tiles = []
+    for screen in config.screens:
+        outlet = by_key.get(screen.key)
+        ref = None
+        if outlet is None:
+            state = STATE_UNMANAGED
+            title = screen.name or t("Screen")
+        elif outlet.never_switch_off:
+            state, title = STATE_FIXED, outlet.label
+        else:
+            on = lit(outlet.ref)
+            state = STATE_OFF if on is False else STATE_ON
+            if on is False and outlet.label in ghosts:
+                state = STATE_GHOST
+            title = outlet.label
+            ref = outlet.ref if editable else None
+        tiles.append(ScreenTile(
+            rect=screen.rect,
+            title=title,
+            detail=describe(state, screen.width, screen.height, screen.primary,
+                            screen.scale, screen.diagonal),
+            state=state,
+            ref=ref,
+            scale=screen.scale,
+            primary=screen.primary,
+            diagonal=screen.diagonal,
+        ))
+    return tiles

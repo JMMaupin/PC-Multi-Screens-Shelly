@@ -10,7 +10,7 @@ ramenées sur un écran allumé.
 
 | | |
 | --- | --- |
-| Appareils | Shelly Power Strip 4 Gen4 et autres Shelly à sorties commandables |
+| Appareils | **validé** : Shelly Power Strip 4 Gen4 (S4PL-00416EU, firmware 2.0.1-beta3) ; autres Shelly à sorties commandables non testés |
 | Découverte | nom mDNS `<device-id>.local`, puis adresse connue, puis balayage |
 | Protocole | JSON-RPC sur HTTP, authentification Digest SHA-256 optionnelle |
 | Dépendances | aucune — bibliothèque standard de Python 3.12+ |
@@ -49,7 +49,39 @@ perdrait le réseau et mettrait une dizaine de secondes à revenir.
 ### 2. Déclarer les appareils
 
 Onglet **Devices** → **Add device**. Le balayage du réseau prend une
-vingtaine de secondes ; saisir l'adresse directement est instantané.
+vingtaine de secondes : il ne part donc pas tout seul, c'est **Scan
+network** qui le lance. Saisir l'adresse directement est instantané.
+
+**Appareil neuf ou remis à zéro** : bouton **First setup of a new
+device...**, un assistant en cinq étapes.
+
+1. **Le modèle** — pour l'instant, le Shelly Power Strip 4 Gen4.
+2. **Ouvrir son point d'accès** : boutons 1 et 4 ensemble, 5 secondes ; les
+   quatre prises clignotent en rouge. Pas 10 secondes : ce serait une remise
+   à zéro d'usine.
+3. **Y connecter le PC** : l'assistant liste les points d'accès
+   `ShellyPStripG4-…` visibles et s'y connecte lui-même (`netsh`, sans
+   droits d'administrateur) — ou l'on passe par le menu Wi-Fi de Windows,
+   il s'en aperçoit. *Suivant* ne s'active que lorsque l'appareil répond à
+   `192.168.33.1`, identité et firmware affichés.
+4. **Le Wi-Fi de la maison** : les réseaux 2,4 GHz vus par le PC — la seule
+   bande de l'appareil —, avec leur signal en dBm et sa qualité ; au-dessous
+   de **-60 dBm**, l'assistant le signale. SSID modifiable (réseau caché),
+   mot de passe masquable.
+5. **L'envoi** : `WiFi.SetConfig`, puis l'attente d'une vraie confirmation —
+   l'appareil doit annoncer une adresse (`got ip`) ; une configuration
+   acceptée ne prouve rien, un mot de passe faux l'est aussi. En cas
+   d'échec, le dernier état est affiché et *Retour* ramène au mot de passe.
+   Le PC quitte ensuite le point d'accès et retrouve son Wi-Fi d'avant ; le
+   scan se lance et **présélectionne le nouvel appareil**, reconnu à sa
+   MAC — ou, faute de le trouver, l'interroge à l'adresse annoncée.
+
+**On ne demande jamais à l'appareil de scanner les réseaux.** Il n'a qu'une
+radio : pour scanner, il quitte le canal de son point d'accès, et certains
+exemplaires le ferment purement et simplement — la mise en service s'arrête
+alors net. C'est pourquoi la liste des réseaux vient du PC : le signal est
+une indication, d'autant plus juste que le PC est près de l'endroit où
+restera l'appareil.
 
 Chaque appareil reçoit une **clé courte** (`strip`, `strip2`, `plug`), et
 c'est elle que les profils référencent — une prise se désigne par
@@ -478,13 +510,29 @@ applique le profil, sans confirmation, et la fenêtre se ferme.
 | Touche | Effet |
 | --- | --- |
 | ↑ ↓ (ou ← →) | déplace la sélection, en bouclant |
-| Entrée | applique le profil sélectionné |
+| Entrée | applique le profil sélectionné — ou, si des écrans ont été basculés sur le plan, cette sélection |
 | 1 à 9 | applique directement l'un des neuf premiers profils |
 | Échap, ou le raccourci à nouveau | ferme sans rien changer |
 
 La sélection part du profil en cours, marqué d'une coche. Le survol à la
 souris déplace la même sélection : il n'y a jamais deux surbrillances. La
 fenêtre se ferme aussi d'elle-même dès qu'on clique ailleurs.
+
+Sous les boutons, **le plan des écrans**, dessiné comme dans les réglages.
+À l'ouverture, il montre ce qui est allumé en ce moment ; **dès que la
+sélection bouge** — flèches, Début, Fin, survol —, il montre **ce que
+donnerait le profil sélectionné**. **Un clic sur un écran** part de ce qui
+est affiché et bascule son état prévu, **sans rien commuter** : on peut
+partir d'un profil et l'ajuster pour cette fois. C'est **Entrée** ou **Apply** qui met la
+sélection en œuvre, Échap l'abandonne ; changer de sélection abandonne les
+clics, et le plan montre toujours ce qui arrivera si l'on valide.
+
+C'est toujours une **configuration ponctuelle, hors profils** — même si
+elle ressemble à l'un d'eux : les clics **ne modifient aucun profil**, et
+aucun ne devient « en cours ». Seuls les écrans basculés sont commutés, avec
+le même enchaînement qu'un profil (allumer d'abord, couper ensuite, ramener
+les fenêtres). Au réveil, les prises reviennent telles qu'elles étaient
+avant la veille.
 
 Le raccourci se change dans **Behaviour** → **Profile shortcut** : cases
 Ctrl / Win / Alt / Shift et une touche (lettre, chiffre ou F1 à F12). Chaque
@@ -658,11 +706,14 @@ shelly_screens/
   sensing.py                 installation et suivi des scripts embarqués
   power_history.py           historique de consommation (SQLite)
   screen_layout.py           concordance prises / écrans avant un relevé
+  product.py                 auteur, liens, appareils validés (onglet About)
+  wifi_setup.py              première mise en service : point d'accès, Wi-Fi
   app.py                     icône, menu, événements système
   scripts/                   pc_sensing.js, pc_probe.js (exécutés sur l'appareil)
   win/
     api.py                   ctypes communs, conscience du DPI
     monitors.py              énumération des écrans, clé stable
+    wlan.py                  carte Wi-Fi du PC (netsh) : lister, rejoindre, quitter
     layout.py                fenêtres restées sur un écran coupé
     icon.py                  génération de l'icône
     shell.py                 fenêtre cachée, zone de notification, messages
@@ -671,6 +722,7 @@ shelly_screens/
   ui/history_window.py       fenêtre d'historique de consommation
   ui/profile_picker.py       fenêtre de choix des profils (raccourci global)
   ui/screen_map.py           plan des écrans de l'onglet Profiles
+  ui/first_setup.py          assistant de première mise en service
 ```
 
 ## Points techniques

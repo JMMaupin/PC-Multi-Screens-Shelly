@@ -315,6 +315,80 @@ CATALOG: dict[str, str] = {
     "Keep '{all_on}'": "Garder '{all_on}'",
     "All on": "Tous en marche",
     "▲ Move up": "▲ Monter",
+    "About": "A propos",
+    # --- premiere mise en service
+    "First setup of a new device": "Premiere mise en service d'un appareil",
+    "First setup of a new device...": "Premiere mise en service...",
+    "1. Which device?": "1. Quel appareil ?",
+    "Choose the model to set up. Only validated models are offered.":
+        "Choisissez le modele a mettre en service. Seuls les modeles valides sont proposes.",
+    "2. Open the device's access point": "2. Ouvrir le point d'acces de l'appareil",
+    "Plug the power strip in. Press buttons 1 and 4 together and hold them for 5 seconds, then release. The four outlets blink red: the access point is open. Do not hold for 10 seconds: that would be a factory reset.":
+        "Branchez la multiprise. Appuyez ensemble sur les boutons 1 et 4 pendant 5 secondes, puis relachez. Les quatre prises clignotent en rouge : le point d'acces est ouvert. Ne maintenez pas 10 secondes : ce serait une remise a zero d'usine.",
+    "Its Wi-Fi network then appears, named {prefix}... followed by its MAC address.":
+        "Son reseau Wi-Fi apparait alors, nomme {prefix}... suivi de son adresse MAC.",
+    "3. Connect this PC to it": "3. Y connecter ce PC",
+    "Select the device's network and connect. You can also connect from the Windows Wi-Fi menu: the assistant notices it by itself.":
+        "Selectionnez le reseau de l'appareil et connectez-vous. Vous pouvez aussi passer par le menu Wi-Fi de Windows : l'assistant s'en apercoit tout seul.",
+    "Looking for the device...": "Recherche de l'appareil...",
+    "Connect": "Connecter",
+    "Connecting to {ssid}...": "Connexion a {ssid}...",
+    "No access point selected. Refresh once the outlets blink red.":
+        "Aucun point d'acces selectionne. Rafraichissez une fois que les prises clignotent en rouge.",
+    "Windows refused the connection. Connect from its Wi-Fi menu instead.":
+        "Windows a refuse la connexion. Passez plutot par son menu Wi-Fi.",
+    "Connected to {model}, MAC {mac}, firmware {firmware}.":
+        "Connecte a {model}, MAC {mac}, firmware {firmware}.",
+    "4. Choose the Wi-Fi network": "4. Choisir le reseau Wi-Fi",
+    "Networks seen by this PC, on 2.4 GHz: the only band the device uses. The signal is measured by the PC, so place it close to where the device will stay. Prefer {limit} dBm or better (excellent): below -70 dBm the connection may drop.":
+        "Reseaux vus par ce PC, en 2,4 GHz : la seule bande qu'utilise l'appareil. Le signal est mesure par le PC, a placer donc pres de l'endroit ou restera l'appareil. Preferez {limit} dBm ou mieux (excellent) : en dessous de -70 dBm, la connexion peut decrocher.",
+    "Network (SSID)": "Reseau (SSID)",
+    "Quality": "Qualite",
+    "Channel": "Canal",
+    "Show": "Afficher",
+    "Send to the device": "Envoyer a l'appareil",
+    "Rescan": "Relancer le scan",
+    "The device's access point dropped: reconnecting this PC to it...":
+        "Le point d'acces de l'appareil s'est coupe : reconnexion de ce PC...",
+    "The device closed its access point: looking for it on your network...":
+        "L'appareil a ferme son point d'acces : recherche sur votre reseau...",
+    "The device closed its access point but was not found on your network. It may still be joining: scan the network in a moment. Otherwise, check the password.":
+        "L'appareil a ferme son point d'acces mais reste introuvable sur votre reseau. Il se connecte peut-etre encore : balayez le reseau dans un instant. Sinon, verifiez le mot de passe.",
+    "Scanning the Wi-Fi networks from this PC...": "Scan des reseaux Wi-Fi depuis ce PC...",
+    "5 GHz only": "5 GHz seulement",
+    "This PC only sees this network on 5 GHz, which the device cannot use. A dual-band router often uses the same name on 2.4 GHz: try it, the device will tell.":
+        "Ce PC ne voit ce reseau qu'en 5 GHz, que l'appareil ne capte pas. Une box double bande emet souvent le meme nom en 2,4 GHz : essayez, l'appareil le dira.",
+    "This PC sees no 2.4 GHz network: type the name of yours.":
+        "Ce PC ne voit aucun reseau 2,4 GHz : saisissez le nom du votre.",
+    "Signal below {limit} dBm: the device may lose the connection. Consider a closer access point.":
+        "Signal en dessous de {limit} dBm : l'appareil risque de perdre la connexion. Envisagez un point d'acces plus proche.",
+    "Choose or type a network first.": "Choisissez ou saisissez d'abord un reseau.",
+    "5. Connecting the device": "5. Connexion de l'appareil",
+    "Sending the Wi-Fi settings for {ssid}...": "Envoi des reglages Wi-Fi de {ssid}...",
+    "Settings accepted by the device.": "Reglages acceptes par l'appareil.",
+    "Waiting for the device to join {ssid}...": "Attente de la connexion de l'appareil a {ssid}...",
+    "The device did not accept the settings: {error}": "L'appareil a refuse les reglages : {error}",
+    "The device did not join {ssid} (last status: {status}). Check the password, then try again.":
+        "L'appareil n'a pas rejoint {ssid} (dernier etat : {status}). Verifiez le mot de passe, puis recommencez.",
+    "Joined {ssid}: address {ip}{quality}.": "{ssid} rejoint : adresse {ip}{quality}.",
+    ", signal {rssi} dBm ({quality})": ", signal {rssi} dBm ({quality})",
+    "Giving this PC its Wi-Fi back...": "Retour de ce PC a son Wi-Fi...",
+    "Done. Looking for the device on your network...": "Termine. Recherche de l'appareil sur votre reseau...",
+    "Next": "Suivant",
+    "Back": "Retour",
+    "Finish": "Terminer",
+    "New device found: check it, then Add selected.":
+        "Nouvel appareil trouve : verifiez-le, puis Ajouter la selection.",
+    "Version {version}": "Version {version}",
+    "Author: {author}": "Auteur : {author}",
+    "Validated devices": "Appareils valides",
+    "model {model}, firmware {firmware}": "modele {model}, firmware {firmware}",
+    "Other Shelly devices with switchable outputs may work, but have not been tested.":
+        "D'autres appareils Shelly a sorties commandables peuvent fonctionner, mais n'ont pas ete testes.",
+    "Releases": "Versions publiees",
+    "(coming soon)": "(bientot disponible)",
+    "Enter or Apply to switch the screens, Esc to cancel":
+        "Entree ou Appliquer pour commuter les ecrans, Echap pour annuler",
     "▼ Move down": "▼ Descendre",
     "Profile order saved": "Ordre des profils enregistre",
     "built-in, every outlet on": "integre, toutes les prises allumees",

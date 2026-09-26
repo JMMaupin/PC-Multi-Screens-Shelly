@@ -11,6 +11,15 @@ les neuf premiers profils, Echap ferme, et le raccourci presse une seconde
 fois aussi. Le survol a la souris deplace la meme selection : une seule
 surbrillance, jamais deux qui se contredisent. Elle se ferme d'elle-meme quand on clique ailleurs :
 un choix rapide qui trainerait a l'ecran deviendrait un encombrement.
+
+Sous les boutons, le plan des ecrans, dessine comme dans les reglages. A
+l'ouverture, il montre l'etat reel ; des que la selection bouge, il montre
+ce que donnerait le profil selectionne. Un clic sur un ecran part de ce qui
+est affiche et bascule son etat prevu, sans rien commuter : c'est Entree,
+ou le bouton Appliquer, qui met la selection en oeuvre. C'est toujours une
+configuration ponctuelle, hors profils : les clics ne modifient aucun
+profil, et aucun profil ne devient « en cours ». Changer de selection
+abandonne les clics : le plan montre toujours ce qui arrivera si l'on valide.
 """
 
 from __future__ import annotations
@@ -21,6 +30,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
+from . import screen_map
 from . import theme as theme_module
 from ..i18n import t
 from ..win import icon as icon_module
@@ -36,6 +46,7 @@ _current: "ProfilePicker | None" = None
 # Largeur des boutons, en caracteres : assez pour un nom de profil
 # ordinaire, sans que la fenetre s'etale.
 BUTTON_WIDTH = 26
+MAP_HEIGHT = 120  # le plan des ecrans, sous les boutons
 
 
 def toggle_picker(application: "Application") -> None:
@@ -88,6 +99,7 @@ class ProfilePicker:
         # boite qui ne vit que quelques secondes.
         root.attributes("-toolwindow", True)
         palette = theme_module.apply(root, config.settings.theme)
+        self.palette = palette
         root.configure(background=palette.bg)
         theme_module.apply_titlebar(root, palette.dark)
 
@@ -107,6 +119,7 @@ class ProfilePicker:
         body = ttk.Frame(root, padding=14)
         body.pack(fill="both", expand=True)
         profiles = config.sorted_profiles()
+        self.profiles = profiles
         current = config.settings.last_profile
         self.buttons: list[ttk.Button] = []
         # Le profil en cours : la selection de depart, et une coche. Il
@@ -128,13 +141,14 @@ class ProfilePicker:
                 command=lambda name=profile.name: self.choose(name),
             )
             button.pack(fill="x", pady=3)
-            button.bind("<Enter>", lambda _e, b=button: b.focus_set())
+            button.bind("<Enter>", lambda _e, i=index: self._hover(i))
             self.buttons.append(button)
             if index < 9:
                 root.bind(str(index + 1), lambda _e, name=profile.name: self.choose(name))
+        self._build_map(body)
+        self.hint = tk.StringVar(root, value=t("Arrows and Enter to choose, Esc to close"))
         ttk.Label(
-            body, text=t("Arrows and Enter to choose, Esc to close"), style="Hint.TLabel",
-            anchor="center",
+            body, textvariable=self.hint, style="Hint.TLabel", anchor="center",
         ).pack(fill="x", pady=(8, 0))
 
         root.bind("<Escape>", lambda _e: self.close())
@@ -172,14 +186,25 @@ class ProfilePicker:
         except (ValueError, OSError):
             pass
         root.focus_force()
-        self._select(self.start)
+        # A l'ouverture, le plan garde l'etat reel : la previsualisation ne
+        # commence qu'au premier mouvement de la selection.
+        self._select(self.start, preview=False)
 
     # ------------------------------------------------------------- clavier
 
-    def _select(self, index: int) -> str:
+    def _select(self, index: int, preview: bool = True) -> str:
         if self.buttons:
-            self.buttons[index % len(self.buttons)].focus_set()
+            index %= len(self.buttons)
+            self.buttons[index].focus_set()
+            if preview:
+                self._preview(self.profiles[index])
         return "break"
+
+    def _hover(self, index: int) -> None:
+        """Le survol deplace la selection -- sans effacer les clics s'il n'y a
+        pas de changement : repasser sur le bouton deja choisi ne dit rien."""
+        if self.root.focus_get() is not self.buttons[index]:
+            self._select(index)
 
     def _move(self, step: int) -> str:
         """Selection suivante ou precedente, en bouclant aux extremites."""
@@ -188,6 +213,10 @@ class ProfilePicker:
         return self._select(index + step)
 
     def _invoke(self, _event) -> str:
+        # Des ecrans ont ete bascules sur le plan : Entree valide ce choix-la.
+        if self._changed():
+            self.apply_selection()
+            return "break"
         focused = self.root.focus_get()
         if focused in self.buttons:
             focused.invoke()
@@ -208,6 +237,95 @@ class ProfilePicker:
             # `focus_get` echoue quand le focus est sur une fenetre d'un
             # autre programme : la fenetre n'est plus active.
             self.close()
+
+    # --------------------------------------------------------------- plan
+
+    def _build_map(self, body: ttk.Frame) -> None:
+        """Le plan des ecrans et son bouton Appliquer, s'il y a une disposition."""
+        config = self.app.config
+        # L'etat reel des prises d'ecran : le point de depart des clics.
+        self.actual = {
+            o.ref: bool(self.app.states[o.ref].output)
+            for o in config.outlets
+            if o.monitor_key and o.ref in self.app.states
+        }
+        self.pending = dict(self.actual)
+        # Vrai une fois des ecrans bascules a la main : Entree valide alors
+        # ces clics, et non le profil selectionne.
+        self.edited = False
+        self.map = None
+        self.apply_button = None
+        if not config.screens:
+            return
+        self.map = screen_map.ScreenMap(
+            body, palette=lambda: self.palette, on_toggle=self._toggle,
+            empty_text="", compact=True, height=MAP_HEIGHT,
+        )
+        self.map.canvas.pack(fill="x", pady=(10, 4))
+        self.apply_button = ttk.Button(
+            body, text=t("Apply"), command=self.apply_selection, state="disabled"
+        )
+        self.apply_button.pack(fill="x")
+        self._draw_map()
+
+    def _draw_map(self) -> None:
+        if self.map is None:
+            return
+        self.map.show(screen_map.build_tiles(
+            self.app.config, lambda ref: self.pending.get(ref), editable=True,
+        ))
+
+    def _preview(self, profile) -> None:
+        """Montre ce que donnerait ce profil ; abandonne les clics en cours."""
+        if self.map is None:
+            return
+        config = self.app.config
+        self.pending = {
+            ref: profile.wants(ref) or config.outlet(ref).never_switch_off
+            for ref in self.actual
+        }
+        self.edited = False
+        self._refresh_controls()
+
+    def _toggle(self, ref: str) -> None:
+        """Bascule l'etat prevu d'un ecran : rien n'est encore commute."""
+        if ref not in self.pending:
+            return  # appareil muet : on ne sait pas ce qu'on changerait
+        self.pending[ref] = not self.pending[ref]
+        self.edited = True
+        self._refresh_controls()
+
+    def _refresh_controls(self) -> None:
+        changed = self._changed()
+        self.apply_button.configure(state="normal" if changed else "disabled")
+        self.hint.set(
+            t("Enter or Apply to switch the screens, Esc to cancel")
+            if changed else t("Arrows and Enter to choose, Esc to close")
+        )
+        self._draw_map()
+
+    def _changed(self) -> bool:
+        """Des clics a valider, et qui changeraient quelque chose."""
+        return self.edited and self.pending != self.actual
+
+    def apply_selection(self) -> None:
+        """Met en oeuvre les ecrans bascules sur le plan, puis ferme.
+
+        Une configuration ponctuelle, meme si elle ressemble a un profil :
+        choisir sur le plan, c'est vouloir autre chose que les profils. On
+        ne commute que les ecrans qui changent ; le reste ne bouge pas.
+        """
+        if self.closing or not self._changed():
+            return
+        config = self.app.config
+        changes = {ref: on for ref, on in self.pending.items() if on != self.actual[ref]}
+        self.app.log(
+            "Screen selection from the keyboard shortcut: "
+            + ", ".join(f"{config.outlet(r).label} {'on' if on else 'off'}"
+                        for r, on in changes.items())
+        )
+        self.app.apply_outlets(changes)
+        self.close()
 
     # --------------------------------------------------------------- actions
 
