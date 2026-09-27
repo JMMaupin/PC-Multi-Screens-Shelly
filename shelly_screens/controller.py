@@ -97,6 +97,13 @@ class NotConnected(RuntimeError):
     """No device reachable for now."""
 
 
+class NotInControl(RuntimeError):
+    """Another Windows session drives the devices."""
+
+    def __init__(self) -> None:
+        super().__init__("Another Windows session drives the devices")
+
+
 class SensingRealmMissing(RuntimeError):
     """Cannot set a password without knowing the device's identity."""
 
@@ -171,6 +178,10 @@ class ScreenController:
         self.capture_attempted_at = 0.0
         # Outlets switched off whose screen remains on the Windows desktop.
         self.ghost_screens: list[str] = []
+        # False while another Windows session drives the devices. The
+        # application stops asking anything of them then; this flag is the
+        # last line: whatever path gets here, no outlet is switched.
+        self.drives_devices = True
 
     # ------------------------------------------------------------ connection
 
@@ -402,6 +413,19 @@ class ScreenController:
         self._log(f"Device '{device_config.key}' added ({identity.model} at {identity.host})")
         return device_config
 
+    def forget_unknown(self) -> None:
+        """Drop the clients of devices the configuration no longer lists.
+
+        After unsaved hardware changes are discarded, a device added
+        meanwhile disappears from the configuration: its client must go
+        with it, or the application would keep commanding it.
+        """
+        known = self.config.device_keys()
+        for key in list(self._devices):
+            if key not in known:
+                self._devices.pop(key, None)
+                self._identities.pop(key, None)
+
     def forget(self, key: str) -> None:
         self._devices.pop(key, None)
         self._identities.pop(key, None)
@@ -566,6 +590,8 @@ class ScreenController:
         identification assistant does without it: it switches each screen
         off in turn and back on right away, that is its very principle.
         """
+        if not self.drives_devices:
+            raise NotInControl()
         outlet = self.config.outlet(ref)
         if outlet is not None and outlet.never_switch_off and not on:
             reason = "powers the PC" if outlet.host_pc else "is marked critical"
@@ -1024,6 +1050,11 @@ class ScreenController:
         pause: Windows only leaves a few moments before suspending the process.
         """
         done: list[str] = []
+        if not self.drives_devices:
+            if refs:
+                report.errors.append("another Windows session drives the devices")
+                self._log("REFUSED: another Windows session drives the devices")
+            return done
         delay = 0.0 if urgent else max(0.0, self.config.settings.switch_delay_ms / 1000.0)
         ordered = sorted(refs)
         for index, ref in enumerate(ordered):

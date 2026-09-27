@@ -347,6 +347,10 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
     style.configure("Card.TLabelframe.Label", background=p.surface,
                     foreground=p.text_muted, font=("", 9, "bold"))
     style.configure("Card.TFrame", background=p.surface)
+    # The banner announcing hardware changes that await an administrator.
+    style.configure("Admin.TFrame", background=p.surface)
+    style.configure("Admin.TLabel", background=p.surface, foreground=p.warn,
+                    font=("", 9, "bold"))
     style.configure("Card.TLabel", background=p.surface, foreground=p.text)
     style.configure("Hint.Card.TLabel", background=p.surface, foreground=p.text_muted)
     style.configure("Section.Card.TLabel", background=p.surface, foreground=p.text,

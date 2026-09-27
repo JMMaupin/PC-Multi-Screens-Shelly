@@ -50,11 +50,11 @@ class DurableFileHandler(logging.handlers.RotatingFileHandler):
 
 
 def log_path(base: Path | None = None) -> Path:
-    """Location of the log file, next to the configuration."""
-    from .config import config_path
+    """Location of the log file: in `base` if given, otherwise in the
+    machine's log folder, one file per account."""
+    from . import paths
 
-    folder = base or config_path().parent
-    return folder / LOG_FILENAME
+    return base / LOG_FILENAME if base is not None else paths.default().log_file
 
 
 def setup(base: Path | None = None, verbose: bool = False) -> logging.Logger:

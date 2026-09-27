@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Launches Shelly Screens at sign-in, without a console.
+    Launches Shelly PC Screens from the sources at sign-in, without a console.
+    The installed executable does not need it: it registers itself.
 
 .DESCRIPTION
     Places a shortcut in the user's Startup folder. This folder requires no
@@ -85,5 +86,5 @@ if ($Desktop) {
 Write-Host "Shortcut created: $shortcut" -ForegroundColor Green
 Write-Host "Target          : $pythonw"
 Write-Host "Shelly Screens will start without a console at the next sign-in."
-Write-Host "Logs            : $(Join-Path $projectDir 'shelly-screens.log')"
+Write-Host "Logs            : $(Join-Path $env:ProgramData 'Shelly PC Screens\logs')"
 Write-Host "To remove it    : powershell -ExecutionPolicy Bypass -File install-startup.ps1 -Remove"

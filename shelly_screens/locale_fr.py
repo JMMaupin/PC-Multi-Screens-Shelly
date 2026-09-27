@@ -177,7 +177,7 @@ CATALOG: dict[str, str] = {
     'fair': 'moyen',
     'weak': 'faible',
     'Frozen measurement: {outlets}': 'Mesure figee : {outlets}',
-    'Shelly Screens {version} - Settings': 'Shelly Screens {version} - Reglages',
+    '{app} {version} - Settings': '{app} {version} - Reglages',
     'On-device script is out of date': "Le script embarque n'est plus a jour",
     'Update it now': 'Le mettre a jour maintenant',
     'stored': 'memorise',
@@ -580,4 +580,34 @@ CATALOG: dict[str, str] = {
     "-{min} min": "-{min} min",
     "-{hours} h": "-{hours} h",
     "now": "maintenant",
+    # --- hardware configuration reserved to administrators
+    "Hardware changes not saved yet: they apply to every account on this PC "
+    "and need an administrator.":
+        "Modifications materielles pas encore enregistrees : elles valent pour "
+        "tous les comptes de ce PC et demandent un administrateur.",
+    "Discard": "Annuler les modifications",
+    "Save changes (administrator)": "Enregistrer (administrateur)",
+    "Waiting for administrator approval...": "En attente de l'accord administrateur...",
+    "Not saved: administrator approval was declined.":
+        "Non enregistre : l'accord administrateur a ete refuse.",
+    "Not saved: {reason}": "Non enregistre : {reason}",
+    "Hardware changes saved.": "Modifications materielles enregistrees.",
+    "Save the hardware changes? They apply to every account on this PC and "
+    "need an administrator.\n\nNo discards them.":
+        "Enregistrer les modifications materielles ? Elles valent pour tous les "
+        "comptes de ce PC et demandent un administrateur.\n\nNon les annule.",
+    "Sleep and shutdown and Timing apply to every account on this PC: saving "
+    "them needs an administrator. The rest is yours alone.":
+        "Veille et arret et Temporisation valent pour tous les comptes de ce PC : les "
+        "enregistrer demande un administrateur. Le reste ne concerne que vous.",
+    "Profiles and windows": "Profils et fenetres",
+    # --- several sessions open
+    "{user}'s session": "la session de {user}",
+    "another session": "une autre session",
+    "driven by {driver}": "pilote par {driver}",
+    "Driven by {driver}": "Pilote par {driver}",
+    "The power strips are driven by {driver}, on the screen right now. "
+    "Switch to it to change profiles or settings.":
+        "Les multiprises sont pilotees par {driver}, affichee a l'ecran en ce "
+        "moment. Basculer vers elle pour changer de profil ou de reglages.",
 }

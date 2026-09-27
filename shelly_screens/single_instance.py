@@ -23,7 +23,9 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
 # `Local\` limits the scope to the current Windows session: two accounts
-# logged in side by side each keep their own instance.
+# logged in side by side each keep their own instance -- their icon, their
+# profiles. Which of them drives the shared power strips is decided
+# elsewhere: the session on the screen (see `win.session`).
 MUTEX_NAME = r"Local\ShellyScreens.SingleInstance"
 ERROR_ALREADY_EXISTS = 183
 

@@ -55,9 +55,16 @@ def open_settings(application: "Application") -> None:
     def run() -> None:
         global _is_open
         try:
-            root = tk.Tk()
-            SettingsWindow(root, application)
-            root.mainloop()
+            # Discarding unsaved hardware changes rebuilds the window from
+            # the configuration read back: every field then shows what is
+            # really in force, with nothing left over from the discarded
+            # edits.
+            while True:
+                root = tk.Tk()
+                window = SettingsWindow(root, application)
+                root.mainloop()
+                if not window.reopen:
+                    break
         except Exception as exc:  # noqa: BLE001 - a failed UI must not kill the app
             application.log(f"Settings window failed: {exc}")
         finally:
@@ -74,11 +81,12 @@ class SettingsWindow:
         self.root = root
         self.app = application
         self.config = application.config
+        self.reopen = False
 
         # Before building anything: widgets read their text only once.
         i18n.set_language(self.config.settings.language)
         icon_module.apply_to_window(root)
-        root.title(t("Shelly Screens {version} - Settings", version=__version__))
+        root.title(t("{app} {version} - Settings", app=product.APP_NAME, version=__version__))
         # The Devices view lines up 944 pixels of columns; any narrower and
         # the last ones get truncated with nothing to show it.
         root.geometry("1020x760")
@@ -107,6 +115,7 @@ class SettingsWindow:
         notebook.add(self.about_tab, text=t("About"))
         # Without this call, Ctrl+Tab and Alt+letter do not switch tabs.
         notebook.enable_traversal()
+        self._build_admin_banner()
 
         self.status = tk.StringVar(self.root, value="")
         ttk.Label(root, textvariable=self.status, anchor="w", padding=(12, 6)).pack(
@@ -135,6 +144,7 @@ class SettingsWindow:
 
     def _schedule_refresh(self) -> None:
         self.refresh_readings()
+        self._update_admin_banner()
         # The layout may have been captured in the background: a profile
         # that turns everything on, a procedure started from the tray icon.
         ghosts = list(self.app.controller.ghost_screens)
@@ -203,13 +213,108 @@ class SettingsWindow:
 
     def _on_close(self) -> None:
         self._save()
+        if self.config.machine_pending():
+            # Closing must not leave hardware changes in force that nobody
+            # approved: they would last until the next restart.
+            answer = messagebox.askyesnocancel(
+                product.APP_NAME,
+                t("Save the hardware changes? They apply to every account on "
+                  "this PC and need an administrator.\n\nNo discards them."),
+                parent=self.root,
+            )
+            if answer is None:
+                return
+            if answer:
+                self._save_machine(then=self.root.destroy)
+                return
+            self.config.reload_machine()
+            self.app.controller.forget_unknown()
+            self._save()
         self.root.destroy()
 
     def _save(self) -> None:
         try:
             self.config.save()
         except OSError as exc:
-            messagebox.showerror("Shelly Screens", f"Cannot save configuration:\n{exc}")
+            messagebox.showerror(product.APP_NAME, f"Cannot save configuration:\n{exc}")
+        self._update_admin_banner()
+
+    # ------------------------------------------------ administrator changes
+
+    def _build_admin_banner(self) -> None:
+        """Banner shown while hardware changes wait for an administrator.
+
+        Every change applies at once, as before; only writing it down needs
+        rights this account may not have. Rather than a UAC prompt at every
+        ticked box, changes pile up here and are saved together.
+        """
+        banner = self.admin_banner = ttk.Frame(self.root, style="Admin.TFrame", padding=(12, 8))
+        ttk.Label(
+            banner,
+            text=t("Hardware changes not saved yet: they apply to every account "
+                   "on this PC and need an administrator."),
+            style="Admin.TLabel",
+            wraplength=600,
+            justify="left",
+        ).pack(side="left", fill="x", expand=True)
+        ttk.Button(banner, text=t("Discard"), command=self._discard_machine).pack(side="right")
+        self.admin_save_button = ttk.Button(
+            banner, text=t("Save changes (administrator)"), command=self._save_machine
+        )
+        self.admin_save_button.pack(side="right", padx=(0, 8))
+        self._banner_shown = False
+
+    def _update_admin_banner(self) -> None:
+        pending = self.config.machine_pending()
+        if pending and not self._banner_shown:
+            self.admin_banner.pack(fill="x", padx=10, pady=(10, 0), before=self.notebook)
+        elif not pending and self._banner_shown:
+            self.admin_banner.pack_forget()
+        self._banner_shown = pending
+
+    def _save_machine(self, then=None) -> None:
+        """Save the hardware changes through UAC, off the UI thread."""
+        from .. import machine_admin
+
+        self.admin_save_button.state(["disabled"])
+        self.set_status(t("Waiting for administrator approval..."))
+        owner = int(self.root.wm_frame(), 16)
+
+        def worker() -> None:
+            error = ""
+            try:
+                machine_admin.save(self.config, owner=owner)
+            except machine_admin.SaveCancelled:
+                error = t("Not saved: administrator approval was declined.")
+            except machine_admin.SaveFailed as exc:
+                error = t("Not saved: {reason}", reason=str(exc))
+
+            def done() -> None:
+                self.admin_save_button.state(["!disabled"])
+                self._update_admin_banner()
+                if error:
+                    self.set_status(error)
+                    return
+                self.set_status(t("Hardware changes saved."))
+                self.app.log("Hardware configuration saved by an administrator")
+                if then is not None:
+                    then()
+
+            try:
+                self.root.after(0, done)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, name="machine-save", daemon=True).start()
+
+    def _discard_machine(self) -> None:
+        """Drop the hardware changes and rebuild the window from what is saved."""
+        self.config.reload_machine()
+        self.app.controller.forget_unknown()
+        self._save()
+        self.app.log("Unsaved hardware changes discarded")
+        self.reopen = True
+        self.root.destroy()
 
     # ------------------------------------------------------------- devices tab
 
@@ -394,7 +499,7 @@ class SettingsWindow:
             return
         outlets = len(self.config.outlets_of(device.key))
         if not messagebox.askyesno(
-            "Shelly Screens",
+            product.APP_NAME,
             f"Remove '{device.label}' and its {outlets} outlet(s)?\n\n"
             "Profiles referring to them will be updated.",
         ):
@@ -679,7 +784,7 @@ class SettingsWindow:
             ttk.Label(header, image=self._about_logo).pack(side="left", padx=(0, 20))
         identity = ttk.Frame(header)
         identity.pack(side="left", anchor="center")
-        ttk.Label(identity, text="Shelly Screens", style="Banner.TLabel").pack(anchor="w")
+        ttk.Label(identity, text=product.APP_NAME, style="Banner.TLabel").pack(anchor="w")
         ttk.Label(identity, text=t("Version {version}", version=__version__)).pack(
             anchor="w", pady=(4, 0)
         )
@@ -1161,11 +1266,11 @@ class SettingsWindow:
             return
         name = name.strip()
         if self.config.is_reserved_name(name):
-            messagebox.showerror("Shelly Screens", t("'{name}' is the built-in profile.",
+            messagebox.showerror(product.APP_NAME, t("'{name}' is the built-in profile.",
                                                       name=name))
             return
         if self.config.profile(name):
-            messagebox.showerror("Shelly Screens", f"'{name}' already exists.")
+            messagebox.showerror(product.APP_NAME, f"'{name}' already exists.")
             return
         order = max((p.order for p in self.config.profiles), default=-1) + 1
         self.config.profiles.append(Profile(name=name, outlets_on=[], order=order))
@@ -1184,11 +1289,11 @@ class SettingsWindow:
             return
         name = name.strip()
         if self.config.is_reserved_name(name):
-            messagebox.showerror("Shelly Screens", t("'{name}' is the built-in profile.",
+            messagebox.showerror(product.APP_NAME, t("'{name}' is the built-in profile.",
                                                       name=name))
             return
         if self.config.profile(name):
-            messagebox.showerror("Shelly Screens", f"'{name}' already exists.")
+            messagebox.showerror(product.APP_NAME, f"'{name}' already exists.")
             return
         if self.config.settings.last_profile == profile.name:
             self.config.settings.last_profile = name
@@ -1201,7 +1306,7 @@ class SettingsWindow:
         profile = self._selected_profile()
         if profile is None or profile.builtin:
             return
-        if not messagebox.askyesno("Shelly Screens", f"Delete profile '{profile.name}'?"):
+        if not messagebox.askyesno(product.APP_NAME, f"Delete profile '{profile.name}'?"):
             return
         self.config.profiles.remove(profile)
         if self.config.settings.last_profile == profile.name:
@@ -1474,7 +1579,7 @@ class SettingsWindow:
 
         def done(result, error):
             if error is not None:
-                messagebox.showerror("Shelly Screens", str(error))
+                messagebox.showerror(product.APP_NAME, str(error))
             else:
                 self.set_status(f"Measurement {result}")
             self.refresh_sensing()
@@ -1561,7 +1666,7 @@ class SettingsWindow:
         outlet = self.config.host_pc_outlet()
         if outlet is None:
             messagebox.showinfo(
-                "Shelly Screens",
+                product.APP_NAME,
                 "First mark the outlet that powers the PC, in the Outlets tab.",
             )
             return False
@@ -1573,14 +1678,14 @@ class SettingsWindow:
             return
         problem = self.config.sensing.thresholds_are_sane()
         if problem and not messagebox.askyesno(
-            "Shelly Screens", f"{problem}\n\nInstall anyway?"
+            product.APP_NAME, f"{problem}\n\nInstall anyway?"
         ):
             return
         self.set_status("Installing the on-device script...")
 
         def done(status, error):
             if error is not None:
-                messagebox.showerror("Shelly Screens", str(error))
+                messagebox.showerror(product.APP_NAME, str(error))
             else:
                 self.set_status(t("Script {state}", state=t(status.summary())))
                 self._save()
@@ -1595,7 +1700,7 @@ class SettingsWindow:
     def _remove_script(self) -> None:
         def done(_result, error):
             if error is not None:
-                messagebox.showerror("Shelly Screens", str(error))
+                messagebox.showerror(product.APP_NAME, str(error))
             else:
                 self.set_status("Script removed")
                 self._save()
@@ -1612,6 +1717,17 @@ class SettingsWindow:
     def _build_behaviour_tab(self) -> None:
         frame = self.behaviour_tab
         settings = self.config.settings
+
+        # Two owners share this tab: say which is which, since only one of
+        # them needs an administrator.
+        ttk.Label(
+            frame,
+            text=t("Sleep and shutdown and Timing apply to every account on this "
+                   "PC: saving them needs an administrator. The rest is yours alone."),
+            style="Hint.TLabel",
+            wraplength=740,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 10))
 
         power_box = ttk.LabelFrame(frame, text=t("Sleep and shutdown"), padding=10)
         power_box.pack(fill="x")
@@ -1632,14 +1748,6 @@ class SettingsWindow:
             command=self._apply_behaviour,
         ).pack(anchor="w")
 
-        self.var_apply_on_start = tk.BooleanVar(self.root, value=settings.apply_profile_on_start)
-        ttk.Checkbutton(
-            power_box,
-            text=t("Re-apply the last profile when this application starts"),
-            variable=self.var_apply_on_start,
-            command=self._apply_behaviour,
-        ).pack(anchor="w")
-
         self.shutdown_summary = tk.StringVar(self.root, value="")
         ttk.Label(
             power_box,
@@ -1649,8 +1757,16 @@ class SettingsWindow:
             style="Hint.TLabel",
         ).pack(anchor="w", pady=(8, 0))
 
-        windows_box = ttk.LabelFrame(frame, text=t("Windows"), padding=10)
+        windows_box = ttk.LabelFrame(frame, text=t("Profiles and windows"), padding=10)
         windows_box.pack(fill="x", pady=12)
+        # A preference of this account, unlike the sleep settings above.
+        self.var_apply_on_start = tk.BooleanVar(self.root, value=settings.apply_profile_on_start)
+        ttk.Checkbutton(
+            windows_box,
+            text=t("Re-apply the last profile when this application starts"),
+            variable=self.var_apply_on_start,
+            command=self._apply_behaviour,
+        ).pack(anchor="w")
         self.var_rescue = tk.BooleanVar(self.root, value=settings.rescue_offscreen_windows)
         ttk.Checkbutton(
             windows_box,
@@ -1847,10 +1963,10 @@ class SettingsWindow:
         self.config.settings.language = chosen
         self._save()
         i18n.set_language(chosen)
-        application = self.app
+        # Rebuilt by the window's own thread once this one is gone: no
+        # delay to guess, no second thread racing the first.
+        self.reopen = True
         self.root.destroy()
-        # Let the window's thread finish before reopening.
-        threading.Timer(0.4, lambda: open_settings(application)).start()
 
     def _update_theme_hint(self) -> None:
         palette = self.palette
@@ -2049,7 +2165,7 @@ class SettingsWindow:
         stay on -- the wizard never pulls the rug out from under itself.
         """
         if not self.app.online:
-            messagebox.showerror("Shelly Screens", "No Shelly device is reachable.")
+            messagebox.showerror(product.APP_NAME, "No Shelly device is reachable.")
             return
         online = self.app.controller.online_keys
         states = self.app.states
@@ -2097,7 +2213,7 @@ class SettingsWindow:
                 else ""
             )
             messagebox.showinfo(
-                "Shelly Screens",
+                product.APP_NAME,
                 "No outlet is declared as carrying a screen.\n\n"
                 "Set the Type column to « Screen » on each display outlet "
                 "first: the wizard only touches what has been declared." + detail,
@@ -3544,7 +3660,7 @@ class PasswordDialog:
     def _remove(self) -> None:
         """Remove authentication from the device."""
         if not messagebox.askyesno(
-            "Shelly Screens",
+            product.APP_NAME,
             "Remove the password from the device?\n\n"
             "Anyone on the local network will be able to command its outlets "
             "and run scripts on it again.",

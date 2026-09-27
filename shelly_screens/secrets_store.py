@@ -1,14 +1,23 @@
 """Storage of the device password.
 
 A plaintext password in a configuration file is readable by anything
-running in the session -- and the file quickly ends up in a backup or a
+running on the machine -- and the file quickly ends up in a backup or a
 folder copy. So it is encrypted with DPAPI, the Windows service designed
-for this: the key is derived from the user account, and the ciphertext can
-only be decrypted by that account, on this machine.
+for this.
 
-This is not a vault: a program running in the same session can ask
-Windows to decrypt. It protects against the file being copied elsewhere
-or read by another account, not against malware already in place.
+The key is the machine's, not an account's: the power strips are shared by
+every account on the PC, and each account's instance must be able to
+command them. The ciphertext can therefore be decrypted by any account on
+this machine, and by nothing elsewhere.
+
+This is not a vault: a program running on the machine can ask Windows to
+decrypt. It protects against the file being copied elsewhere, not against
+a local user or malware already in place -- and no scheme could, since
+every account's instance needs the password to switch its screens.
+
+Before version 2.0, ciphertexts were tied to one account. `unprotect`
+still reads them for that account, which is how the import of an older
+installation re-encrypts them with the machine key.
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 # decrypted from another program, even under the same account.
 ENTROPY = b"shelly-screens/v1"
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
+CRYPTPROTECT_LOCAL_MACHINE = 0x04
 PREFIX = "dpapi:"
 
 
@@ -64,7 +74,8 @@ def _read(blob: DATA_BLOB) -> bytes:
 
 
 def protect(secret: str) -> str:
-    """Encrypts a secret; returns a string that can be stored as is."""
+    """Encrypts a secret with the machine key; returns a string that can be
+    stored as is."""
     if not secret:
         return ""
     source = _Blob(secret.encode("utf-8"))
@@ -72,7 +83,8 @@ def protect(secret: str) -> str:
     out = DATA_BLOB()
     ok = crypt32.CryptProtectData(
         ctypes.byref(source.value), "Shelly Screens", ctypes.byref(entropy.value),
-        None, None, CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out),
+        None, None, CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE,
+        ctypes.byref(out),
     )
     if not ok:
         raise OSError(ctypes.get_last_error(), "CryptProtectData failed")
@@ -102,7 +114,8 @@ def unprotect(stored: str) -> str:
         None, None, CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out),
     )
     if not ok:
-        # Ciphertext produced by another account or another machine.
+        # Ciphertext produced on another machine, or tied to another
+        # account by a version older than 2.0.
         return ""
     return _read(out).decode("utf-8", errors="replace")
 

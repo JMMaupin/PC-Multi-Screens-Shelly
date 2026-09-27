@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import quote_plus
 
+APP_NAME = "Shelly PC Screens"
 AUTHOR = "JMMaupin"
 
 REPOSITORY_URL = "https://github.com/JMMaupin/PC-Multi-Screens-Shelly"

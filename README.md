@@ -1,4 +1,4 @@
-# Shelly Screens
+# Shelly PC Screens
 
 Controls the power of a PC's screens and peripherals through one or more
 **Shelly Power Strip 4 Gen4**, from an icon in the Windows notification
@@ -13,21 +13,102 @@ is on.
 | Devices | **validated**: Shelly Power Strip 4 Gen4 (S4PL-00416EU, firmware 2.0.1-beta3); other Shelly devices with switchable outputs untested |
 | Discovery | mDNS name `<device-id>.local`, then known address, then scan |
 | Protocol | JSON-RPC over HTTP, optional SHA-256 Digest authentication |
-| Dependencies | none — Python 3.12+ standard library |
+| Installation | one executable, installed for every account of the PC |
+| Dependencies | none — Python 3.12+ standard library (only to run from the sources) |
 
-## Quick start
+## Installation
 
-```powershell
-powershell -ExecutionPolicy Bypass -File install-startup.ps1 -Desktop
+Download `ShellyPCScreens-<version>.exe` from the
+[releases page](https://github.com/JMMaupin/PC-Multi-Screens-Shelly/releases)
+and run it from anywhere. It offers to:
+
+| What is installed | Offered |
+| --- | --- |
+| Nothing | **Install**, or **Run without installing** |
+| An older version | **Update** — the running application closes in every session, is replaced, and starts again |
+| The same or a newer version | **Open** the installed copy |
+
+Windows asks for an administrator once, through UAC. The application
+itself never runs elevated.
+
+**For every account, on purpose.** The application drives screens that
+every account on the PC shares: one account cannot own them. It is
+therefore installed in `C:\Program Files\Shelly PC Screens`, starts at
+sign-in for every account, and appears in the common Start menu and in
+*Settings → Apps → Installed apps*, where it is uninstalled — optionally
+keeping the configuration and history.
+
+**Coming from version 1.x** (run from the sources with
+`install-startup.ps1`): the installation finds the old configuration
+through its startup shortcut, imports it — passwords included, re-encrypted
+for the machine — copies the power history, then removes the old shortcuts
+so that both versions do not start side by side. The old files are left
+untouched.
+
+The executable is not signed yet: on the first launch of a downloaded
+copy, SmartScreen shows *Windows protected your PC* → *More info* → *Run
+anyway*.
+
+### Running from the sources
+
+For development, `python main.py` runs the application directly, and
+`run-console.cmd` does so with a console showing the logs live.
+`install-startup.ps1` still creates console-free shortcuts for that mode.
+
+### Building the executable
+
+```bat
+build.cmd
 ```
 
-This creates two shortcuts — one at session startup, one on the Desktop —
-that target `pythonw.exe` directly: **no console, not even a flicker at
-launch**. A single process, unlike a detour through `.cmd`, `wscript` or the
-`.pyw` association, which leave a second one running for nothing.
+produces `dist\ShellyPCScreens-<version>.exe`. PyInstaller lives in a
+dedicated environment, `.venv-build`, pinned to one version: the system
+Python is left untouched. To sign, set `SHELLY_SIGN_CERT` to a `.pfx` file
+(and `SHELLY_SIGN_PASSWORD` if needed) with `signtool.exe` on the PATH.
 
-For troubleshooting, `run-console.cmd` opens a console and shows the logs
-live.
+## Where the data lives
+
+| File | Contents | Who writes it |
+| --- | --- | --- |
+| `%ProgramData%\Shelly PC Screens\machine.json` | devices, outlets, roles, power sensing, sleep behaviour, the profiles a new account starts with | **an administrator** |
+| `%ProgramData%\Shelly PC Screens\state\state.json` | what the application notes by itself: device addresses and passwords, outlets to restore on wake, screen positions | the application, any account |
+| `%ProgramData%\Shelly PC Screens\history\` | power consumption history | the application, any account |
+| `%ProgramData%\Shelly PC Screens\logs\` | one log per account | the application, any account |
+| `%APPDATA%\Shelly PC Screens\user.json` | **this account's** profiles and preferences (shortcut, theme, language) | the account |
+
+The hardware is shared, its use is personal: every account has its own
+profiles, and a new account starts from the default ones. Each file is
+written atomically, forced to disk, with the previous version kept as
+`.bak` and used if the file is ever damaged.
+
+`SHELLY_SCREENS_DATA` points everything at one folder instead — a sandbox
+for development or tests.
+
+### Hardware settings need an administrator
+
+Devices, outlets, roles, power sensing and the sleep settings apply to every
+account, and include the safeguards — the PC's outlet, critical outlets.
+An ordinary account cannot change them by mistake: a change applies at
+once, but a banner then offers **Save changes (administrator)** — one UAC
+prompt for all of them — or **Discard**. Closing the window asks the same
+question, so that nothing unapproved stays in force.
+
+This protects against mistakes, not against a determined user: every
+account's instance must be able to decrypt the power strips' password to
+switch its screens, and the strips also have their own web page and
+buttons.
+
+### Several accounts signed in
+
+Each account runs its own instance, but only **the session shown on the
+screen drives the power strips**. The others turn their icon blue, keep the
+consumption history and the log, and explain who drives when asked for a
+profile or the settings. When the screen switches to another session
+(fast user switching, unlocking), control follows — without switching
+anything: the screens stay as the previous account left them. A Remote
+Desktop session is not in front of these screens, so it never drives.
+
+## In the notification area
 
 The icon appears in the notification area: one box per outlet, green when
 powered, grey otherwise, all red when nothing responds any more. Beyond four
@@ -222,7 +303,7 @@ step from the main screen, following shared edges.
 Screen positions are the ones **Windows** defines. But Windows forgets a
 screen as soon as its outlet is switched off, and may then shift the others
 — with the main screen off, another one takes its place at 0,0. The app
-therefore **remembers the layout** in `config.json` (`screens` section), and
+therefore **remembers the layout** in `state.json` (`screens` section), and
 only updates it when **every screen matched to an outlet is on**: that is the
 only combination that places them all relative to each other.
 
@@ -258,7 +339,7 @@ hand, counts as a real screen.
 neither the output technology nor the EDID say where its power comes from.
 Only the **Identify displays** test proves it: once each screen outlet has
 found its screen, those that stayed on through every power cut depend on
-none. They are remembered as such (`unswitched_screens` in `config.json`),
+none. They are remembered as such (`unswitched_screens` in `machine.json`),
 drawn in grey *on no outlet*, and counted separately. Any other unlinked
 physical screen is **unknown** and blocks the capture until the wizard is
 run again.
@@ -464,15 +545,21 @@ Three actions:
 ### Where the password is stored
 
 Encrypted with **DPAPI**, the Windows service designed for this, and the
-ciphertext is stored in `config.json`. The key derives from your Windows
-account: it is neither in the file nor in the source code. A `config.json`
-copied elsewhere, read by another account or restored on another machine
-yields nothing.
+ciphertext is stored in `state.json`. The key is the machine's: it is
+neither in the file nor in the source code. A copy of the file taken to
+another machine yields nothing.
 
-It is not a vault: a program running **in your session** can ask Windows to
-decrypt it. This protects against the file travelling, not against malware
-already in place. Encryption with a key embedded in the code would only have
-been obfuscation.
+The machine's key rather than an account's, because every account's
+instance must be able to command the shared power strips. It is not a
+vault: a program running **on this PC** can ask Windows to decrypt it. This
+protects against the file travelling, not against a local user or malware
+already in place. Encryption with a key embedded in the code would only
+have been obfuscation.
+
+The password sits with the state, not with the administrator's hardware
+configuration, because it must mirror what the device holds: changing it
+changes the device at once, and waiting for an approval that could be
+refused would leave the application locked out.
 
 ### If the password is lost
 
@@ -675,17 +762,19 @@ are left as they are and flagged in the menu.
 
 ```
 main.py                      entry point
+build.cmd, build.py          builds the executable (PyInstaller)
 windows-icons/               icon set, produced by icongen_windows.py
-install-startup.ps1          console-free launch shortcuts
+install-startup.ps1          console-free shortcuts, when running from the sources
 run-console.cmd              diagnostic launch, with a console
-config.json                  configuration (generated on first launch)
-shelly-screens.log           log (generated, rotating)
 shelly_screens/
   device.py                  Shelly Gen2+ JSON-RPC client
   device_services.py         optional device services (Matter, Cloud...)
   device_leds.py             Power Strip LED rings and buttons
   discovery.py               location: known address, mDNS, scan
-  config.py                  configuration model, migration, persistence
+  config.py                  configuration model, migration, persistence in three files
+  paths.py                   where the program and its data live
+  machine_admin.py           saving the hardware configuration through UAC
+  installer.py               installation, update, removal
   controller.py              orchestration of devices / outlets / screens / windows
   sensing.py                 installing and monitoring the on-device scripts
   power_history.py           power consumption history (SQLite)
@@ -702,7 +791,10 @@ shelly_screens/
     icon.py                  icon generation
     shell.py                 hidden window, notification area, messages
     hotkey.py                global shortcuts: reading, availability test
+    session.py               which Windows session drives the devices
+    elevation.py             running a short task through UAC
   ui/settings.py             settings window (tkinter)
+  ui/setup_dialog.py         install, update and uninstall dialogs
   ui/history_window.py       power consumption history window
   ui/profile_picker.py       profile picker window (global shortcut)
   ui/screen_map.py           screen map in the Profiles tab
@@ -800,8 +892,8 @@ none in the three minutes before it — whatever its date: the first readings
 taken after wake therefore do not hide the night before them.
 
 The measurements are stored in a **SQLite** database, a standard format
-included with Python: `history/power_history.sqlite3`, next to the
-configuration. How far back it goes is set in **PC power** → *Keep history
+included with Python: `history\power_history.sqlite3`, in the machine's
+data folder. How far back it goes is set in **PC power** → *Keep history
 for*, from 1 to 365 days; beyond that, the oldest points are pruned.
 
 The database can be read without the app — *DB Browser for SQLite*, Excel,
@@ -911,8 +1003,10 @@ code it is about wastes more time than it saves.
 | Screens switch off while the PC is running | Switch-off threshold too high. Run a new measurement, or lower it in `PC power`. |
 | Nothing switches back on at PC boot | Check in `PC power` that the script is `running`, and that an outlet carries the **Boot screen** role. |
 | The keyboard does not respond in the BIOS | Its USB hub must be marked **Critical**, not just driven by the script. |
-| A console opens at launch | The shortcut must target `pythonw.exe`, not `python.exe`. Reinstall it with `install-startup.ps1`. |
-| No trace of what the app is doing | Icon menu → **Open log file**, or open `shelly-screens.log`. |
+| A console opens at launch (sources) | The shortcut must target `pythonw.exe`, not `python.exe`. Reinstall it with `install-startup.ps1`. |
+| No trace of what the app is doing | Icon menu → **Open log file**, or `%ProgramData%\Shelly PC Screens\logs`. |
+| Blue icon, profiles refused | Another session is on the screen and drives the power strips. Switch to it. |
+| A banner asks for an administrator | A hardware setting was changed from an ordinary account: **Save changes (administrator)** or **Discard**. |
 | A device in `auth failed` | It responds but refuses the password. `Devices` → `Password...`, or a button reset if lost. |
 | Light window while Windows is dark | The mode must be set to *Follow Windows* in `Behaviour` → `Appearance`. The setting read is `AppsUseLightTheme` in the registry. |
 
@@ -931,10 +1025,15 @@ The lock is a Windows named mutex. It belongs to the process and disappears
 with it, even if it is killed abruptly — a lock file, by contrast, would
 survive and block every later launch.
 
+The lock holds within one Windows session: two accounts signed in side by
+side each have their instance, and only the one on the screen drives the
+devices (see *Several accounts signed in*).
+
 ## Logs
 
-Everything is written to `shelly-screens.log`, next to the configuration,
-rotating at 512 KB over three files. The icon menu offers **Open log file**
+Everything is written to `%ProgramData%\Shelly PC Screens\logs\`, one file
+per account (`shelly-screens-<account>.log`), rotating at 512 KB over three
+files. The icon menu offers **Open log file**
 to open it directly.
 
 This is essential, not optional. Without a console, `sys.stdout` is `None`

@@ -1,8 +1,17 @@
 """Configuration model and on-disk persistence.
 
-The configuration fits in a single JSON file, readable and editable by
-hand. It describes the Shelly devices, the role of each outlet, the usage
-profiles and a few behaviour settings.
+In memory, the configuration is a single `AppConfig`. On disk it is split
+in three JSON files, readable and editable by hand, according to who owns
+each piece (see the `paths` module for where they live):
+
+- `machine.json`: the hardware and how to treat it -- devices, outlets,
+  safety roles, power sensing, sleep behaviour, the profiles a new account
+  starts with. Shared by every account, written by an administrator;
+- `state.json`: what the application records by itself as it runs -- last
+  known addresses, outlets to restore on resume, screen positions, the
+  fingerprint of the on-device script. Shared, written by any account:
+  asking for elevation to note an IP change would make no sense;
+- `user.json`: each account's profiles and preferences.
 
 Several devices can coexist -- a power strip for the screens, a single
 outlet for the PC, for example. An outlet is therefore designated by a
@@ -17,24 +26,57 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import paths as paths_module
 from . import secrets_store
 from .i18n import t
+from .paths import DataPaths
 
-CONFIG_VERSION = 2
+# 1: single device. 2: several devices, one file. 3: split in three files.
+CONFIG_VERSION = 3
 
 # The built-in profile: every outlet on. This name is its key -- in
 # `last_profile`, in the on-device script --, stable whatever the
 # language; it is displayed translated ("Tous en marche").
 ALL_ON_PROFILE = "All on"
-# By default the configuration lives next to the code: the tool is
-# single-machine and we want it easy to inspect. SHELLY_SCREENS_CONFIG
-# moves it elsewhere (to %APPDATA%, for example).
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+
+# Which file each behaviour setting lives in. The machine's say how the
+# hardware reacts to sleep; the account's say how that person likes to
+# work; `resume_refs` is noted by the application at every sleep.
+MACHINE_SETTINGS = (
+    "power_off_on_suspend",
+    "restore_on_resume",
+    "switch_delay_ms",
+    "display_settle_timeout_s",
+    "history_days",
+)
+STATE_SETTINGS = ("resume_refs",)
+USER_SETTINGS = (
+    "last_profile",
+    "apply_profile_on_start",
+    "theme",
+    "language",
+    "profile_hotkey",
+    "rescue_offscreen_windows",
+)
+# Device and sensing fields the application updates by itself: an address
+# changed by DHCP, the id and fingerprint of the script it installed.
+#
+# The password goes with them. It must mirror what the device itself
+# holds: changing it changes the device at once, so if it waited for an
+# administrator's approval, a refusal would leave the device with the new
+# password and the configuration with the old one -- and the application
+# locked out. Keeping it out of the administrator's file costs nothing:
+# every account can decrypt it anyway (see `secrets_store`).
+DEVICE_STATE_FIELDS = ("host", "ip", "password")
+SENSING_STATE_FIELDS = ("script_id", "installed_fingerprint")
+
+log = logging.getLogger("shelly_screens")
 
 # What an outlet powers. Distinct from the safety roles -- critical,
 # boot screen, PC -- which say how to treat it: the kind says what is
@@ -487,7 +529,24 @@ class AppConfig:
     # assistant cut every screen outlet. Only this test proves it -- a
     # wall-powered screen cannot be told apart any other way.
     unswitched_screens: list[str] = field(default_factory=list)
-    path: Path = field(default=DEFAULT_CONFIG_PATH, compare=False, repr=False)
+    # The profiles an account starts with the first time it runs the
+    # application: those of the installation that was imported, rather
+    # than an empty list.
+    default_profiles: list[Profile] = field(default_factory=list)
+    paths: DataPaths = field(default_factory=paths_module.default, compare=False, repr=False)
+    # False while another session drives the devices: that session's
+    # instance is the one noting the state, and a stale copy written from
+    # here would overwrite what it noted.
+    writes_state: bool = field(default=True, compare=False, repr=False)
+    # Last machine content this account was refused permission to write:
+    # logged once, not at every save of the state.
+    _refused_machine: str = field(default="", compare=False, repr=False)
+    # Hardware configuration as last read or saved, to tell edits made
+    # here from changes another session wrote to the file.
+    _machine_baseline: str = field(default="", compare=False, repr=False)
+    # Modification times of the shared files as last seen, to notice
+    # another session writing them.
+    _seen_mtimes: dict = field(default_factory=dict, compare=False, repr=False)
 
     # ------------------------------------------------------------- access
 
@@ -675,17 +734,49 @@ class AppConfig:
 
     # -------------------------------------------------------- persistence
 
-    def to_dict(self) -> dict[str, Any]:
+    def machine_dict(self) -> dict[str, Any]:
+        """What `machine.json` holds: the hardware and how to treat it."""
+        settings = self.settings.to_dict()
+        sensing = self.sensing.to_dict()
         return {
             "version": CONFIG_VERSION,
-            "devices": [device.to_dict() for device in self.devices],
+            "devices": [
+                {k: v for k, v in device.to_dict().items() if k not in DEVICE_STATE_FIELDS}
+                for device in self.devices
+            ],
             "outlets": [outlet.to_dict() for outlet in self.outlets],
-            "profiles": [profile.to_dict() for profile in self.user_profiles()],
-            "settings": self.settings.to_dict(),
-            "sensing": self.sensing.to_dict(),
+            "sensing": {k: v for k, v in sensing.items() if k not in SENSING_STATE_FIELDS},
+            "settings": {k: settings[k] for k in MACHINE_SETTINGS},
+            "unswitched_screens": sorted(set(self.unswitched_screens)),
+            "default_profiles": [
+                profile.to_dict()
+                for profile in sorted(self.default_profiles, key=lambda p: p.order)
+            ],
+        }
+
+    def state_dict(self) -> dict[str, Any]:
+        """What `state.json` holds: what the application notes as it runs."""
+        settings = self.settings.to_dict()
+        sensing = self.sensing.to_dict()
+        return {
+            "version": CONFIG_VERSION,
+            "devices": {
+                device.key: {k: getattr(device, k) for k in DEVICE_STATE_FIELDS}
+                for device in self.devices
+            },
+            "sensing": {k: sensing[k] for k in SENSING_STATE_FIELDS},
+            "settings": {k: settings[k] for k in STATE_SETTINGS},
             "screens": [screen.to_dict() for screen in self.screens],
             "screens_captured_at": self.screens_captured_at,
-            "unswitched_screens": sorted(set(self.unswitched_screens)),
+        }
+
+    def user_dict(self) -> dict[str, Any]:
+        """What `user.json` holds: this account's profiles and preferences."""
+        settings = self.settings.to_dict()
+        return {
+            "version": CONFIG_VERSION,
+            "profiles": [profile.to_dict() for profile in self.user_profiles()],
+            "settings": {k: settings[k] for k in USER_SETTINGS},
         }
 
     def normalise_roles(self) -> None:
@@ -731,7 +822,8 @@ class AppConfig:
         ]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], path: Path) -> "AppConfig":
+    def from_dict(cls, data: dict[str, Any], paths: DataPaths) -> "AppConfig":
+        """Build the configuration from its merged form (see `merge_files`)."""
         data = migrate(data)
         config = cls(
             devices=[DeviceConfig.from_dict(item) for item in data.get("devices", [])],
@@ -742,7 +834,10 @@ class AppConfig:
             screens=[ScreenPosition.from_dict(item) for item in data.get("screens", [])],
             screens_captured_at=float(data.get("screens_captured_at", 0.0)),
             unswitched_screens=[str(k) for k in data.get("unswitched_screens", [])],
-            path=path,
+            default_profiles=[
+                Profile.from_dict(item) for item in data.get("default_profiles", [])
+            ],
+            paths=paths,
         )
         config.normalise_roles()
         config._adopt_all_on()
@@ -770,20 +865,129 @@ class AppConfig:
                     self.settings.last_profile = name
                 profile.name = name
 
-    def save(self, path: Path | None = None) -> None:
-        """Write the configuration atomically and durably.
+    def save(self) -> None:
+        """Write whichever of the three files changed.
 
-        The previous version, if readable, first goes to
-        `config.json.bak`: `load` falls back on it if the main file is
-        damaged.
+        Most saves only concern `state.json` or `user.json`: an address
+        noted, a profile applied. `machine.json` is only rewritten when the
+        hardware configuration itself changed -- the one file an ordinary
+        account may not be allowed to write. Failing to write it must not
+        cost the other two, so it comes last and its refusal is only
+        logged.
         """
-        target = Path(path or self.path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n"
-        previous = _read_valid(target)
-        if previous is not None and previous != payload:
-            _write_durable(backup_path(target), previous)
-        _write_durable(target, payload)
+        if self.writes_state:
+            _save_json(self.paths.state_file, self.state_dict())
+        _save_json(self.paths.user_file, self.user_dict())
+        machine = self.machine_dict()
+        try:
+            _save_json(self.paths.machine_file, machine)
+            self._machine_baseline = _payload(machine)
+        except PermissionError:
+            payload = _payload(machine)
+            if payload != self._refused_machine:
+                self._refused_machine = payload
+                log.info("Hardware changes pending: saving them needs an administrator")
+        self._note_mtimes()
+
+    def machine_pending(self) -> bool:
+        """True if the hardware configuration differs from `machine.json`."""
+        return _read_valid(self.paths.machine_file) != _payload(self.machine_dict())
+
+    def mark_synced(self) -> None:
+        """Record the configuration as matching the files on disk."""
+        self._machine_baseline = _payload(self.machine_dict())
+        self._note_mtimes()
+
+    def _note_mtimes(self) -> None:
+        self._seen_mtimes = {
+            path: _mtime(path) for path in (self.paths.machine_file, self.paths.state_file)
+        }
+
+    def shared_files_changed(self) -> bool:
+        """True if another session wrote the machine or state file since."""
+        return any(_mtime(path) != seen for path, seen in self._seen_mtimes.items())
+
+    def reload_shared(self) -> None:
+        """Reread what other sessions may have written.
+
+        The state always: the session that drove the devices until now
+        noted addresses, screen positions, outlets to restore. The machine
+        file too, unless hardware edits made here are still waiting for an
+        administrator -- rereading would silently throw them away.
+        """
+        local_edits = _payload(self.machine_dict()) != self._machine_baseline
+        machine = self.machine_dict() if local_edits else _load_json(self.paths.machine_file)
+        self._adopt(merge_files(machine, _load_json(self.paths.state_file), self.user_dict()))
+        if local_edits:
+            self._note_mtimes()
+        else:
+            self.mark_synced()
+
+    def reload_machine(self) -> None:
+        """Drop unsaved hardware changes: reread `machine.json`.
+
+        What belongs to the state and to the account is kept as it is in
+        memory -- an address noted meanwhile, a profile applied.
+        """
+        self._adopt(
+            merge_files(_load_json(self.paths.machine_file), self.state_dict(), self.user_dict())
+        )
+        self.mark_synced()
+
+    def _adopt(self, merged: dict[str, Any]) -> None:
+        """Replace the shared parts with those of a merged configuration."""
+        fresh = AppConfig.from_dict(merged, paths=self.paths)
+        for name in ("devices", "outlets", "sensing", "settings", "screens",
+                     "screens_captured_at", "unswitched_screens", "default_profiles"):
+            setattr(self, name, getattr(fresh, name))
+
+
+def _mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _payload(data: dict[str, Any]) -> str:
+    """The exact text a file is written with."""
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def write_machine_file(source: Path, machine_dir: Path) -> None:
+    """Install a prepared `machine.json`: what the elevated copy does.
+
+    The content is checked before anything is replaced: an elevated
+    process writes where the user cannot, so it must not write just
+    anything it is handed.
+    """
+    data = json.loads(source.read_text(encoding="utf-8"))
+    if not (
+        isinstance(data, dict)
+        and isinstance(data.get("devices"), list)
+        and isinstance(data.get("outlets"), list)
+    ):
+        raise ValueError("Not a machine configuration")
+    _save_json(machine_dir / paths_module.MACHINE_FILE_NAME, data)
+
+
+def _save_json(target: Path, data: dict[str, Any]) -> bool:
+    """Write a file atomically and durably, only if its content changed.
+
+    The previous version, if readable, first goes to `<name>.bak`: `load`
+    falls back on it if the main file is damaged. With no readable previous
+    version -- a first write --, the backup gets the new content: a file
+    written once and rarely again, like `machine.json`, would otherwise
+    have no backup for months. Returns True if the file was written.
+    """
+    payload = _payload(data)
+    previous = _read_valid(target)
+    if previous == payload:
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_durable(backup_path(target), previous if previous is not None else payload)
+    _write_durable(target, payload)
+    return True
 
 
 def backup_path(target: Path) -> Path:
@@ -874,17 +1078,10 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def config_path() -> Path:
-    """Location of the configuration file."""
-    override = os.environ.get("SHELLY_SCREENS_CONFIG")
-    return Path(override).expanduser() if override else DEFAULT_CONFIG_PATH
-
-
-def load(path: Path | None = None) -> AppConfig:
-    """Load the configuration, or return a blank one."""
-    target = Path(path) if path else config_path()
+def _load_json(target: Path) -> dict[str, Any]:
+    """Read one of the files; empty if absent, its backup if damaged."""
     if not target.exists():
-        return AppConfig(path=target)
+        return {}
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -894,12 +1091,108 @@ def load(path: Path | None = None) -> AppConfig:
         backup = _read_valid(backup_path(target))
         if backup is None:
             raise RuntimeError(f"Unreadable configuration ({target}): {exc}") from exc
-        logging.getLogger("shelly_screens").warning(
-            "Configuration unreadable (%s), restored from %s",
-            exc,
-            backup_path(target).name,
+        log.warning(
+            "Configuration unreadable (%s), restored from %s", exc, backup_path(target).name
         )
         data = json.loads(backup)
-    return AppConfig.from_dict(data, path=target)
+    return data if isinstance(data, dict) else {}
+
+
+def merge_files(
+    machine: dict[str, Any], state: dict[str, Any], user: dict[str, Any]
+) -> dict[str, Any]:
+    """Assemble the three files into the single form `from_dict` reads.
+
+    An account running the application for the first time has no
+    `user.json` yet: it starts with the machine's default profiles.
+    """
+    addresses = state.get("devices", {})
+    devices = [
+        {**device, **addresses.get(device.get("key", ""), {})}
+        for device in machine.get("devices", [])
+    ]
+    profiles = user["profiles"] if "profiles" in user else machine.get("default_profiles", [])
+    return {
+        "version": CONFIG_VERSION,
+        "devices": devices,
+        "outlets": machine.get("outlets", []),
+        "profiles": profiles,
+        "default_profiles": machine.get("default_profiles", []),
+        "settings": {
+            **machine.get("settings", {}),
+            **state.get("settings", {}),
+            **user.get("settings", {}),
+        },
+        "sensing": {**machine.get("sensing", {}), **state.get("sensing", {})},
+        "screens": state.get("screens", []),
+        "screens_captured_at": state.get("screens_captured_at", 0.0),
+        "unswitched_screens": machine.get("unswitched_screens", []),
+    }
+
+
+def load(paths: DataPaths | None = None) -> AppConfig:
+    """Load the configuration, or return a blank one.
+
+    The first time, with no machine configuration yet, an installation
+    from before version 2.0 is imported if there is one.
+    """
+    paths = paths or paths_module.default()
+    if not paths.machine_file.exists() and paths_module.LEGACY_CONFIG.exists():
+        import_legacy(paths_module.LEGACY_CONFIG, paths)
+    data = merge_files(
+        _load_json(paths.machine_file),
+        _load_json(paths.state_file),
+        _load_json(paths.user_file),
+    )
+    config = AppConfig.from_dict(data, paths=paths)
+    config.mark_synced()
+    return config
+
+
+def import_legacy(source: Path, paths: DataPaths) -> AppConfig:
+    """Import a configuration from before version 2.0.
+
+    It lived in one file next to the code, with passwords only its own
+    account could decrypt. The import splits it into the three files,
+    re-encrypts the passwords with the machine key and copies the power
+    history. The originals are left untouched.
+
+    Must run under the account that wrote the old file: another one could
+    not decrypt its passwords, and they would then have to be entered
+    again.
+    """
+    data = json.loads(source.read_text(encoding="utf-8"))
+    config = AppConfig.from_dict(data, paths=paths)
+    for device in config.devices:
+        if device.password:
+            plain = device.get_password()
+            if plain:
+                device.set_password(plain)
+            else:
+                device.password = None
+                log.warning(
+                    "Device '%s': password not readable by this account, enter it again",
+                    device.key,
+                )
+    # The profiles of the imported installation become those every new
+    # account starts with.
+    config.default_profiles = [
+        Profile(name=p.name, outlets_on=list(p.outlets_on), order=p.order)
+        for p in config.profiles
+    ]
+    config.save()
+    _copy_history(source.parent / "history", paths.history_dir)
+    log.info("Configuration imported from %s into %s", source, paths.machine_dir)
+    return config
+
+
+def _copy_history(source: Path, target: Path) -> None:
+    """Copy the power history, unless the target already has one."""
+    if not source.is_dir() or (target.exists() and any(target.iterdir())):
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    for item in source.iterdir():
+        if item.is_file():
+            shutil.copy2(item, target / item.name)
 
 

@@ -120,8 +120,8 @@ class Sample:
 
 
 def history_dir(config: "AppConfig") -> Path:
-    """History folder, next to the configuration."""
-    return Path(config.path).parent / "history"
+    """History folder: the machine's, shared by every account."""
+    return config.paths.history_dir
 
 
 def db_path(config: "AppConfig") -> Path:

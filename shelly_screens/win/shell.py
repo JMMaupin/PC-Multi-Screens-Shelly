@@ -8,6 +8,8 @@ point for everything that comes from the system:
   wake-up;
 * WM_QUERYENDSESSION / WM_ENDSESSION, the same on shutdown and restart;
 * WM_DISPLAYCHANGE, to track screens as they appear and disappear;
+* WM_WTSSESSION_CHANGE, to know when this session comes to the screen or
+  leaves it -- only the session on the screen drives the devices;
 * the "TaskbarCreated" message, which signals that Explorer restarted and
   that the icon must be added again.
 
@@ -24,6 +26,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from . import hotkey as hotkey_module
+from . import session as session_module
 from .api import HICON, LRESULT, UINT_PTR, kernel32, shell32, user32
 
 # --------------------------------------------------------------- constants
@@ -203,13 +206,13 @@ class TrayWindow:
     """Hidden window that carries the notification icon and the system events."""
 
     CLASS_NAME = "ShellyScreensTrayWindow"
-    WINDOW_TITLE = "Shelly Screens"
+    WINDOW_TITLE = "Shelly PC Screens"
     TIMER_ID = 1
     HOTKEY_ID = 1
 
     def __init__(
         self,
-        tooltip: str = "Shelly Screens",
+        tooltip: str = "Shelly PC Screens",
         on_suspend: Callable[[], None] | None = None,
         on_resume: Callable[[], None] | None = None,
         on_shutdown: Callable[[], None] | None = None,
@@ -217,6 +220,7 @@ class TrayWindow:
         on_tick: Callable[[], None] | None = None,
         on_activate: Callable[[], None] | None = None,
         on_hotkey: Callable[[], None] | None = None,
+        on_session_change: Callable[[], None] | None = None,
         build_menu: Callable[[], list[MenuItem]] | None = None,
         tick_interval_ms: int = 5000,
     ) -> None:
@@ -228,6 +232,7 @@ class TrayWindow:
         self.on_tick = on_tick
         self.on_activate = on_activate
         self.on_hotkey = on_hotkey
+        self.on_session_change = on_session_change
         self.build_menu = build_menu or (lambda: [])
         self.tick_interval_ms = tick_interval_ms
 
@@ -280,6 +285,8 @@ class TrayWindow:
         self._taskbar_created_message = user32.RegisterWindowMessageW("TaskbarCreated")
         if self.tick_interval_ms > 0:
             user32.SetTimer(self._hwnd, self.TIMER_ID, self.tick_interval_ms, None)
+        # Not fatal if refused: the periodic tick checks the session too.
+        session_module.register(self._hwnd)
 
     def run(self) -> None:
         """Message loop. Returns when the window is destroyed."""
@@ -506,6 +513,11 @@ class TrayWindow:
                 self.on_display_change()
             return 0
 
+        if message == session_module.WM_WTSSESSION_CHANGE:
+            if self.on_session_change is not None:
+                self.on_session_change()
+            return 0
+
         if message == WM_TIMER and wparam == self.TIMER_ID:
             if self.on_tick is not None:
                 self.on_tick()
@@ -542,6 +554,7 @@ class TrayWindow:
             return 0
 
         if message == WM_DESTROY:
+            session_module.unregister(hwnd)
             user32.UnregisterHotKey(hwnd, self.HOTKEY_ID)
             self.remove_icon()
             user32.PostQuitMessage(0)

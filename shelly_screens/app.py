@@ -13,11 +13,15 @@ mode.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 
 from . import config as config_module
+from . import installer
 from . import logging_setup
+from . import machine_admin
+from . import paths
 from . import power_history
 from . import single_instance
 from .i18n import set_language, t
@@ -27,11 +31,12 @@ from .device import SwitchState
 from .win import hotkey as hotkey_module
 from .win import icon as icon_module
 from .win import monitors
+from .win import session as session_module
 from .win.shell import WM_SHOW_SETTINGS, MenuItem, TrayWindow
 
-from . import __version__
+from . import __version__, product
 
-APP_NAME = "Shelly Screens"
+APP_NAME = product.APP_NAME
 REFRESH_INTERVAL_MS = 5000
 
 
@@ -55,9 +60,17 @@ class Application:
             on_tick=self._on_tick,
             on_activate=self._on_activate,
             on_hotkey=self._on_hotkey,
+            on_session_change=self._check_control,
             build_menu=self._build_menu,
             tick_interval_ms=REFRESH_INTERVAL_MS,
         )
+        # Only the session on the screen drives the devices; the others
+        # keep their icon but leave the power strips alone.
+        self.in_control = session_module.is_console_session()
+        self.controller.drives_devices = self.in_control
+        self.config.writes_state = self.in_control
+        # A request to exit older than this instance is a leftover.
+        self._started_at = time.time()
         # The log is set up here if it hasn't been already: a logger with no
         # handler would silently swallow everything, precisely what we want
         # to avoid when there is no console.
@@ -86,13 +99,67 @@ class Application:
         self.tray.create()
         self._update_icon()
         self._install_hotkey()
-        # The first connection may require a network scan: in the
-        # background, so the icon appears right away.
-        threading.Thread(target=self._initial_connect, daemon=True).start()
+        if self.in_control:
+            # The first connection may require a network scan: in the
+            # background, so the icon appears right away.
+            threading.Thread(target=self._initial_connect, daemon=True).start()
+        else:
+            self.log("Another session is on the screen: this one leaves the devices alone")
         self.tray.run()
         self.log(f"{APP_NAME} stopped")
 
-    def _initial_connect(self) -> None:
+    # --------------------------------------------------------------- sessions
+
+    def _check_control(self) -> None:
+        """Follow which session is on the screen, and hand over control.
+
+        Called when Windows reports a session switch, and on every tick in
+        case a notification went missing: a missed handover would leave two
+        instances driving the power strips, or none.
+        """
+        now = session_module.is_console_session()
+        if now == self.in_control:
+            return
+        self.in_control = now
+        self.controller.drives_devices = now
+        self.config.writes_state = now
+        if now:
+            self.log("This session is on the screen: it drives the devices again")
+            # The session that drove until now noted addresses, screen
+            # positions and outlets to restore: start from what it wrote.
+            self.config.reload_shared()
+            self.controller.forget_unknown()
+            # Nothing is switched: the screens stay as the other account
+            # left them, until this one picks a profile.
+            threading.Thread(
+                target=self._initial_connect, kwargs={"at_startup": False}, daemon=True
+            ).start()
+        else:
+            self.log(f"Session switch: {self._driver_label()} now drives the devices")
+            self.history.sync()
+            self.states = {}
+            self.online = False
+        self._update_icon()
+
+    def _quit_requested(self) -> bool:
+        try:
+            return self.config.paths.quit_flag.stat().st_mtime > self._started_at
+        except OSError:
+            return False
+
+    def _driver_label(self) -> str:
+        """Who drives the devices, when it is not this session."""
+        user = session_module.console_user()
+        return t("{user}'s session", user=user) if user else t("another session")
+
+    def _explain_passive(self) -> None:
+        self.tray.notify(
+            APP_NAME,
+            t("The power strips are driven by {driver}, on the screen right now. "
+              "Switch to it to change profiles or settings.", driver=self._driver_label()),
+        )
+
+    def _initial_connect(self, at_startup: bool = True) -> None:
         try:
             if not self.config.devices:
                 self.log("No device configured yet - open Settings to add one")
@@ -118,7 +185,7 @@ class Application:
             published = sensing.ensure_published(self.controller, self.config)
             if published:
                 self.log(f"Published outlets for the on-device script: {published}")
-            if self.config.settings.apply_profile_on_start:
+            if at_startup and self.config.settings.apply_profile_on_start:
                 name = self.config.settings.last_profile
                 if name and self.config.profile(name):
                     self.log(f"Applying profile '{name}' at startup")
@@ -175,16 +242,21 @@ class Application:
         The outlet count is no longer drawn but given by the tooltip: at
         sixteen pixels square, a dot is readable, a count is not.
         """
-        status = icon_module.status_for(
-            self._outlet_states(),
-            online=self.online,
-            complete=self.controller.fully_connected
-            and not self.controller.auth_failures,
-        )
+        if not self.in_control:
+            status = "passive"
+        else:
+            status = icon_module.status_for(
+                self._outlet_states(),
+                online=self.online,
+                complete=self.controller.fully_connected
+                and not self.controller.auth_failures,
+            )
         path = icon_module.write_ico(status)
         self.tray.set_icon(str(path), self._tooltip())
 
     def _tooltip(self) -> str:
+        if not self.in_control:
+            return f"{APP_NAME} - " + t("driven by {driver}", driver=self._driver_label())
         if not self.config.devices:
             return f"{APP_NAME} - no device configured"
         if not self.online:
@@ -205,6 +277,10 @@ class Application:
 
     def _run_async(self, label: str, function) -> None:
         """Runs an operation in the background, one at a time."""
+        if not self.in_control:
+            self.log(f"Ignored '{label}': another session drives the devices")
+            self._explain_passive()
+            return
         with self._busy_lock:
             if self.busy:
                 self.log(f"Ignored '{label}': '{self.busy}' still running")
@@ -252,6 +328,18 @@ class Application:
 
     def _build_menu(self) -> list[MenuItem]:
         items: list[MenuItem] = []
+
+        if not self.in_control:
+            # Reading is harmless, driving is not: the history stays, the
+            # profiles and outlets go.
+            items.append(MenuItem.info(t("Driven by {driver}", driver=self._driver_label())))
+            items.append(MenuItem.sep())
+            items.append(
+                MenuItem(t("Consumption history..."), action=self._open_history)
+            )
+            items.append(MenuItem(t("Open log file"), action=self.open_log))
+            items.append(MenuItem(t("Quit"), action=self.stop))
+            return items
 
         if not self.config.devices:
             items.append(MenuItem.info(t("No device configured")))
@@ -464,6 +552,21 @@ class Application:
 
     def _on_tick(self) -> None:
         """Periodic refresh, without piling up requests."""
+        if self._quit_requested():
+            # An update or a removal is under way, possibly started from
+            # another session: exit cleanly, history saved, so the
+            # executable can be replaced.
+            self.log("The installer asked this instance to exit")
+            self.stop()
+            return
+        self._check_control()
+        if self.config.shared_files_changed():
+            # Another session saved: an administrator's hardware change, or
+            # the state noted by the session that drives the devices.
+            self.config.reload_shared()
+            self.controller.forget_unknown()
+        if not self.in_control:
+            return
         if self._refreshing or self.busy or not self.config.devices:
             return
         self._refreshing = True
@@ -481,6 +584,8 @@ class Application:
         self._open_settings()
 
     def _on_display_change(self) -> None:
+        if not self.in_control:
+            return  # the screens show another session: not ours to note
         self.log("Display configuration changed")
         self._remember_screens()
 
@@ -547,6 +652,10 @@ class Application:
         # and whatever isn't on disk would be lost if the PC didn't wake
         # up.
         self.history.sync()
+        # Every session hears about the sleep; only the one driving acts,
+        # or the relays would be commanded twice at the worst moment.
+        if not self.in_control:
+            return
         if not self.config.settings.power_off_on_suspend or not self.config.devices:
             return
         if self.config.sensing.enabled:
@@ -569,6 +678,10 @@ class Application:
 
     def _on_resume(self) -> None:
         """Wake: reapply the last profile."""
+        # The session on the screen may have changed while the PC slept.
+        self._check_control()
+        if not self.in_control:
+            return
         # During sleep, only the on-device probe measured: its ticks will
         # fill the gap on the next read.
         self.history.request_recovery()
@@ -622,6 +735,9 @@ class Application:
     def _on_hotkey(self) -> None:
         from .ui.profile_picker import toggle_picker
 
+        if not self.in_control:
+            self._explain_passive()
+            return
         toggle_picker(self)
 
     def _open_history(self) -> None:
@@ -632,10 +748,40 @@ class Application:
     def _open_settings(self) -> None:
         from .ui.settings import open_settings
 
+        # The settings window commands the devices at every turn -- the
+        # identification assistant, the script, the password: it belongs to
+        # the session that drives them.
+        if not self.in_control:
+            self._explain_passive()
+            return
         open_settings(self)
 
 
-def main(verbose: bool = False) -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # The elevated copy started to save the hardware configuration does
+    # that and nothing else: no log, no icon, no single-instance lock --
+    # the instance that asked for it is holding that lock.
+    if machine_admin.COMMIT_ARGUMENT in argv:
+        index = argv.index(machine_admin.COMMIT_ARGUMENT)
+        try:
+            source, machine_dir = argv[index + 1], argv[index + 2]
+        except IndexError:
+            return machine_admin.EXIT_INVALID
+        return machine_admin.commit_from_command_line(source, machine_dir)
+
+    if installer.INSTALL_ARGUMENT in argv or installer.UNINSTALL_ARGUMENT in argv:
+        return _setup_command(argv)
+
+    # The executable started from anywhere but its installation folder --
+    # a download, a USB stick -- offers to install or update itself first.
+    if paths.is_frozen() and not paths.running_installed_copy():
+        outcome = _offer_setup()
+        if outcome is not None:
+            return outcome
+
+    verbose = "--verbose" in argv or "-v" in argv
     # The log is set up before anything else: without it, an error while
     # loading the configuration would vanish without a trace.
     logger = logging_setup.setup(verbose=verbose)
@@ -663,3 +809,114 @@ def main(verbose: bool = False) -> int:
     finally:
         single_instance.release()
     return 0
+
+
+# ----------------------------------------------------------------- setup
+
+
+def _offer_setup() -> int | None:
+    """Ask what to do with a non-installed executable; None to just run it."""
+    from .ui import setup_dialog
+
+    choice = setup_dialog.ask_setup(installer.installed_version())
+    if choice == "run":
+        return None
+    if choice == "open":
+        installer.start_installed()
+        return 0
+    if choice == "install":
+        return _install_from_launcher(silent=False)
+    return 0
+
+
+def _install_from_launcher(silent: bool) -> int:
+    """Install or update, from the account that launched the executable.
+
+    This account imports an older installation first -- only it can
+    decrypt its passwords --, hands the privileged part to an elevated
+    copy, then removes its old shortcuts and starts the installed
+    application, not elevated.
+    """
+    from .ui import setup_dialog
+    from .win import elevation
+
+    logger = logging_setup.setup()
+    try:
+        legacy = installer.import_legacy_installation()
+        if legacy is not None:
+            logger.info("Imported the configuration of %s", legacy)
+    except Exception:  # noqa: BLE001 - the installation goes on without it
+        logger.exception("Could not import the previous installation")
+
+    try:
+        code = elevation.run_elevated(
+            [installer.INSTALL_ARGUMENT, *installer.spare_argument()], timeout_s=300
+        )
+    except elevation.ElevationCancelled:
+        logger.info("Installation cancelled at the UAC prompt")
+        return 1
+    except (OSError, TimeoutError) as exc:
+        code = -1
+        logger.error("Installation could not run: %s", exc)
+    if code != 0:
+        if not silent:
+            setup_dialog.show_message(
+                t("The installation failed (code {code}). The log is in {folder}.",
+                  code=code, folder=paths.default().log_dir),
+                error=True,
+            )
+        return code or 1
+
+    installer.remove_legacy_links()
+    installer.start_installed()
+    return 0
+
+
+def _setup_command(argv: list[str]) -> int:
+    """`--install` and `--uninstall`, elevated or not yet."""
+    import shutil
+
+    from .ui import setup_dialog
+    from .win import elevation
+
+    logger = logging_setup.setup()
+    silent = installer.SILENT_ARGUMENT in argv
+    spare = installer.parse_spare(argv)
+    elevated = elevation.is_elevated()
+
+    if installer.INSTALL_ARGUMENT in argv:
+        if not elevated:
+            return _install_from_launcher(silent=silent)
+        try:
+            installer.install(installer.own_executable(), spare)
+        except Exception:  # noqa: BLE001 - reported through the exit code and the log
+            logger.exception("Installation failed")
+            return 1
+        return 0
+
+    purge = installer.PURGE_ARGUMENT in argv
+    if not silent:
+        go, purge = setup_dialog.confirm_uninstall()
+        if not go:
+            return 0
+    if elevated:
+        try:
+            installer.uninstall(purge, spare)
+        except Exception:  # noqa: BLE001
+            logger.exception("Uninstallation failed")
+            return 1
+        return 0
+
+    arguments = [installer.UNINSTALL_ARGUMENT, installer.SILENT_ARGUMENT]
+    if purge:
+        arguments.append(installer.PURGE_ARGUMENT)
+    try:
+        code = elevation.run_elevated(arguments + installer.spare_argument(), timeout_s=300)
+    except elevation.ElevationCancelled:
+        return 1
+    if code == 0 and purge:
+        # This account's own preferences; other accounts keep theirs.
+        shutil.rmtree(paths.default().user_dir, ignore_errors=True)
+    if code == 0 and not silent:
+        setup_dialog.show_message(t("{app} has been uninstalled.", app=APP_NAME))
+    return code

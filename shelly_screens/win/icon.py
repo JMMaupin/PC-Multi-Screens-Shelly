@@ -39,6 +39,7 @@ STATUS_COLORS = {
     "off": (150, 150, 156, 255),  # everything off, but everything responds
     "warning": (230, 155, 60, 255),  # a device is missing or rejects the password
     "offline": (220, 90, 70, 255),  # nothing responds any more
+    "passive": (90, 140, 220, 255),  # another session drives the devices
 }
 BADGE_RING = (18, 20, 24, 255)  # dark ring, to stand out from the background
 
@@ -144,8 +145,8 @@ def build_ico(status: str) -> bytes:
 def write_ico(status: str, path: Path | None = None) -> Path:
     """Write the icon for a state to disk and return its path.
 
-    Files are reused from one run to the next: there are only four
-    possible states, no point rewriting them on every refresh.
+    Files are reused from one run to the next: there are only a handful
+    of possible states, no point rewriting them on every refresh.
     """
     if path is None:
         directory = Path(tempfile.gettempdir()) / "shelly-screens"
