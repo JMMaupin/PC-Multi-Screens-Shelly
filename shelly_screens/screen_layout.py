@@ -1,26 +1,27 @@
-"""Peut-on relever la disposition des ecrans maintenant ?
+"""Can the screen layout be captured right now?
 
-La disposition n'a de valeur que si chaque ecran y figure a sa place : un
-ecran absent, et Windows decale les autres ; un ecran de trop, et le plan
-dessine ce qui n'est pas la. Avant tout releve, on verifie donc que ce que
-disent les prises et ce que voit Windows concordent exactement :
+The layout is only worth something if every screen is in its place: one
+screen missing, and Windows shifts the others; one screen too many, and the
+map draws something that isn't there. Before any capture, we therefore
+check that what the outlets report and what Windows sees match exactly:
 
-* chaque prise d'ecran est liee a un ecran, joignable, et allumee ;
-* chaque ecran dont la prise est allumee est vu par Windows ;
-* autant d'ecrans physiques detectes que de prises d'ecran allumees, plus
-  les ecrans prouves hors prise -- ni plus, ni moins ;
-* pas deux prises pour un meme ecran, pas d'ecrans en miroir.
+* every screen outlet is linked to a screen, reachable, and on;
+* every screen whose outlet is on is seen by Windows;
+* as many physical screens detected as screen outlets on, plus the
+  screens proven not to be on an outlet -- no more, no less;
+* no two outlets for the same screen, no mirrored screens.
 
-Les ecrans virtuels et sans fil sont ecartes avant de compter : ils ne
-s'eteignent pas avec une prise et ne sont pas des ecrans du bureau.
+Virtual and wireless screens are set aside before counting: they don't
+turn off with an outlet and aren't desktop screens.
 
-Un ecran branche au mur ne se reconnait a rien : seule l'epreuve de
-l'assistant d'identification -- couper chaque prise et regarder qui
-disparait -- prouve qu'il ne depend d'aucune. Tant qu'elle n'a pas ete
-faite, un ecran physique sans prise est inconnu, et le releve attend.
+A screen plugged into the wall can't be recognised by anything: only the
+test run by the identification assistant -- cut each outlet and watch
+which screen disappears -- proves it depends on none. Until that test has
+been done, a physical screen without an outlet is unknown, and the
+capture waits.
 
-Le module ne touche a rien : il rend la liste des problemes, vide quand le
-releve peut avoir lieu.
+The module changes nothing: it returns the list of problems, empty when
+the capture can go ahead.
 """
 
 from __future__ import annotations
@@ -45,13 +46,14 @@ def problems(
     unswitched: set[str],
     links: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """Ce qui empeche de relever la disposition ; vide si rien ne s'y oppose.
+    """What prevents capturing the layout; empty if nothing stands in the way.
 
-    `physical` : cles des ecrans physiques actifs, virtuels ecartes.
-    `outputs` : sorties actives, pour les noms et les miroirs.
-    `unswitched` : ecrans prouves hors prise.
-    `links` : associations prise -> ecran qui priment sur la configuration,
-    pour l'assistant qui vient de les trouver sans les avoir encore ecrites.
+    `physical`: keys of the active physical screens, virtual ones excluded.
+    `outputs`: active outputs, for names and mirrors.
+    `unswitched`: screens proven not to be on an outlet.
+    `links`: outlet -> screen links that take precedence over the
+    configuration, for the assistant that has just found them but not yet
+    written them.
     """
     links = links or {}
 
@@ -102,8 +104,8 @@ def problems(
         found.append(t("Unknown screen connected ({screen}): run Identify displays",
                        screen=name_of(key)))
 
-    # Le comptage resume tout : prises d'ecran allumees d'un cote, ecrans
-    # physiques vus de l'autre. Il dit d'un coup d'oeil ce qui cloche.
+    # The count sums it all up: screen outlets on one side, physical
+    # screens seen on the other. It shows at a glance what is wrong.
     expected = lit + len(physical & unswitched)
     if len(physical) != expected:
         found.insert(0, t("{lit} screen outlet(s) on, {count} physical screen(s) detected",
@@ -125,12 +127,12 @@ def ghosts(
     states: Mapping[str, "SwitchState"],
     physical: set[str],
 ) -> list[str]:
-    """Prises d'ecran coupees dont Windows garde pourtant l'ecran : les fantomes.
+    """Screen outlets that are off yet whose screen Windows keeps: the ghosts.
 
-    Un ecran branche en HDMI recoit du +5 V par le cable, de quoi maintenir
-    sa detection et son EDID une fois son alimentation coupee. Windows le
-    garde alors dans le bureau, eteint, et fenetres ou souris peuvent s'y
-    perdre.
+    A screen connected over HDMI receives +5 V through the cable, enough to
+    keep its detection and its EDID alive once its power is cut. Windows
+    then keeps it on the desktop, dark, and windows or the mouse can get
+    lost on it.
     """
     return [
         o.label for o in outlets

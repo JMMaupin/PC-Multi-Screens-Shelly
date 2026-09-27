@@ -1,13 +1,13 @@
-"""Journalisation de l'application.
+"""Application logging.
 
-Sans console, `print` ne leve pas d'erreur : il ne fait simplement rien.
-Lance par pythonw, le programme perdrait donc silencieusement toute trace de
-ce qu'il fait -- et c'est precisement dans ce mode qu'il tourne au
-quotidien. Les messages partent donc dans un fichier, et vers la console
-seulement lorsqu'il y en a une.
+Without a console, `print` raises no error: it simply does nothing.
+Launched by pythonw, the program would therefore silently lose every trace
+of what it does -- and that is precisely the mode it runs in day to day.
+Messages therefore go to a file, and to the console only when there is
+one.
 
-Les exceptions non rattrapees y sont egalement deroutees : sans cela, une
-erreur de fond dans un thread disparaitrait sans laisser de trace.
+Uncaught exceptions are rerouted there too: otherwise, a background error
+in a thread would vanish without a trace.
 """
 
 from __future__ import annotations
@@ -28,15 +28,15 @@ _configured = False
 
 
 class DurableFileHandler(logging.handlers.RotatingFileHandler):
-    """Gestionnaire qui force l'ecriture jusqu'au disque.
+    """Handler that forces writes all the way to disk.
 
-    `flush` ne fait que remettre les octets au systeme, qui les garde en
-    cache : coupez l'alimentation et les dernieres lignes disparaissent.
-    C'est exactement ce qui empeche de comprendre un incident ou la machine
-    s'est arretee -- le journal s'interrompt juste avant ce qu'on cherche.
+    `flush` only hands the bytes over to the OS, which keeps them in
+    cache: cut the power and the last lines are gone. That is exactly what
+    makes it impossible to understand an incident where the machine shut
+    down -- the log stops right before what you are looking for.
 
-    Un `fsync` par ligne coute cher sur un journal bavard ; ici quelques
-    lignes par minute, et la certitude de les retrouver.
+    One `fsync` per line is costly on a chatty log; here it is a few lines
+    per minute, and the certainty of finding them again.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -46,11 +46,11 @@ class DurableFileHandler(logging.handlers.RotatingFileHandler):
                 self.stream.flush()
                 os.fsync(self.stream.fileno())
         except (OSError, ValueError):
-            pass  # flux ferme ou support qui ne sait pas synchroniser
+            pass  # stream closed, or medium that can't sync
 
 
 def log_path(base: Path | None = None) -> Path:
-    """Emplacement du journal, a cote de la configuration."""
+    """Location of the log file, next to the configuration."""
     from .config import config_path
 
     folder = base or config_path().parent
@@ -58,7 +58,7 @@ def log_path(base: Path | None = None) -> Path:
 
 
 def setup(base: Path | None = None, verbose: bool = False) -> logging.Logger:
-    """Installe les gestionnaires. Appelable plusieurs fois sans dommage."""
+    """Installs the handlers. Safe to call several times."""
     global _configured
     logger = logging.getLogger(LOGGER_NAME)
     if _configured:
@@ -79,10 +79,10 @@ def setup(base: Path | None = None, verbose: bool = False) -> logging.Logger:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     except OSError:
-        # Un journal illisible ne doit pas empecher l'application de tourner.
+        # An unwritable log must not stop the application from running.
         pass
 
-    # sys.stdout vaut None sous pythonw : il n'y a alors pas de console.
+    # sys.stdout is None under pythonw: there is no console then.
     if sys.stdout is not None:
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(formatter)
@@ -95,7 +95,7 @@ def setup(base: Path | None = None, verbose: bool = False) -> logging.Logger:
 
 
 def _install_exception_hooks(logger: logging.Logger) -> None:
-    """Deroute vers le journal ce qui serait sinon perdu."""
+    """Reroutes to the log what would otherwise be lost."""
 
     def on_exception(exc_type, exc_value, exc_traceback) -> None:
         if issubclass(exc_type, KeyboardInterrupt):

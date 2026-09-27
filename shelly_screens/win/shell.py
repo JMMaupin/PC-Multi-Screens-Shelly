@@ -1,18 +1,18 @@
-"""Icone de notification, menu contextuel et evenements systeme.
+"""Notification icon, context menu and system events.
 
-Une unique fenetre Win32, creee mais jamais affichee, sert de point d'ancrage
-a tout ce qui vient du systeme :
+A single Win32 window, created but never shown, serves as the anchor
+point for everything that comes from the system:
 
-* l'icone de la zone de notification et son menu ;
-* WM_POWERBROADCAST, pour couper les ecrans a la mise en veille et les
-  remettre au reveil ;
-* WM_QUERYENDSESSION / WM_ENDSESSION, meme chose a l'arret et au redemarrage ;
-* WM_DISPLAYCHANGE, pour suivre les ecrans qui apparaissent et disparaissent ;
-* le message "TaskbarCreated", qui signale un redemarrage de l'explorateur et
-  impose de reposer l'icone.
+* the notification area icon and its menu;
+* WM_POWERBROADCAST, to switch the screens off on sleep and back on at
+  wake-up;
+* WM_QUERYENDSESSION / WM_ENDSESSION, the same on shutdown and restart;
+* WM_DISPLAYCHANGE, to track screens as they appear and disappear;
+* the "TaskbarCreated" message, which signals that Explorer restarted and
+  that the icon must be added again.
 
-La fenetre doit etre de premier niveau, et non message-only : Windows
-n'adresse pas les diffusions d'alimentation et d'affichage a ces dernieres.
+The window must be top-level, not message-only: Windows doesn't send
+power and display broadcasts to message-only windows.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from typing import Callable
 from . import hotkey as hotkey_module
 from .api import HICON, LRESULT, UINT_PTR, kernel32, shell32, user32
 
-# --------------------------------------------------------------- constantes
+# --------------------------------------------------------------- constants
 
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
@@ -38,11 +38,11 @@ WM_DISPLAYCHANGE = 0x007E
 WM_POWERBROADCAST = 0x0218
 WM_USER = 0x0400
 WM_TRAY_CALLBACK = WM_USER + 1
-# Envoye par une seconde instance : elle ne demarre pas et demande a
-# celle-ci de se montrer, plutot que d'afficher un refus.
+# Sent by a second instance: it doesn't start, and asks this one to
+# show itself instead of displaying a refusal.
 WM_SHOW_SETTINGS = WM_USER + 3
-# Pose ou retire le raccourci global. Envoye par `set_hotkey`, depuis
-# n'importe quel thread : Windows lie un raccourci au thread qui le pose.
+# Registers or removes the global shortcut. Sent by `set_hotkey`, from
+# any thread: Windows binds a shortcut to the thread that registers it.
 WM_SET_HOTKEY = WM_USER + 4
 WM_HOTKEY = 0x0312
 
@@ -176,11 +176,11 @@ shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
 @dataclass
 class MenuItem:
-    """Une entree du menu contextuel.
+    """A context menu entry.
 
-    Une entree porte soit une action, soit un sous-menu, soit rien -- une
-    entree sans action ni sous-menu sert de ligne d'information et s'affiche
-    grisee.
+    An entry carries either an action, a submenu, or nothing -- an entry
+    with neither action nor submenu serves as an information line and is
+    shown greyed out.
     """
 
     label: str
@@ -200,7 +200,7 @@ class MenuItem:
 
 
 class TrayWindow:
-    """Fenetre cachee portant l'icone de notification et les evenements systeme."""
+    """Hidden window that carries the notification icon and the system events."""
 
     CLASS_NAME = "ShellyScreensTrayWindow"
     WINDOW_TITLE = "Shelly Screens"
@@ -237,25 +237,25 @@ class TrayWindow:
         self._menu_actions: dict[int, Callable[[], None]] = {}
         self._taskbar_created_message = 0
         self._thread_id = 0
-        # Raccourci effectivement tenu, et celui dont la pose est en cours :
-        # le message ne transporte que des codes, pas l'objet.
+        # Shortcut actually held, and the one being registered:
+        # the message only carries codes, not the object.
         self.hotkey: hotkey_module.Hotkey | None = None
         self._requested: hotkey_module.Hotkey | None = None
         self._hotkey_lock = threading.Lock()
-        # La reference doit survivre a la fonction : Windows garde le pointeur.
+        # The reference must outlive the function: Windows keeps the pointer.
         self._wndproc = WNDPROC(self._window_proc)
 
-    # ------------------------------------------------------------- cycle de vie
+    # ------------------------------------------------------------- lifecycle
 
     def create(self) -> None:
-        """Enregistre la classe et cree la fenetre. A appeler dans son thread."""
+        """Register the class and create the window. Call it from its own thread."""
         instance = kernel32.GetModuleHandleW(None)
         window_class = WNDCLASSEXW()
         window_class.cbSize = ctypes.sizeof(WNDCLASSEXW)
         window_class.lpfnWndProc = ctypes.cast(self._wndproc, ctypes.c_void_p)
         window_class.hInstance = instance
         window_class.lpszClassName = self.CLASS_NAME
-        # Une classe deja enregistree renvoie 0 : sans importance ici.
+        # An already registered class returns 0: irrelevant here.
         user32.RegisterClassExW(ctypes.byref(window_class))
 
         self._hwnd = user32.CreateWindowExW(
@@ -276,36 +276,36 @@ class TrayWindow:
             raise ctypes.WinError(ctypes.get_last_error())
 
         self._thread_id = kernel32.GetCurrentThreadId()
-        # Si l'explorateur redemarre, la zone de notification est recreee vide.
+        # If Explorer restarts, the notification area is recreated empty.
         self._taskbar_created_message = user32.RegisterWindowMessageW("TaskbarCreated")
         if self.tick_interval_ms > 0:
             user32.SetTimer(self._hwnd, self.TIMER_ID, self.tick_interval_ms, None)
 
     def run(self) -> None:
-        """Boucle de messages. Rend la main quand la fenetre est detruite."""
+        """Message loop. Returns when the window is destroyed."""
         if self._hwnd is None:
             self.create()
         message = wintypes.MSG()
         while True:
             result = user32.GetMessageW(ctypes.byref(message), None, 0, 0)
-            if result in (0, -1):  # WM_QUIT ou erreur
+            if result in (0, -1):  # WM_QUIT or error
                 break
             user32.TranslateMessage(ctypes.byref(message))
             user32.DispatchMessageW(ctypes.byref(message))
 
     def stop(self) -> None:
-        """Demande l'arret de la boucle depuis n'importe quel thread."""
+        """Ask the loop to stop, from any thread."""
         if self._hwnd:
             user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
 
-    # --------------------------------------------------------------- raccourci
+    # --------------------------------------------------------------- shortcut
 
     def set_hotkey(self, wanted: "hotkey_module.Hotkey | None") -> bool:
-        """Pose le raccourci global, ou le retire avec `None`.
+        """Register the global shortcut, or remove it with `None`.
 
-        Rend faux si Windows le refuse -- un autre programme le tient. Le
-        precedent est alors conserve : mieux vaut l'ancien raccourci que
-        plus de raccourci du tout.
+        Returns False if Windows refuses it -- another program holds it. The
+        previous one is then kept: better the old shortcut than no shortcut
+        at all.
         """
         if self._hwnd is None:
             return False
@@ -335,10 +335,10 @@ class TrayWindow:
             self.hotkey = previous
         return 0
 
-    # ------------------------------------------------------------------ icone
+    # ------------------------------------------------------------------ icon
 
     def set_icon(self, ico_path: str, tooltip: str | None = None) -> None:
-        """Pose ou met a jour l'icone de la zone de notification."""
+        """Add or update the notification area icon."""
         if self._hwnd is None:
             return
         if tooltip is not None:
@@ -357,7 +357,7 @@ class TrayWindow:
         data.szTip = self.tooltip[:127]
         action = NIM_MODIFY if self._icon_added else NIM_ADD
         if not shell32.Shell_NotifyIconW(action, ctypes.byref(data)):
-            # Un NIM_MODIFY echoue si l'icone a disparu : on la repose.
+            # NIM_MODIFY fails if the icon has disappeared: add it again.
             shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data))
         self._icon_added = True
 
@@ -365,7 +365,7 @@ class TrayWindow:
             user32.DestroyIcon(previous)
 
     def notify(self, title: str, message: str) -> None:
-        """Affiche une bulle d'information."""
+        """Show an information balloon."""
         if self._hwnd is None or not self._icon_added:
             return
         data = self._icon_data()
@@ -394,7 +394,7 @@ class TrayWindow:
     # ------------------------------------------------------------------- menu
 
     def show_menu(self) -> None:
-        """Affiche le menu contextuel a l'emplacement du curseur."""
+        """Show the context menu at the cursor position."""
         items = self.build_menu()
         if not items:
             return
@@ -402,11 +402,11 @@ class TrayWindow:
         self._next_command_id = 1000
         menu = self._build_popup(items)
 
-        from .api import POINT  # local : seul cet endroit en a besoin
+        from .api import POINT  # local: only this spot needs it
 
         point = POINT()
         user32.GetCursorPos(ctypes.byref(point))
-        # Sans cet appel, le menu ne se referme pas quand on clique ailleurs.
+        # Without this call, the menu doesn't close when clicking elsewhere.
         user32.SetForegroundWindow(self._hwnd)
         chosen = user32.TrackPopupMenu(
             menu,
@@ -417,14 +417,14 @@ class TrayWindow:
             self._hwnd,
             None,
         )
-        user32.PostMessageW(self._hwnd, 0, 0, 0)  # contournement connu
-        user32.DestroyMenu(menu)  # detruit aussi les sous-menus rattaches
+        user32.PostMessageW(self._hwnd, 0, 0, 0)  # known workaround
+        user32.DestroyMenu(menu)  # also destroys the attached submenus
         action = self._menu_actions.get(int(chosen))
         if action is not None:
             action()
 
     def _build_popup(self, items: list[MenuItem]) -> int:
-        """Construit un menu et ses sous-menus, en numerotant les commandes."""
+        """Build a menu and its submenus, numbering the commands."""
         menu = user32.CreatePopupMenu()
         for item in items:
             if item.separator:
@@ -434,7 +434,7 @@ class TrayWindow:
             flags = MF_STRING
             if item.checked:
                 flags |= MF_CHECKED
-            # Une entree sans action ni sous-menu n'est qu'une ligne d'information.
+            # An entry with neither action nor submenu is just an information line.
             if not item.enabled or (item.action is None and not item.submenu):
                 flags |= MF_DISABLED | MF_GRAYED
 
@@ -450,13 +450,13 @@ class TrayWindow:
                 self._menu_actions[command_id] = item.action
         return menu
 
-    # --------------------------------------------------- traitement des messages
+    # --------------------------------------------------- message handling
 
     def _window_proc(self, hwnd, message, wparam, lparam) -> int:
         try:
             handled = self._dispatch(hwnd, message, wparam, lparam)
-        except Exception:  # noqa: BLE001 - une exception ici tuerait la boucle
-            # Sans console, un traceback imprime se perdrait : il part au journal.
+        except Exception:  # noqa: BLE001 - an exception here would kill the loop
+            # Without a console, a printed traceback would be lost: it goes to the log.
             import logging
 
             logging.getLogger("shelly_screens").exception(
@@ -481,20 +481,20 @@ class TrayWindow:
 
         if message == WM_POWERBROADCAST:
             if wparam == PBT_APMSUSPEND:
-                # Windows attend ici : la coupure doit etre breve.
+                # Windows waits here: switching off must be quick.
                 if self.on_suspend is not None:
                     self.on_suspend()
             elif wparam in (PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC):
                 if self.on_resume is not None:
                     self.on_resume()
-            return 1  # TRUE : l'evenement est pris en compte
+            return 1  # TRUE: the event has been handled
 
         if message == WM_QUERYENDSESSION:
-            # Arret ou redemarrage : meme traitement que la mise en veille,
-            # car le PC va repartir sans que rien ne pilote la multiprise.
+            # Shutdown or restart: same handling as sleep, since the PC
+            # will come back up with nothing driving the power strip.
             if self.on_shutdown is not None:
                 self.on_shutdown()
-            return 1  # ne pas s'opposer a la fermeture de session
+            return 1  # don't block the session from ending
 
         if message == WM_ENDSESSION:
             if wparam:
@@ -525,7 +525,7 @@ class TrayWindow:
             return 0
 
         if self._taskbar_created_message and message == self._taskbar_created_message:
-            # L'explorateur a redemarre : l'icone doit etre reposee.
+            # Explorer restarted: the icon must be added again.
             self._icon_added = False
             if self._hicon:
                 data = self._icon_data()

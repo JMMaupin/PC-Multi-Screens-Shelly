@@ -1,15 +1,14 @@
-"""Modele de configuration et persistance sur disque.
+"""Configuration model and on-disk persistence.
 
-La configuration tient dans un seul fichier JSON, lisible et editable a la
-main. Elle decrit les appareils Shelly, le role de chaque prise, les profils
-d'usage et quelques reglages de comportement.
+The configuration fits in a single JSON file, readable and editable by
+hand. It describes the Shelly devices, the role of each outlet, the usage
+profiles and a few behaviour settings.
 
-Plusieurs appareils peuvent cohabiter -- une multiprise pour les ecrans, une
-prise simple pour l'unite centrale, par exemple. Une prise se designe donc
-par une reference `<cle appareil>:<numero de sortie>`, par exemple
-`strip:0`. La cle est un alias court choisi a l'ajout de l'appareil ; elle
-reste stable meme si l'adresse IP change, et c'est elle que les profils
-referencent.
+Several devices can coexist -- a power strip for the screens, a single
+outlet for the PC, for example. An outlet is therefore designated by a
+reference `<device key>:<output number>`, for example `strip:0`. The key
+is a short alias chosen when the device is added; it stays stable even if
+the IP address changes, and it is what profiles reference.
 """
 
 from __future__ import annotations
@@ -28,32 +27,32 @@ from .i18n import t
 
 CONFIG_VERSION = 2
 
-# Le profil integre : toutes les prises allumees. Ce nom est sa cle -- dans
-# `last_profile`, dans le script embarque --, stable quelle que soit la
-# langue ; il s'affiche traduit (« Tous en marche »).
+# The built-in profile: every outlet on. This name is its key -- in
+# `last_profile`, in the on-device script --, stable whatever the
+# language; it is displayed translated ("Tous en marche").
 ALL_ON_PROFILE = "All on"
-# Par defaut la configuration vit a cote du code : l'outil est mono-poste et
-# on veut pouvoir l'inspecter facilement. SHELLY_SCREENS_CONFIG permet de la
-# deplacer (par exemple vers %APPDATA%).
+# By default the configuration lives next to the code: the tool is
+# single-machine and we want it easy to inspect. SHELLY_SCREENS_CONFIG
+# moves it elsewhere (to %APPDATA%, for example).
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 
-# Ce qu'une prise alimente. Distinct des roles de securite -- critique,
-# ecran de demarrage, unite centrale -- qui disent comment la traiter :
-# le type, lui, dit ce qui est au bout du fil.
+# What an outlet powers. Distinct from the safety roles -- critical,
+# boot screen, PC -- which say how to treat it: the kind says what is
+# at the end of the cord.
 KIND_UNKNOWN = ""
 KIND_SCREEN = "screen"
 KIND_ACCESSORY = "accessory"
 KINDS = (KIND_UNKNOWN, KIND_SCREEN, KIND_ACCESSORY)
 KIND_LABELS = {
-    KIND_UNKNOWN: "Not set",  # tant qu'il vaut cela, aucun automatisme n'y touche
+    KIND_UNKNOWN: "Not set",  # while it has this value, no automation touches it
     KIND_SCREEN: "Screen",
     KIND_ACCESSORY: "Accessory",
 }
 
 
-# Prefixes lisibles par type d'appareil : avec deux multiprises, `strip` et
-# `strip2` se lisent d'un coup d'oeil la ou `shellypstripg4aabbccddeeff` ne
-# dit rien.
+# Readable prefixes per device type: with two power strips, `strip` and
+# `strip2` read at a glance where `shellypstripg4aabbccddeeff` says
+# nothing.
 KEY_PREFIXES = {
     "powerstrip": "strip",
     "plugs": "plug",
@@ -65,7 +64,7 @@ KEY_PREFIXES = {
 
 
 def make_key(base: str, taken: set[str]) -> str:
-    """Fabrique une cle d'appareil courte, lisible et unique."""
+    """Build a short, readable and unique device key."""
     slug = re.sub(r"[^a-z0-9]+", "", base.lower())
     slug = KEY_PREFIXES.get(slug, slug[:12]) or "device"
     if slug not in taken:
@@ -78,31 +77,31 @@ def make_key(base: str, taken: set[str]) -> str:
 
 @dataclass
 class DeviceConfig:
-    """Un appareil Shelly et comment le joindre."""
+    """A Shelly device and how to reach it."""
 
-    key: str  # alias court, utilise dans les references de prise
+    key: str  # short alias, used in outlet references
     device_id: str = ""
     mac: str = ""
-    # Hote utilise pour joindre l'appareil : adresse IP, ou nom mDNS quand la
-    # resolution est passee par la. Reactualise a chaque connexion.
+    # Host used to reach the device: IP address, or mDNS name when
+    # resolution went that way. Refreshed on every connection.
     host: str = ""
-    # Adresse IPv4 correspondante, resolue a la connexion. Redondante avec
-    # `host` quand celui-ci est deja une adresse, mais toujours renseignee :
-    # c'est elle qu'on affiche et qu'on ouvre dans un navigateur.
+    # Matching IPv4 address, resolved on connection. Redundant with
+    # `host` when that is already an address, but always filled in:
+    # it is what we display and open in a browser.
     ip: str = ""
-    name: str = ""  # libelle lisible, libre
-    kind: str = ""  # application annoncee par l'appareil (PowerStrip, PlugS...)
-    # Mot de passe de l'appareil, chiffre par DPAPI (voir secrets_store).
-    # Ne jamais lire ce champ directement : passer par `get_password`.
+    name: str = ""  # human-readable label, free-form
+    kind: str = ""  # application reported by the device (PowerStrip, PlugS...)
+    # Device password, encrypted with DPAPI (see secrets_store).
+    # Never read this field directly: go through `get_password`.
     password: str | None = None
-    switch_count: int = 0  # nombre de sorties constatees
+    switch_count: int = 0  # number of outputs found
 
     def get_password(self) -> str:
-        """Mot de passe en clair, dechiffre a l'usage."""
+        """Plain-text password, decrypted on use."""
         return secrets_store.unprotect(self.password or "")
 
     def set_password(self, plain: str) -> None:
-        """Enregistre un mot de passe sous forme chiffree, ou l'efface."""
+        """Store a password in encrypted form, or clear it."""
         self.password = secrets_store.protect(plain) if plain else None
 
     @property
@@ -133,43 +132,43 @@ class DeviceConfig:
 
 @dataclass
 class OutletConfig:
-    """Une sortie d'un appareil, et ce qu'elle alimente."""
+    """One output of a device, and what it powers."""
 
-    device: str  # cle de l'appareil
-    switch_id: int  # numero de sortie sur cet appareil
+    device: str  # device key
+    switch_id: int  # output number on that device
     name: str = ""
-    # Identifiant stable de l'ecran alimente par cette prise, tel que le
-    # module win.monitors le calcule. Vide tant que l'association n'a pas
-    # ete faite.
+    # Stable identifier of the screen powered by this outlet, as computed
+    # by the win.monitors module. Empty until the association has been
+    # made.
     monitor_key: str = ""
-    # Une prise critique ne sera jamais coupee par un profil : garde-fou pour
-    # ce qui ne doit pas s'eteindre (un dock, un NAS).
+    # A critical outlet is never switched off by a profile: a safeguard
+    # for what must not go dark (a dock, a NAS).
     critical: bool = False
-    # L'ecran de demarrage : le garde-fou du demarrage, pas un ecran
-    # privilegie. Quand le profil memorise est exploitable, cette prise
-    # s'allume -- ou non -- avec les autres, comme n'importe laquelle. Elle
-    # ne ressort que si ce profil manque ou ne vaut rien, pour que le PC ne
-    # demarre jamais sans image.
+    # The boot screen: the boot-time safeguard, not a favoured screen.
+    # When the stored profile is usable, this outlet switches on -- or
+    # not -- with the others, like any other. It only comes into play if
+    # that profile is missing or worthless, so that the PC never boots
+    # without a picture.
     #
-    # Sans detection de consommation, rien ne pourrait la rallumer : elle
-    # reste alors sous tension a l'arret, faute de mieux.
+    # Without power sensing, nothing could switch it back on: it then
+    # stays powered at shutdown, for lack of anything better.
     boot_screen: bool = False
-    # Cette prise alimente l'unite centrale. Elle n'est jamais coupee, et sa
-    # consommation dit si le PC tourne -- de quoi reproduire le comportement
-    # d'une multiprise maitresse.
+    # This outlet powers the PC. It is never switched off, and its
+    # power draw tells whether the PC is running -- enough to reproduce
+    # the behaviour of a master/slave power strip.
     host_pc: bool = False
-    # Ce qui est branche : un ecran, ou un accessoire (concentrateur USB,
-    # enceintes...). Les accessoires restent pilotables par les profils,
-    # mais sortent du perimetre de l'assistant d'identification : les
-    # couper ne fera disparaitre aucun ecran, et les tester ne serait que
-    # du temps perdu et des coupures pour rien.
+    # What is plugged in: a screen, or an accessory (USB hub, speakers...).
+    # Accessories remain controllable by profiles, but fall outside the
+    # scope of the identification assistant: switching them off will not
+    # make any screen disappear, and testing them would only waste time
+    # and cause pointless power cuts.
     kind: str = KIND_UNKNOWN
-    # Cette prise suit-elle la veille du PC ? Les ecrans, oui : c'est tout
-    # l'objet du montage. Les accessoires, seulement si on le demande --
-    # couper un concentrateur USB ou des enceintes n'a rien d'evident, et
-    # l'avoir fait d'office a deja surpris. Le choix se pose prise par
-    # prise, puisqu'un hub inutile la nuit voisine avec un autre qui doit
-    # rester eveille.
+    # Does this outlet follow the PC's sleep? Screens do: that is the
+    # whole point of the setup. Accessories only when asked -- switching
+    # off a USB hub or speakers is far from obvious, and doing it by
+    # default has already caught people out. The choice is made outlet
+    # by outlet, since a hub that is useless at night can sit next to
+    # another that must stay awake.
     cut_on_sleep: bool = True
 
     @property
@@ -186,22 +185,22 @@ class OutletConfig:
 
     @property
     def cuts_on_sleep(self) -> bool:
-        """Vrai si la veille du PC doit emporter cette prise.
+        """True if the PC going to sleep should take this outlet with it.
 
-        Les prises intouchables l'emportent sur la case : cocher la case
-        d'une prise critique ou de celle du PC ne doit pas la rendre
-        coupable pour autant.
+        Untouchable outlets win over the checkbox: ticking the box on a
+        critical outlet or on the PC's outlet must not make it cuttable
+        for all that.
         """
         return self.cut_on_sleep and not self.never_switch_off
 
     @property
     def is_screen(self) -> bool:
-        """Vrai seulement si la prise est declaree comme portant un ecran.
+        """True only if the outlet is declared as powering a screen.
 
-        Le type doit etre pose explicitement : une prise non renseignee
-        n'est pas traitee comme un ecran. Ce qu'on ignore, on n'y touche
-        pas -- c'est la prise non classee qui se fait couper par megarde,
-        jamais celle qu'on a pris le temps de declarer.
+        The kind must be set explicitly: an outlet left blank is not
+        treated as a screen. What we do not know, we do not touch -- it
+        is the unclassified outlet that gets switched off by mistake,
+        never the one someone took the time to declare.
         """
         return self.kind == KIND_SCREEN and not self.host_pc
 
@@ -225,9 +224,9 @@ class OutletConfig:
             boot_screen=bool(data.get("boot_screen", False)),
             host_pc=bool(data.get("host_pc", False)),
             kind=str(data.get("kind", KIND_UNKNOWN)),
-            # Absent des fichiers anterieurs : on reconduit le comportement
-            # attendu pour les ecrans, et on cesse de couper les accessoires
-            # que personne n'avait explicitement designes.
+            # Missing from older files: keep the expected behaviour for
+            # screens, and stop switching off accessories that nobody had
+            # explicitly designated.
             cut_on_sleep=bool(
                 data.get("cut_on_sleep", str(data.get("kind", KIND_UNKNOWN)) == KIND_SCREEN)
             ),
@@ -236,19 +235,19 @@ class OutletConfig:
 
 @dataclass
 class ScreenPosition:
-    """Un ecran et sa place sur le bureau, telle que Windows la definit.
+    """A screen and its place on the desktop, as Windows defines it.
 
-    Windows oublie un ecran des qu'on coupe sa prise, et peut alors decaler
-    les autres. Pour savoir ou se trouve un ecran eteint, il faut donc avoir
-    retenu sa place quand tout etait allume.
+    Windows forgets a screen as soon as its outlet is cut, and may then
+    shift the others. To know where a switched-off screen sits, its place
+    must therefore have been recorded while everything was on.
     """
 
-    key: str  # identifiant stable de l'ecran, voir win.monitors
-    rect: tuple[int, int, int, int]  # gauche, haut, droite, bas ; pixels reels
+    key: str  # stable screen identifier, see win.monitors
+    rect: tuple[int, int, int, int]  # left, top, right, bottom; physical pixels
     primary: bool = False
-    name: str = ""  # ce que le pilote annonce, faute de prise associee
-    scale: float = 1.0  # echelle reglee dans Windows : 1.25 pour 125 %
-    diagonal: float = 0.0  # pouces, lus dans l'EDID de l'ecran ; 0 si inconnue
+    name: str = ""  # what the driver reports, when no outlet is associated
+    scale: float = 1.0  # scale set in Windows: 1.25 for 125 %
+    diagonal: float = 0.0  # inches, read from the screen's EDID; 0 if unknown
 
     @property
     def width(self) -> int:
@@ -282,30 +281,29 @@ class ScreenPosition:
 
 
 def parse_ref(ref: str) -> tuple[str, int]:
-    """Decoupe une reference `cle:sortie`."""
+    """Split a `key:output` reference."""
     device, _, switch = ref.rpartition(":")
     return device, int(switch)
 
 
 @dataclass
 class Profile:
-    """Un profil d'ecrans : quelles prises sont alimentees.
+    """A screen profile: which outlets are powered.
 
-    Rien de plus. Un profil dit quels ecrans sont allumes, pas ce qu'on y
-    fait : sur un meme profil se succedent des activites sans rapport --
-    CAO, trading, developpement --, chacune avec ses fenetres. Memoriser
-    une disposition de fenetres par profil n'avait donc pas de sens ; une
-    ancienne configuration qui en porte une la perd au prochain
-    enregistrement.
+    Nothing more. A profile says which screens are on, not what is done on
+    them: unrelated activities follow one another on the same profile --
+    CAD, trading, development --, each with its own windows. Storing a
+    window layout per profile therefore made no sense; an old
+    configuration that carries one loses it on the next save.
     """
 
     name: str
-    # References de prises (`cle:sortie`) alimentees par ce profil.
+    # Outlet references (`key:output`) powered by this profile.
     outlets_on: list[str] = field(default_factory=list)
-    # Rang d'affichage dans le menu.
+    # Display rank in the menu.
     order: int = 0
 
-    # Profil integre : calcule, jamais enregistre, ni modifiable ni supprimable.
+    # Built-in profile: computed, never saved, neither editable nor deletable.
     builtin: bool = field(default=False, compare=False)
 
     def wants(self, ref: str) -> bool:
@@ -313,7 +311,7 @@ class Profile:
 
     @property
     def label(self) -> str:
-        """Nom affiche : traduit pour le profil integre, tel quel sinon."""
+        """Displayed name: translated for the built-in profile, as is otherwise."""
         return t(self.name) if self.builtin else self.name
 
     def to_dict(self) -> dict[str, Any]:
@@ -334,39 +332,39 @@ class Profile:
 
 @dataclass
 class PowerSensing:
-    """Detection de l'activite du PC par sa consommation.
+    """Detecting PC activity from its power draw.
 
-    Quand le PC est eteint, aucun logiciel ne tourne pour commander les
-    prises : c'est la multiprise elle-meme, via un script embarque, qui
-    surveille la consommation de l'unite centrale et rallume les ecrans des
-    qu'elle la voit repartir. Ces reglages sont ceux de ce script.
+    When the PC is off, no software runs to command the outlets: it is the
+    power strip itself, through an on-device script, that watches the PC's
+    power draw and switches the screens back on as soon as it sees it pick
+    up again. These settings are that script's settings.
 
-    Deux seuils plutot qu'un : entre les deux se trouve une zone morte ou
-    l'etat courant se maintient, sans quoi une consommation oscillant autour
-    d'une valeur unique ferait claquer le relais en boucle.
+    Two thresholds rather than one: between them lies a dead band where the
+    current state holds, otherwise a power draw hovering around a single
+    value would make the relay chatter endlessly.
     """
 
     enabled: bool = False
-    pc_ref: str = ""  # reference de la prise alimentant l'unite centrale
-    on_threshold_w: float = 25.0  # au-dessus, le PC est considere actif
-    off_threshold_w: float = 15.0  # en dessous, il est considere eteint
-    on_delay_s: float = 3.0  # confirmation avant d'allumer : court
-    # Confirmation avant de couper : long a dessein. Lors d'un redemarrage
-    # de Windows le PC passe sous le seuil dix a quinze secondes, et couper
-    # les ecrans a cet instant serait le pire moment.
+    pc_ref: str = ""  # reference of the outlet powering the PC
+    on_threshold_w: float = 25.0  # above it, the PC is considered running
+    off_threshold_w: float = 15.0  # below it, it is considered off
+    on_delay_s: float = 3.0  # confirmation before switching on: short
+    # Confirmation before switching off: long on purpose. During a Windows
+    # restart the PC drops below the threshold for ten to fifteen seconds,
+    # and cutting the screens at that instant would be the worst timing.
     off_delay_s: float = 90.0
     poll_interval_s: float = 2.0
-    script_id: int = 0  # identifiant du script installe, 0 si aucun
-    # Empreinte du code reellement pose sur l'appareil. Comparee a celle
-    # du code qu'on produirait maintenant, elle dit si un reglage a
-    # change depuis -- un seuil, un type de prise, un mot de passe --
-    # sans avoir ete transmis. Un drapeau qu'il faudrait lever a la main
-    # finirait par etre oublie ; une empreinte ne s'oublie pas.
+    script_id: int = 0  # id of the installed script, 0 if none
+    # Fingerprint of the code actually installed on the device. Compared
+    # with that of the code we would produce now, it tells whether a
+    # setting has changed since -- a threshold, an outlet kind, a password
+    # -- without having been sent. A flag that had to be raised by hand
+    # would end up forgotten; a fingerprint cannot be forgotten.
     installed_fingerprint: str = ""
-    # Paliers releves par l'assistant de calibration, en watts.
-    measured_idle_w: float = 0.0  # PC allume, au repos
-    measured_sleep_w: float = 0.0  # PC en veille
-    measured_off_w: float = 0.0  # PC eteint
+    # Levels recorded by the calibration assistant, in watts.
+    measured_idle_w: float = 0.0  # PC on, idle
+    measured_sleep_w: float = 0.0  # PC asleep
+    measured_off_w: float = 0.0  # PC off
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -390,7 +388,7 @@ class PowerSensing:
         )
 
     def thresholds_are_sane(self) -> str:
-        """Message d'alerte si les seuils ne tiennent pas debout, sinon vide."""
+        """Warning message if the thresholds do not make sense, otherwise empty."""
         if self.off_threshold_w >= self.on_threshold_w:
             return "The off threshold must stay below the on threshold."
         if self.measured_idle_w and self.on_threshold_w >= self.measured_idle_w:
@@ -410,36 +408,36 @@ class PowerSensing:
 
 @dataclass
 class Settings:
-    """Reglages de comportement."""
+    """Behaviour settings."""
 
-    # Couper toutes les prises non protegees quand le PC se met en veille.
+    # Switch off every unprotected outlet when the PC goes to sleep.
     power_off_on_suspend: bool = True
-    # Reappliquer le dernier profil au reveil.
+    # Reapply the last profile on resume.
     restore_on_resume: bool = True
-    # Pause entre deux commandes de prise, pour ne pas noyer un appareil.
+    # Pause between two outlet commands, so as not to flood a device.
     switch_delay_ms: int = 250
-    # Temps max d'attente de la prise en compte des ecrans par Windows.
+    # Maximum time to wait for Windows to pick up the screens.
     display_settle_timeout_s: float = 20.0
-    # Profil applique en dernier, reapplique au reveil et au demarrage.
+    # Last applied profile, reapplied on resume and at startup.
     last_profile: str = ""
-    # Prises alimentees juste avant la mise en veille. Sans profil applique,
-    # c'est la seule trace de ce qu'il faut rendre au reveil : le nom d'un
-    # profil peut manquer, l'etat des prises, lui, existe toujours.
+    # Outlets powered just before going to sleep. Without an applied
+    # profile, this is the only record of what to restore on resume: a
+    # profile name may be missing, the outlet state always exists.
     resume_refs: list[str] = field(default_factory=list)
-    # Reappliquer le dernier profil au lancement de l'application.
+    # Reapply the last profile when the application starts.
     apply_profile_on_start: bool = False
-    # Theme de la fenetre de reglages : system, light ou dark.
+    # Theme of the settings window: system, light or dark.
     theme: str = "system"
-    # Langue de l'interface : system, en ou fr.
+    # Interface language: system, en or fr.
     language: str = "system"
-    # Profondeur de l'historique de consommation, en jours. Au-dela, les
-    # points les plus anciens sont elagues : une file, pas une archive.
+    # Depth of the power history, in days. Beyond that, the oldest
+    # points are pruned: a queue, not an archive.
     history_days: int = 30
-    # Raccourci global qui ouvre le choix des profils, sous sa forme
-    # lisible (« Ctrl+Win+Alt+P »). Vide : pas de raccourci.
+    # Global hotkey that opens the profile picker, in its readable
+    # form ("Ctrl+Win+Alt+P"). Empty: no hotkey.
     profile_hotkey: str = "Ctrl+Win+Alt+P"
-    # Apres un changement de profil, ramener sur l'ecran allume le plus
-    # proche les fenetres restees hors de tout ecran.
+    # After a profile change, bring windows left outside every screen
+    # back onto the nearest screen that is on.
     rescue_offscreen_windows: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -474,24 +472,24 @@ class Settings:
 
 @dataclass
 class AppConfig:
-    """Racine de la configuration."""
+    """Root of the configuration."""
 
     devices: list[DeviceConfig] = field(default_factory=list)
     outlets: list[OutletConfig] = field(default_factory=list)
     profiles: list[Profile] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
     sensing: PowerSensing = field(default_factory=PowerSensing)
-    # Place des ecrans sur le bureau, relevee quand ils etaient tous allumes.
+    # Position of the screens on the desktop, recorded while they were all on.
     screens: list[ScreenPosition] = field(default_factory=list)
-    # Moment du dernier releve de la disposition (temps Unix), 0 si aucun.
+    # Time of the last layout capture (Unix time), 0 if none.
     screens_captured_at: float = 0.0
-    # Ecrans prouves hors de toute prise : restes allumes pendant que
-    # l'assistant coupait chaque prise d'ecran. Seule cette epreuve le
-    # prouve -- un ecran au mur ne se distingue pas autrement.
+    # Screens proven to be on no outlet: they stayed on while the
+    # assistant cut every screen outlet. Only this test proves it -- a
+    # wall-powered screen cannot be told apart any other way.
     unswitched_screens: list[str] = field(default_factory=list)
     path: Path = field(default=DEFAULT_CONFIG_PATH, compare=False, repr=False)
 
-    # ------------------------------------------------------------- acces
+    # ------------------------------------------------------------- access
 
     def device(self, key: str) -> DeviceConfig | None:
         for device in self.devices:
@@ -509,14 +507,14 @@ class AppConfig:
         return [o for o in self.outlets if o.device == device_key]
 
     def all_on_profile(self) -> Profile:
-        """Le profil integre, recalcule : il suit les prises ajoutees ou retirees."""
+        """The built-in profile, recomputed: it follows added or removed outlets."""
         return Profile(
             name=ALL_ON_PROFILE, outlets_on=self.refs(), order=-1, builtin=True
         )
 
     @staticmethod
     def is_reserved_name(name: str) -> bool:
-        """Vrai pour le nom du profil integre, dans sa langue ou en anglais."""
+        """True for the built-in profile's name, in the UI language or in English."""
         folded = name.strip().casefold()
         return folded in (ALL_ON_PROFILE.casefold(), t(ALL_ON_PROFILE).casefold())
 
@@ -529,7 +527,7 @@ class AppConfig:
         return None
 
     def sorted_profiles(self) -> list[Profile]:
-        """Le profil integre en tete, puis ceux de l'utilisateur dans leur ordre."""
+        """The built-in profile first, then the user's in their order."""
         return [self.all_on_profile()] + self.user_profiles()
 
     def user_profiles(self) -> list[Profile]:
@@ -539,7 +537,7 @@ class AppConfig:
         return [outlet.ref for outlet in self.outlets]
 
     def ensure_outlets(self, device_key: str, count: int) -> None:
-        """Complete la liste des prises pour couvrir un appareil reel."""
+        """Fill in the outlet list to cover an actual device."""
         known = {o.switch_id for o in self.outlets_of(device_key)}
         for switch_id in range(count):
             if switch_id not in known:
@@ -556,7 +554,7 @@ class AppConfig:
         return len(self.devices)
 
     def add_device(self, device: DeviceConfig) -> DeviceConfig:
-        """Ajoute un appareil, en lui donnant une cle libre si besoin."""
+        """Add a device, giving it a free key if needed."""
         if not device.key:
             device.key = make_key(device.kind or device.device_id, self.device_keys())
         elif self.device(device.key) is not None:
@@ -568,7 +566,7 @@ class AppConfig:
         return {device.key for device in self.devices}
 
     def rename_device(self, old_key: str, new_key: str) -> bool:
-        """Change la cle d'un appareil et propage aux prises et aux profils."""
+        """Change a device's key and propagate it to outlets and profiles."""
         device = self.device(old_key)
         if device is None or not new_key or self.device(new_key) is not None:
             return False
@@ -580,10 +578,10 @@ class AppConfig:
             profile.outlets_on = [
                 self._repoint(ref, old_key, new_key) for ref in profile.outlets_on
             ]
-        # Les references hors profils comptent autant : laisser `pc_ref`
-        # pointer sur l'ancienne cle rend la detection muette -- l'appareil
-        # designe n'existe plus -- sans le moindre message, et `resume_refs`
-        # perime rendrait un reveil incapable de restituer quoi que ce soit.
+        # References outside profiles matter just as much: leaving `pc_ref`
+        # pointing at the old key silences sensing -- the designated device
+        # no longer exists -- without the slightest message, and a stale
+        # `resume_refs` would leave a resume unable to restore anything.
         self.sensing.pc_ref = self._repoint(self.sensing.pc_ref, old_key, new_key)
         self.settings.resume_refs = [
             self._repoint(ref, old_key, new_key)
@@ -593,14 +591,14 @@ class AppConfig:
 
     @staticmethod
     def _repoint(ref: str, old_key: str, new_key: str) -> str:
-        """Reecrit une reference de prise apres un changement de cle."""
+        """Rewrite an outlet reference after a key change."""
         if not ref:
             return ref
         device, switch = parse_ref(ref)
         return f"{new_key}:{switch}" if device == old_key else ref
 
     def remove_device(self, key: str) -> None:
-        """Retire un appareil, ses prises, et les references qui y pointent."""
+        """Remove a device, its outlets, and the references pointing to them."""
         self.devices = [d for d in self.devices if d.key != key]
         self.outlets = [o for o in self.outlets if o.device != key]
         remaining = set(self.refs())
@@ -608,10 +606,10 @@ class AppConfig:
             profile.outlets_on = [r for r in profile.outlets_on if r in remaining]
 
     def unclassified_outlets(self) -> list[OutletConfig]:
-        """Prises dont le type n'a pas ete renseigne.
+        """Outlets whose kind has not been set.
 
-        Elles ne sont manoeuvrees par aucun automatisme tant qu'on ignore
-        ce qu'elles alimentent.
+        No automation operates them as long as we do not know what they
+        power.
         """
         return [
             outlet
@@ -620,27 +618,51 @@ class AppConfig:
         ]
 
     def boot_screen_outlet(self) -> OutletConfig | None:
-        """La prise qui doit rester alimentee quand le PC s'eteint."""
+        """The outlet that must stay powered when the PC shuts down."""
         for outlet in self.outlets:
             if outlet.boot_screen:
                 return outlet
         return None
 
+    def leaves_a_screen(self, powered: set[str]) -> bool:
+        """True if these powered outlets leave at least one screen on.
+
+        Nothing to protect without a declared screen outlet, nor when a
+        screen depends on no outlet: that one stays on whatever is cut.
+        """
+        screens = [outlet.ref for outlet in self.outlets if outlet.is_screen]
+        if not screens or self.unswitched_screens:
+            return True
+        return any(ref in powered for ref in screens)
+
+    def fallback_screen(self, candidates: set[str]) -> OutletConfig | None:
+        """The screen to keep when none would stay on.
+
+        The boot screen first, since it is already designated as the one
+        that must never be missing; failing that, the first declared
+        screen. `candidates` rules out outlets we could not command.
+        """
+        screens = [o for o in self.outlets if o.is_screen and o.ref in candidates]
+        boot = self.boot_screen_outlet()
+        if boot is not None and boot in screens:
+            return boot
+        return screens[0] if screens else None
+
     def host_pc_outlet(self) -> OutletConfig | None:
-        """La prise qui alimente l'unite centrale, si elle est connue."""
+        """The outlet powering the PC, if known."""
         for outlet in self.outlets:
             if outlet.host_pc:
                 return outlet
         return None
 
     def shutdown_refs_on(self) -> list[str]:
-        """Prises a laisser alimentees a la veille ou a l'arret du PC.
+        """Outlets to leave powered when the PC sleeps or shuts down.
 
-        L'ecran de demarrage n'en fait partie que si rien ne peut le
-        rallumer. Des lors que le script embarque surveille la
-        consommation, il s'en charge au prochain allumage : le garder sous
-        tension ne ferait que consommer pour rien, et contredirait le but
-        meme de la detection -- tout couper a l'arret.
+        The boot screen is only among them if nothing can switch it back
+        on. As soon as the on-device script watches the power draw, it
+        takes care of it at the next power-on: keeping it powered would
+        only waste energy, and would defeat the very purpose of sensing
+        -- cutting everything at shutdown.
         """
         keep = [outlet.ref for outlet in self.outlets if not outlet.cuts_on_sleep]
         if not self.sensing.enabled:
@@ -651,7 +673,7 @@ class AppConfig:
             ]
         return keep
 
-    # -------------------------------------------------------- persistance
+    # -------------------------------------------------------- persistence
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -667,15 +689,15 @@ class AppConfig:
         }
 
     def normalise_roles(self) -> None:
-        """Garantit l'unicite des roles exclusifs.
+        """Guarantee that exclusive roles are unique.
 
-        L'interface l'assure deja, mais un fichier edite a la main -- ou une
-        configuration a demi migree -- pourrait porter deux ecrans de
-        demarrage. On garde le premier de chaque role, car deux prises
-        rivales rendraient le comportement a l'arret imprevisible.
+        The interface already ensures it, but a hand-edited file -- or a
+        half-migrated configuration -- could carry two boot screens. The
+        first of each role is kept, because two rival outlets would make
+        the shutdown behaviour unpredictable.
         """
-        # Une prise associee a un ecran en est un : on le deduit plutot que
-        # de demander a nouveau ce qui est deja connu.
+        # An outlet associated with a screen is one: infer it rather than
+        # asking again for what is already known.
         for outlet in self.outlets:
             if not outlet.kind and outlet.monitor_key:
                 outlet.kind = KIND_SCREEN
@@ -691,14 +713,14 @@ class AppConfig:
         self._heal_refs()
 
     def _heal_refs(self) -> None:
-        """Repose les references qui ne designent plus aucune prise.
+        """Repoint references that no longer designate any outlet.
 
-        Une reference orpheline -- le plus souvent laissee par un changement
-        de cle d'appareil -- ne se signale nulle part : la detection cherche
-        un appareil absent et se tait, et la panne ne se decouvre qu'a la
-        premiere veille. On repose donc `pc_ref` sur la prise qui porte
-        effectivement le PC, et l'on ecarte les references de reveil
-        devenues sans objet plutot que de tenter de les rallumer.
+        An orphan reference -- most often left behind by a device key
+        change -- is reported nowhere: sensing looks for a missing device
+        and goes quiet, and the failure is only discovered at the first
+        sleep. So `pc_ref` is repointed to the outlet that actually powers
+        the PC, and resume references that no longer mean anything are
+        dropped rather than trying to switch them back on.
         """
         known = set(self.refs())
         if self.sensing.pc_ref and self.sensing.pc_ref not in known:
@@ -727,11 +749,11 @@ class AppConfig:
         return config
 
     def _adopt_all_on(self) -> None:
-        """Fait place au profil integre dans une configuration anterieure.
+        """Make room for the built-in profile in an older configuration.
 
-        Un profil enregistre sous ce nom le masquerait. S'il allume deja
-        tous les ecrans, il fait double emploi et disparait ; sinon, c'est
-        un choix de l'utilisateur, et il est garde sous un autre nom.
+        A profile saved under that name would hide it. If it already turns
+        on every screen, it is redundant and goes away; otherwise it is a
+        user choice, and it is kept under another name.
         """
         screens = {
             o.ref for o in self.outlets
@@ -749,11 +771,11 @@ class AppConfig:
                 profile.name = name
 
     def save(self, path: Path | None = None) -> None:
-        """Ecrit la configuration de facon atomique et durable.
+        """Write the configuration atomically and durably.
 
-        La version precedente, si elle est lisible, part d'abord dans
-        `config.json.bak` : `load` s'y rabat si le fichier principal est
-        abime.
+        The previous version, if readable, first goes to
+        `config.json.bak`: `load` falls back on it if the main file is
+        damaged.
         """
         target = Path(path or self.path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -765,12 +787,12 @@ class AppConfig:
 
 
 def backup_path(target: Path) -> Path:
-    """Copie de secours : la version precedant le dernier enregistrement."""
+    """Backup copy: the version preceding the last save."""
     return target.with_name(target.name + ".bak")
 
 
 def _read_valid(target: Path) -> str | None:
-    """Contenu du fichier s'il se lit comme du JSON, sinon None."""
+    """File contents if they parse as JSON, otherwise None."""
     try:
         text = target.read_text(encoding="utf-8")
         json.loads(text)
@@ -780,11 +802,11 @@ def _read_valid(target: Path) -> str | None:
 
 
 def _write_durable(target: Path, text: str) -> None:
-    """Fichier temporaire, `fsync`, puis remplacement.
+    """Temporary file, `fsync`, then replace.
 
-    Sans `fsync`, le renommage peut atteindre le disque avant les donnees :
-    une coupure de courant pendant une mise en veille a ainsi laisse un
-    `config.json` de la bonne taille, mais rempli d'octets nuls.
+    Without `fsync`, the rename can reach the disk before the data: a
+    power cut during a sleep once left a `config.json` of the right size,
+    but filled with null bytes.
     """
     handle, temp_name = tempfile.mkstemp(
         dir=str(target.parent), prefix=target.name, suffix=".tmp"
@@ -801,11 +823,11 @@ def _write_durable(target: Path, text: str) -> None:
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
-    """Amene une configuration ancienne au format courant.
+    """Bring an old configuration up to the current format.
 
-    Version 1 : un seul appareil, decrit par un objet `device`, des prises
-    numerotees `id`, et des profils referencant ces numeros. On lui invente
-    une cle d'appareil et on reecrit les references en `cle:sortie`.
+    Version 1: a single device, described by a `device` object, outlets
+    numbered by `id`, and profiles referencing those numbers. A device key
+    is invented for it and references are rewritten as `key:output`.
     """
     version = int(data.get("version", 1))
     if version >= CONFIG_VERSION:
@@ -853,25 +875,25 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def config_path() -> Path:
-    """Emplacement du fichier de configuration."""
+    """Location of the configuration file."""
     override = os.environ.get("SHELLY_SCREENS_CONFIG")
     return Path(override).expanduser() if override else DEFAULT_CONFIG_PATH
 
 
 def load(path: Path | None = None) -> AppConfig:
-    """Charge la configuration, ou renvoie une configuration vierge."""
+    """Load the configuration, or return a blank one."""
     target = Path(path) if path else config_path()
     if not target.exists():
         return AppConfig(path=target)
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        # Fichier abime : on repart de la copie de secours. Le fichier
-        # principal sera reecrit au prochain enregistrement ; celui-ci ne
-        # touchera pas la copie, puisque l'original ne se lit plus.
+        # Damaged file: start again from the backup copy. The main file
+        # will be rewritten on the next save; that save will not touch
+        # the backup, since the original no longer parses.
         backup = _read_valid(backup_path(target))
         if backup is None:
-            raise RuntimeError(f"Configuration illisible ({target}): {exc}") from exc
+            raise RuntimeError(f"Unreadable configuration ({target}): {exc}") from exc
         logging.getLogger("shelly_screens").warning(
             "Configuration unreadable (%s), restored from %s",
             exc,

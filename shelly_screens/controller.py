@@ -1,23 +1,23 @@
-"""Orchestration : appareils, prises, ecrans et fenetres.
+"""Orchestration: devices, outlets, screens and windows.
 
-Le controleur est la seule piece qui connait l'enchainement complet d'un
-changement de profil. Il ne depend d'aucune interface graphique, de facon a
-rester testable et pilotable depuis n'importe ou.
+The controller is the only piece that knows the complete sequence of a
+profile change. It depends on no graphical interface, so that it stays
+testable and can be driven from anywhere.
 
-Plusieurs appareils Shelly cohabitent -- typiquement deux multiprises, ou une
-multiprise et une prise simple pour l'unite centrale. Chacun est joint
-independamment : un appareil injoignable n'empeche pas les autres de
-repondre, et le rapport dit ce qui n'a pas pu etre fait.
+Several Shelly devices coexist -- typically two power strips, or a power
+strip and a single outlet for the tower. Each one is reached independently:
+an unreachable device does not prevent the others from answering, and the
+report says what could not be done.
 
-L'ordre des operations n'est pas anodin :
+The order of operations is not trivial:
 
-1. memoriser la disposition des fenetres du profil que l'on quitte ;
-2. ALLUMER d'abord les ecrans manquants, et attendre que Windows les voie.
-   Allumer avant d'eteindre evite de se retrouver, ne serait-ce qu'un
-   instant, sans aucun ecran -- et laisse a la dalle ses quelques secondes
-   d'initialisation ;
-3. eteindre ensuite ce qui doit l'etre ;
-4. rejouer la disposition memorisee pour le profil demande.
+1. remember the window layout of the profile being left;
+2. switch the missing screens ON first, and wait for Windows to see them.
+   Switching on before switching off avoids ending up, even for a moment,
+   with no screen at all -- and gives the panel its few seconds of
+   initialisation;
+3. then switch off what needs to be;
+4. replay the layout remembered for the requested profile.
 """
 
 from __future__ import annotations
@@ -41,11 +41,11 @@ from .device import (
 from .i18n import t
 from .win import layout, monitors
 
-# Marge laissee a la dalle apres que Windows a annonce l'ecran.
+# Margin left to the panel after Windows has announced the screen.
 DISPLAY_GRACE_S = 1.2
-# Periode de scrutation de la liste des ecrans.
+# Polling period of the screen list.
 POLL_INTERVAL_S = 0.4
-# Ecart entre deux lectures de la disposition qui doivent concorder.
+# Gap between two layout readings that must agree.
 LAYOUT_STABLE_S = 2.0
 
 LogFn = Callable[[str], None]
@@ -53,7 +53,7 @@ LogFn = Callable[[str], None]
 
 @dataclass
 class ApplyReport:
-    """Resultat d'un changement de profil, pour l'affichage et les journaux."""
+    """Outcome of a profile change, for display and logs."""
 
     profile: str
     turned_on: list[str] = field(default_factory=list)
@@ -84,21 +84,21 @@ class ApplyReport:
 
 @dataclass
 class LayoutCapture:
-    """Issue d'un releve de la disposition, et de quoi revenir en arriere."""
+    """Outcome of a layout capture, and what is needed to roll it back."""
 
     ok: bool
     message: str
-    # Etat des prises avant le releve, et celles qu'il a allumees.
+    # Outlet states before the capture, and the outlets it switched on.
     states_before: dict[str, bool] = field(default_factory=dict)
     turned_on: list[str] = field(default_factory=list)
 
 
 class NotConnected(RuntimeError):
-    """Aucun appareil joignable pour l'instant."""
+    """No device reachable for now."""
 
 
 class SensingRealmMissing(RuntimeError):
-    """Impossible de poser un mot de passe sans connaitre l'identite de l'appareil."""
+    """Cannot set a password without knowing the device's identity."""
 
     def __init__(self, key: str) -> None:
         super().__init__(
@@ -107,73 +107,72 @@ class SensingRealmMissing(RuntimeError):
         )
 
 
-# Une resolution complete coute une requete mDNS et un sondage HTTP. La
-# refaire a chaque lecture ratee revient a punir un appareil deja en
-# difficulte : c'est ainsi qu'on a compte dix resolutions en dix secondes
-# pendant un reveil, au moment precis ou la multiprise saturait.
+# A full resolution costs an mDNS query and an HTTP probe. Redoing it on
+# every failed read amounts to punishing a device already in trouble: that
+# is how ten resolutions were counted in ten seconds during a wake, at the
+# very moment the power strip was saturating.
 RESOLVE_COOLDOWN_S = 30.0
-# Une tension secteur ne reste jamais parfaitement constante : elle
-# oscille toujours d'un dixieme de volt d'une mesure a l'autre. Plusieurs
-# releves rigoureusement identiques ne sont donc pas une mesure mais une
-# valeur gelee -- la voie du firmware a lache. Le symptome est sournois :
-# l'appareil repond, les prises obeissent, et seule la detection de veille
-# raisonne sur un chiffre mort. Elle ne coupe alors plus rien, sans que
-# rien ne le signale. Six lectures, soit une demi-minute, suffisent a
-# distinguer le gel d'une coincidence.
+# Mains voltage never stays perfectly constant: it always wobbles by a
+# tenth of a volt from one reading to the next. Several strictly identical
+# readings are therefore not a measurement but a frozen value -- the
+# firmware's metering channel has given out. The symptom is insidious: the
+# device answers, the outlets obey, and only sleep detection reasons on a
+# dead figure. It then no longer switches anything off, with nothing to
+# flag it. Six reads, i.e. half a minute, are enough to tell a freeze from
+# a coincidence.
 FROZEN_METER_READS = 6
-# Le signal se relit a part, et rarement. Une liaison Wi-Fi ne change pas
-# d'un battement de cil, et chaque interrogation supplementaire pese sur
-# un firmware dont on a appris ce soir la fragilite : une fois par minute
-# suffit largement a voir une degradation s'installer.
+# The signal is read separately, and rarely. A Wi-Fi link does not change
+# in the blink of an eye, and every extra query weighs on a firmware whose
+# fragility we learned about tonight: once a minute is plenty to see a
+# degradation setting in.
 SIGNAL_REFRESH_S = 60.0
-# Apres un echec, on espace les interrogations au lieu de les maintenir.
-# On revient au rythme normal des que l'appareil repond.
+# After a failure, queries are spaced out instead of kept up. We return to
+# the normal pace as soon as the device answers.
 READ_BACKOFF_S = (0.0, 15.0, 30.0, 60.0)
 
 
 class ScreenController:
-    """Pilote un ou plusieurs appareils Shelly en fonction des profils."""
+    """Drives one or more Shelly devices according to the profiles."""
 
     def __init__(self, app_config: AppConfig, log: LogFn | None = None) -> None:
         self.config = app_config
         self._log: LogFn = log or (lambda message: None)
         self._devices: dict[str, ShellyDevice] = {}
         self._identities: dict[str, discovery.DeviceIdentity] = {}
-        # Appareils qui repondent mais refusent le mot de passe. Distingues
-        # des injoignables : insister ne sert a rien, et seule une
-        # reinitialisation par les boutons permet d'en sortir.
+        # Devices that answer but reject the password. Kept apart from the
+        # unreachable ones: insisting is useless, and only a reset via the
+        # buttons gets out of it.
         self.auth_failures: dict[str, str] = {}
-        # Date de la derniere resolution tentee, par appareil : elle arme le
-        # delai de garde qui empeche d'en enchainer une a chaque echec.
+        # Time of the last attempted resolution, per device: it arms the
+        # cooldown that prevents chaining one on every failure.
         self._last_resolve: dict[str, float] = {}
-        # Nombre d'echecs de lecture consecutifs, et date avant laquelle il
-        # est inutile de retenter. Un appareil qui peine recoit ainsi moins
-        # de trafic, pas davantage.
+        # Number of consecutive read failures, and the time before which
+        # retrying is pointless. A struggling device thus receives less
+        # traffic, not more.
         self._read_failures: dict[str, int] = {}
         self._retry_after: dict[str, float] = {}
-        # Dernieres tensions relevees par prise, pour reperer une voie
-        # de mesure qui ne bouge plus.
+        # Latest voltages read per outlet, to spot a metering channel that
+        # no longer moves.
         self._meter_history: dict[str, list[float]] = {}
-        # Dernier RSSI connu par appareil, et date de la prochaine
-        # relecture. Absent tant qu'on n'a pas pu le lire.
+        # Last known RSSI per device, and the time of the next re-read.
+        # Absent until it could be read.
         self._signal: dict[str, int] = {}
         self._signal_due: dict[str, float] = {}
-        # Une seule sequence a la fois : un changement de profil manipule
-        # l'alimentation et les fenetres, deux en parallele se marcheraient
-        # dessus.
+        # One sequence at a time: a profile change handles power and
+        # windows, two in parallel would trip over each other.
         self._lock = threading.RLock()
-        # Derniere lecture des ecrans, pour juger de leur stabilite, et
-        # raison du dernier refus de relever la disposition.
+        # Last screen reading, to judge their stability, and reason for the
+        # last refusal to capture the layout.
         self._layout_reading: tuple | None = None
-        # Resultat du dernier releve demande : ses problemes (vide s'il a
-        # reussi) et son heure. Le releve continu ne le touche pas : ses
-        # refus sont la regle des qu'un ecran est eteint, pas des echecs.
+        # Result of the last requested capture: its problems (empty if it
+        # succeeded) and its time. Continuous capture does not touch it: its
+        # refusals are the rule as soon as a screen is off, not failures.
         self.capture_problems: list[str] = []
         self.capture_attempted_at = 0.0
-        # Prises coupees dont l'ecran reste sur le bureau de Windows.
+        # Outlets switched off whose screen remains on the Windows desktop.
         self.ghost_screens: list[str] = []
 
-    # ------------------------------------------------------------ connexion
+    # ------------------------------------------------------------ connection
 
     @property
     def online_keys(self) -> set[str]:
@@ -181,19 +180,19 @@ class ScreenController:
 
     @property
     def connected(self) -> bool:
-        """Vrai si au moins un appareil repond."""
+        """True if at least one device answers."""
         return bool(self._devices)
 
     @property
     def fully_connected(self) -> bool:
-        """Vrai si tous les appareils configures repondent."""
+        """True if every configured device answers."""
         return bool(self.config.devices) and len(self._devices) == len(self.config.devices)
 
     def identity(self, key: str) -> discovery.DeviceIdentity | None:
         return self._identities.get(key)
 
     def connect_all(self, allow_scan: bool = True) -> dict[str, bool]:
-        """Resout tous les appareils configures ; renvoie leur etat par cle."""
+        """Resolve every configured device; return their state by key."""
         results: dict[str, bool] = {}
         for device_config in list(self.config.devices):
             results[device_config.key] = (
@@ -205,11 +204,11 @@ class ScreenController:
     def connect_device(
         self, key: str, allow_scan: bool = True, force: bool = False
     ) -> discovery.DeviceIdentity | None:
-        """Retrouve un appareil et memorise son adresse.
+        """Find a device and remember its address.
 
-        `force` passe outre le delai de garde : c'est ce que fait le bouton
-        de reconnexion, ou un demarrage, ou un changement de mot de passe --
-        des gestes voulus, qui ne doivent pas attendre.
+        `force` overrides the cooldown: that is what the reconnect button
+        does, or a startup, or a password change -- deliberate actions,
+        which must not wait.
         """
         device_config = self.config.device(key)
         if device_config is None:
@@ -254,20 +253,20 @@ class ScreenController:
         if count:
             self.config.ensure_outlets(key, count)
         if not was_connected:
-            # Un appareil qui apparait est peut-etre neuf, remis a zero ou
-            # revenu d'un changement de firmware : ses sorties reprennent
-            # alors le reglage d'usine, qui les ouvre toutes au demarrage --
-            # la prise du PC comprise. On repose la garantie ici plutot qu'au
-            # seul lancement de l'application, qui peut tourner depuis des
-            # heures quand l'appareil, lui, vient de renaitre.
+            # A device that shows up may be new, reset, or back from a
+            # firmware change: its outputs then revert to the factory
+            # setting, which turns them all on at boot -- the PC's outlet
+            # included. We reapply the guarantee here rather than only at
+            # app launch, since the app may have been running for hours when
+            # the device has just come back to life.
             self.enforce_power_on_state(key)
             self.enforce_button_lock(key)
         if changed:
             self._save()
-        # On ne journalise que ce qui apprend quelque chose : une premiere
-        # connexion, ou une adresse qui a bouge. Repeter la meme ligne a
-        # chaque appel noyait le journal -- cent onze lignes pour deux
-        # appareils -- juste quand il fallait pouvoir le lire.
+        # Only log what tells us something: a first connection, or an
+        # address that moved. Repeating the same line on every call drowned
+        # the log -- a hundred and eleven lines for two devices -- right when
+        # it needed to be readable.
         if changed or not was_connected:
             where = (
                 f"{identity.host} ({address})"
@@ -278,7 +277,7 @@ class ScreenController:
         return identity
 
     def protected_switches(self, device_key: str) -> set[int]:
-        """Sorties de cet appareil qu'aucune commande ne doit couper."""
+        """Outputs of this device that no command may switch off."""
         return {
             outlet.switch_id
             for outlet in self.config.outlets_of(device_key)
@@ -286,11 +285,11 @@ class ScreenController:
         }
 
     def refresh_protection(self) -> None:
-        """Repropage les protections vers les clients deja ouverts.
+        """Propagate the protections again to the clients already open.
 
-        A appeler des qu'un role change : un client cree avant le marquage
-        garderait sinon l'ancienne liste, et la sortie du PC redeviendrait
-        coupable.
+        To be called as soon as a role changes: a client created before the
+        marking would otherwise keep the old list, and the PC's output would
+        become switchable off again.
         """
         for key, device in self._devices.items():
             device.protect(self.protected_switches(key))
@@ -298,21 +297,21 @@ class ScreenController:
             self.enforce_button_lock(key)
 
     def enforce_power_on_state(self, device_key: str) -> list[str]:
-        """Pose ce que chaque sortie doit faire quand l'appareil redemarre.
+        """Set what each output must do when the device restarts.
 
-        Ce reglage vit dans la multiprise, hors de portee du script comme de
-        l'application, et il decide seul du sort des sorties a chaque
-        demarrage. Livre sur `off`, il coupe tout au moindre redemarrage --
-        mise a jour du firmware, micro-coupure, chien de garde -- et la
-        prise du PC avec : la machine s'arrete net, sans qu'aucune de nos
-        protections ait eu son mot a dire. C'est ainsi qu'un redemarrage de
-        la multiprise a coupe le PC en pleine session.
+        This setting lives in the power strip, out of reach of both the
+        script and the app, and it alone decides the fate of the outputs at
+        every boot. Shipped as `off`, it cuts everything at the slightest
+        restart -- firmware update, brief power cut, watchdog -- and the PC's
+        outlet with it: the machine stops dead, without any of our
+        protections having a say. That is how a restart of the power strip
+        cut the PC in the middle of a session.
 
-        La sortie du PC et les sorties critiques repartent donc allumees.
-        Les autres reprennent leur etat anterieur : une multiprise d'ecrans
-        qui redemarre pendant que le PC tourne doit rendre l'image, et le
-        script ne la rallumerait pas -- il n'agit qu'aux changements d'etat
-        du PC, et celui-ci n'a pas bouge.
+        The PC's output and the critical outputs therefore come back on.
+        The others return to their previous state: a screen power strip
+        that restarts while the PC is running must give the picture back,
+        and the script would not switch it back on -- it only acts on PC
+        state changes, and the PC has not moved.
         """
         device = self._devices.get(device_key)
         if device is None:
@@ -326,12 +325,12 @@ class ScreenController:
                 ) or {}).get("initial_state")
                 if current == wanted:
                     continue
-                # Un reglage, pas une commutation : la sortie ne bouge pas.
+                # A setting, not a switching: the output does not move.
                 device.call(
                     "Switch.SetConfig",
                     {"id": outlet.switch_id, "config": {"initial_state": wanted}},
                 )
-            except Exception as exc:  # noqa: BLE001 - ne jamais bloquer la connexion
+            except Exception as exc:  # noqa: BLE001 - never block the connection
                 self._log(f"Could not set the power-on state of {outlet.ref}: {exc}")
                 continue
             changed.append(f"{outlet.ref} {current} -> {wanted}")
@@ -340,16 +339,16 @@ class ScreenController:
         return changed
 
     def enforce_button_lock(self, device_key: str) -> bool:
-        """Detache le bouton physique de la prise du PC ; vrai s'il l'a fallu.
+        """Detach the physical button of the PC's outlet; true if it was needed.
 
-        Le bouton d'une Power Strip commute sa prise au moindre appui, sans
-        passer par aucune de nos protections : un coup de balai, un cable
-        qu'on range, et le PC s'eteint net. Detache, le bouton ne commande
-        plus rien -- la prise ne se pilote que par l'application.
+        A Power Strip's button toggles its outlet at the slightest press,
+        bypassing all of our protections: a sweep of the broom, a cable
+        being tidied, and the PC dies on the spot. Detached, the button no
+        longer controls anything -- the outlet is driven by the app only.
 
-        Comme l'etat au demarrage, ce reglage vit dans l'appareil et se
-        perd a la remise a zero : on le repose a chaque connexion. Un autre
-        modele que la Power Strip n'a pas le composant, et n'est pas concerne.
+        Like the power-on state, this setting lives in the device and is
+        lost on a reset: we reapply it on every connection. A model other
+        than the Power Strip lacks the component, and is not concerned.
         """
         device = self._devices.get(device_key)
         pc = self.config.host_pc_outlet()
@@ -363,14 +362,14 @@ class ScreenController:
             if buttons.get(pc.switch_id) == device_leds.BUTTON_DETACHED:
                 return False
             device_leds.set_button(device, pc.switch_id, detached=True)
-        except Exception as exc:  # noqa: BLE001 - ne jamais bloquer la connexion
+        except Exception as exc:  # noqa: BLE001 - never block the connection
             self._log(f"Could not detach the button of {pc.ref}: {exc}")
             return False
         self._log(f"Physical button of {pc.ref} detached: it can no longer switch the PC off")
         return True
 
     def _switch_count(self, key: str) -> int:
-        """Nombre de sorties reellement presentes sur un appareil."""
+        """Number of outputs actually present on a device."""
         device = self._devices.get(key)
         if device is None:
             return 0
@@ -380,7 +379,7 @@ class ScreenController:
             return 0
 
     def adopt(self, identity: discovery.DeviceIdentity, name: str = "") -> DeviceConfig:
-        """Ajoute un appareil decouvert a la configuration."""
+        """Add a discovered device to the configuration."""
         existing = next(
             (d for d in self.config.devices if d.mac.upper() == identity.mac.upper()), None
         )
@@ -411,49 +410,49 @@ class ScreenController:
         self._log(f"Device '{key}' removed")
 
     def device_for(self, key: str) -> ShellyDevice:
-        """Appareil joignable pour cette cle, avec une tentative de reconnexion."""
+        """Reachable device for this key, with one reconnection attempt."""
         device = self._devices.get(key)
         if device is not None:
             return device
         self.connect_device(key)
-        # On verifie le client, pas la valeur de retour : pendant le delai
-        # de garde, `connect_device` rend l'identite deja connue sans avoir
-        # reconstruit quoi que ce soit. S'y fier ferait croire l'appareil
-        # joignable alors qu'aucun client n'existe.
+        # Check the client, not the return value: during the cooldown,
+        # `connect_device` returns the already known identity without having
+        # rebuilt anything. Relying on it would make the device look
+        # reachable while no client exists.
         device = self._devices.get(key)
         if device is None:
             raise NotConnected(f"Device '{key}' is not reachable")
         return device
 
-    # -------------------------------------------------------------- lecture
+    # --------------------------------------------------------------- reading
 
     def read_outlets(self) -> dict[str, SwitchState]:
-        """Etat courant de toutes les prises, indexe par reference.
+        """Current state of every outlet, indexed by reference.
 
-        Un appareil muet est simplement absent du resultat : les autres
-        restent lisibles, et l'appelant voit quelles prises manquent.
+        A silent device is simply absent from the result: the others remain
+        readable, and the caller sees which outlets are missing.
         """
         states: dict[str, SwitchState] = {}
         now = time.monotonic()
         for device_config in self.config.devices:
             key = device_config.key
-            # Un appareil qui vient d'echouer se voit accorder un repit.
-            # Le relancer toutes les cinq secondes revenait a l'accabler au
-            # moment ou il tenait le moins debout, et c'est cette rafale qui
-            # a precede ses deux plantages.
+            # A device that has just failed is granted a respite. Polling it
+            # again every five seconds amounted to overwhelming it at the
+            # moment it was least able to stand, and that burst is what
+            # preceded its two crashes.
             if now < self._retry_after.get(key, 0.0):
                 continue
             try:
                 switches = self.device_for(key).get_all_switches()
             except AuthenticationFailed as exc:
-                # Inutile de retenter : l'appareil repond, c'est le mot de
-                # passe qui ne convient pas.
+                # No point retrying: the device answers, it is the password
+                # that does not fit.
                 self.auth_failures[key] = str(exc)
                 continue
             except (NotConnected, ShellyUnreachable, ShellyError):
-                # On ne reconstruit plus la connexion sur-le-champ : le
-                # delai de garde de `connect_device` s'en chargera au
-                # prochain tour, une fois l'appareil calme.
+                # The connection is no longer rebuilt on the spot: the
+                # cooldown of `connect_device` will handle it on the next
+                # round, once the device has calmed down.
                 self._devices.pop(key, None)
                 attempt = self._read_failures.get(key, 0) + 1
                 self._read_failures[key] = attempt
@@ -472,31 +471,31 @@ class ScreenController:
                 ref = f"{key}:{switch_id}"
                 states[ref] = state
                 self._note_meter(ref, state)
-            # L'appareil vient de repondre : c'est le bon moment, et le
-            # seul ou l'on est sur de ne pas le deranger pour rien.
+            # The device has just answered: this is the right moment, and
+            # the only one where we are sure not to bother it for nothing.
             if now >= self._signal_due.get(key, 0.0):
                 self._refresh_signal(key, now)
         return states
 
     def _refresh_signal(self, key: str, now: float) -> None:
-        """Relit la puissance du signal Wi-Fi, sans jamais faire echouer."""
+        """Re-read the Wi-Fi signal strength, without ever failing."""
         self._signal_due[key] = now + SIGNAL_REFRESH_S
         try:
             status = self._devices[key].call("Wifi.GetStatus") or {}
-        except Exception:  # noqa: BLE001 - une mesure de confort, pas plus
+        except Exception:  # noqa: BLE001 - a nice-to-have reading, nothing more
             return
         rssi = status.get("rssi")
         if isinstance(rssi, (int, float)) and rssi:
             self._signal[key] = int(rssi)
 
     def wifi_signal(self, key: str) -> int | None:
-        """Dernier RSSI connu, en dBm, ou None s'il n'a pas ete lu."""
+        """Last known RSSI, in dBm, or None if it has not been read."""
         return self._signal.get(key)
 
     def _note_meter(self, ref: str, state: SwitchState) -> None:
-        """Retient la tension relevee, pour juger si la voie est vivante."""
-        # Une prise coupee ne mesure rien : sa tension nulle et constante
-        # ne dit pas que le firmware a lache.
+        """Remember the voltage read, to judge whether the channel is alive."""
+        # An outlet that is off measures nothing: its constant zero voltage
+        # does not mean the firmware has given out.
         if not state.output or state.voltage <= 0:
             self._meter_history.pop(ref, None)
             return
@@ -505,7 +504,7 @@ class ScreenController:
         del readings[:-FROZEN_METER_READS]
 
     def frozen_meters(self) -> set[str]:
-        """Prises dont la mesure semble gelee."""
+        """Outlets whose metering seems frozen."""
         return {
             ref
             for ref, readings in self._meter_history.items()
@@ -513,18 +512,18 @@ class ScreenController:
         }
 
     def reboot_device(self, key: str) -> None:
-        """Redemarre un appareil.
+        """Restart a device.
 
-        Sans danger pour les sorties : leurs relais sont bistables et
-        gardent leur position, et `initial_state` ramene de toute facon la
-        prise du PC et les prises critiques sous tension.
+        Harmless for the outputs: their relays are bistable and keep their
+        position, and `initial_state` brings the PC's outlet and the
+        critical outlets back on anyway.
         """
         device = self.device_for(key)
         try:
             device.call("Shelly.Reboot")
-        except Exception:  # noqa: BLE001 - la reponse se perd avec la connexion
+        except Exception:  # noqa: BLE001 - the response is lost with the connection
             pass
-        # L'appareil part : on oublie tout ce qu'on croyait savoir de lui.
+        # The device is going away: forget everything we thought we knew about it.
         self._devices.pop(key, None)
         self._last_resolve.pop(key, None)
         for ref in list(self._meter_history):
@@ -535,10 +534,10 @@ class ScreenController:
     # ------------------------------------------------------------- actions
 
     def set_device_password(self, key: str, password: str) -> None:
-        """Active, change ou retire le mot de passe d'un appareil.
+        """Enable, change or remove a device's password.
 
-        Une chaine vide retire l'authentification. Le mot de passe est
-        memorise chiffre, et le client reconstruit pour l'utiliser aussitot.
+        An empty string removes authentication. The password is stored
+        encrypted, and the client is rebuilt to use it right away.
         """
         device_config = self.config.device(key)
         if device_config is None:
@@ -549,10 +548,10 @@ class ScreenController:
         self.device_for(key).set_password(realm, password)
         device_config.set_password(password)
         self._devices[key] = ShellyDevice(device_config.host, password=password or None)
-        # L'identite est une photo prise a la connexion : sans cette mise a
-        # jour, elle continuerait d'annoncer un appareil sans mot de passe
-        # alors qu'on vient de lui en poser un. L'interface s'y fie pour
-        # afficher l'etat reel, et afficherait donc le contraire.
+        # The identity is a snapshot taken at connection time: without this
+        # update, it would keep announcing a device without a password when
+        # one has just been set. The interface relies on it to show the
+        # real state, and would therefore show the opposite.
         identity = self._identities.get(key)
         if identity is not None:
             self._identities[key] = replace(identity, auth_enabled=bool(password))
@@ -560,18 +559,29 @@ class ScreenController:
         self._save()
         self._log(f"Device '{key}': password {'set' if password else 'removed'}")
 
-    def set_outlet(self, ref: str, on: bool) -> None:
-        """Manoeuvre une prise, en respectant les garde-fous."""
+    def set_outlet(self, ref: str, on: bool, keep_a_screen: bool = False) -> None:
+        """Operate an outlet, honouring the safeguards.
+
+        `keep_a_screen` refuses to switch off the last screen that is on. The
+        identification assistant does without it: it switches each screen
+        off in turn and back on right away, that is its very principle.
+        """
         outlet = self.config.outlet(ref)
         if outlet is not None and outlet.never_switch_off and not on:
             reason = "powers the PC" if outlet.host_pc else "is marked critical"
             raise PermissionError(f"{outlet.label} {reason} and cannot be switched off")
+        if keep_a_screen and not on and outlet is not None and outlet.is_screen:
+            powered = {r for r, s in self.read_outlets().items() if s.output and r != ref}
+            if not self.config.leaves_a_screen(powered):
+                raise PermissionError(
+                    f"{outlet.label} is the last screen on and cannot be switched off"
+                )
         key, switch_id = parse_ref(ref)
         self.device_for(key).set_switch(switch_id, on)
         self._log(f"{ref} -> {'on' if on else 'off'}")
 
     def apply_profile(self, name: str) -> ApplyReport:
-        """Applique un profil : les prises, puis les fenetres a secourir."""
+        """Apply a profile: the outlets, then the windows to rescue."""
         profile = self.config.profile(name)
         if profile is None:
             raise KeyError(f"Unknown profile: {name}")
@@ -586,14 +596,14 @@ class ScreenController:
         )
 
     def apply_outlets(self, targets: dict[str, bool]) -> ApplyReport:
-        """Applique une configuration ponctuelle, hors profils.
+        """Apply a one-off configuration, outside of profiles.
 
-        Aucun profil n'est modifie ni retenu comme profil en cours.
+        No profile is modified or kept as the current profile.
 
-        Meme enchainement qu'un profil -- allumer d'abord, couper ensuite,
-        ramener les fenetres egarees --, mais aucun profil n'est plus « en
-        cours » : au reveil, on rendra les prises telles qu'elles etaient
-        avant la veille, plutot qu'un profil qu'on a quitte.
+        Same sequence as a profile -- switch on first, switch off next,
+        bring back stray windows --, but no profile is "current" any more:
+        on wake, the outlets will be restored as they were before sleep,
+        rather than to a profile that was left.
         """
         for ref in list(targets):
             outlet = self.config.outlet(ref)
@@ -607,18 +617,17 @@ class ScreenController:
         return report
 
     def prepare_for_suspend(self) -> ApplyReport:
-        """Coupe les ecrans a la mise en veille, sauf ce qui doit rester.
+        """Switch the screens off on sleep, except what must stay on.
 
-        Pendant le POST et l'ecran de connexion, rien ne tourne sur le PC pour
-        commander les prises : l'ecran de demarrage -- et le concentrateur USB
-        qui porte le clavier, s'il est marque critique -- doivent donc rester
-        alimentes, sans quoi le prochain demarrage se ferait a l'aveugle et
-        sans saisie possible.
+        During POST and the sign-in screen, nothing runs on the PC to
+        control the outlets: the boot screen -- and the USB hub carrying the
+        keyboard, if it is marked critical -- must therefore stay powered,
+        otherwise the next boot would happen blind and with no way to type.
         """
         keep_on = set(self.config.shutdown_refs_on())
         targets = {outlet.ref: (outlet.ref in keep_on) for outlet in self.config.outlets}
-        # Ce qui est allume maintenant est ce qu'il faudra rendre au reveil.
-        # On le note avant de couper : apres, l'information a disparu.
+        # What is on now is what will need to be restored on wake. Note it
+        # before switching off: afterwards, the information is gone.
         states = self.read_outlets()
         self.config.settings.resume_refs = [
             ref for ref, state in states.items() if state.output and ref not in keep_on
@@ -628,13 +637,15 @@ class ScreenController:
             targets=targets,
             profile=None,
             urgent=True,
+            # On sleep, switching everything off is precisely the goal.
+            keep_a_screen=False,
         )
 
     def remember_for_resume(self) -> list[str]:
-        """Note les prises alimentees, sans rien commander.
+        """Note the powered outlets, without commanding anything.
 
-        Utile quand la coupure est laissee au script embarque : il faut
-        tout de meme savoir quoi rendre au reveil.
+        Useful when the switching off is left to the on-device script: we
+        still need to know what to restore on wake.
         """
         keep_on = set(self.config.shutdown_refs_on())
         states = self.read_outlets()
@@ -646,12 +657,12 @@ class ScreenController:
         return refs
 
     def resume(self) -> ApplyReport | None:
-        """Rend au reveil ce qui etait alimente avant la veille.
+        """On wake, restore what was powered before sleep.
 
-        Le dernier profil d'abord, puisque c'est l'intention exprimee. A
-        defaut, l'etat releve juste avant la coupure : sans lui, un
-        utilisateur qui n'a jamais applique de profil se reveillait devant
-        des ecrans eteints, sans que rien ne les rallume.
+        The last profile first, since that is the expressed intent. Failing
+        that, the state recorded just before the cut: without it, a user
+        who had never applied a profile woke up in front of dark screens,
+        with nothing to switch them back on.
         """
         name = self.config.settings.last_profile
         if name and self.config.profile(name) is not None:
@@ -673,7 +684,7 @@ class ScreenController:
             profile=None,
         )
 
-    # ----------------------------------------------------------- sequencage
+    # ----------------------------------------------------------- sequencing
 
     def _apply_targets(
         self,
@@ -682,6 +693,7 @@ class ScreenController:
         profile: Profile | None,
         urgent: bool = False,
         rescue: bool = False,
+        keep_a_screen: bool = True,
     ) -> ApplyReport:
         report = ApplyReport(profile=profile_name)
 
@@ -691,12 +703,15 @@ class ScreenController:
                 report.errors.append("No Shelly device is reachable")
                 return report
 
-            # Les ecrans d'avant le changement : une fenetre qui s'y trouvait
-            # et n'est plus sur aucun ecran est perdue, pas garee a dessein.
+            if keep_a_screen:
+                self._keep_a_screen(targets, states)
+
+            # The screens before the change: a window that was on one of
+            # them and is no longer on any screen is lost, not parked on purpose.
             screens_before = [m.rect for m in monitors.list_monitors()]
 
-            # Une prise dont on ne connait pas l'etat n'est pas manoeuvree :
-            # son appareil ne repond pas, insister ne ferait qu'attendre.
+            # An outlet whose state is unknown is not operated: its device
+            # does not answer, insisting would only mean waiting.
             to_turn_on = [
                 ref for ref, want in targets.items() if want and _is_off(states, ref)
             ]
@@ -710,17 +725,17 @@ class ScreenController:
             if missing:
                 report.errors.append(f"unreachable: {', '.join(sorted(missing))}")
 
-            # 1. Allumer d'abord, puis laisser Windows decouvrir les ecrans.
+            # 1. Switch on first, then let Windows discover the screens.
             expected_keys = self._expected_monitor_keys(targets)
             report.turned_on = self._switch_many(to_turn_on, True, report, urgent)
             if report.turned_on and not urgent:
                 report.displays_waited_s = self._wait_for_displays(expected_keys)
 
-            # 2. Couper ce qui reste a couper.
+            # 2. Switch off whatever remains to be switched off.
             report.turned_off = self._switch_many(to_turn_off, False, report, urgent)
 
-            # 3. Ramener ce qui est reste hors de tout ecran allume. La pause
-            #    laisse a Windows le temps de retirer les ecrans coupes.
+            # 3. Bring back whatever was left outside every lit screen. The
+            #    pause gives Windows time to remove the switched-off screens.
             if (profile is not None or rescue) and self.config.settings.rescue_offscreen_windows:
                 if report.turned_off:
                     time.sleep(DISPLAY_GRACE_S)
@@ -728,16 +743,34 @@ class ScreenController:
 
             if profile is not None:
                 self.config.settings.last_profile = profile.name
-                # Le script embarque doit savoir quoi rallumer au prochain
-                # demarrage du PC : c'est le seul moment ou l'application
-                # peut le lui dire.
+                # The on-device script must know what to switch back on at
+                # the next PC boot: this is the only moment the app can
+                # tell it.
                 sensing.publish_profile(self, self.config, profile.name)
             self._save()
 
         self._log(report.summary())
         return report
 
-    # ------------------------------------------------------------- ecrans
+    def _keep_a_screen(self, targets: dict[str, bool], states: dict[str, SwitchState]) -> None:
+        """Keep one screen on if the command would leave none.
+
+        Outside of sleep, switching off every screen leaves the PC running
+        but with no picture: nothing then allows going back from the
+        desktop. The safety net is set here, and not in each interface, to
+        cover profiles, choices on the plan and resumes on wake all at once.
+        """
+        powered = {ref for ref, state in states.items() if targets.get(ref, state.output)}
+        if self.config.leaves_a_screen(powered):
+            return
+        # Only outlets whose state is known can be commanded.
+        keep = self.config.fallback_screen(set(states))
+        if keep is None:
+            return
+        targets[keep.ref] = True
+        self._log(f"No screen would stay on: keeping {keep.label} on")
+
+    # ------------------------------------------------------------ screens
 
     def check_screen_layout(
         self,
@@ -745,7 +778,7 @@ class ScreenController:
         links: dict[str, str] | None = None,
         unswitched: set[str] | None = None,
     ) -> tuple[list[monitors.MonitorInfo], dict, list[str]]:
-        """Ecrans physiques, sorties, et ce qui empeche d'en relever la place."""
+        """Physical screens, outputs, and what prevents capturing their position."""
         outputs = monitors.list_outputs()
         physical = monitors.physical_monitors(outputs)
         found = screen_layout.problems(
@@ -761,10 +794,10 @@ class ScreenController:
     def _record_screens(
         self, physical: list[monitors.MonitorInfo], outputs: dict, touch: bool
     ) -> bool:
-        """Ecrit la disposition ; vrai si elle a change.
+        """Write the layout; true if it changed.
 
-        `touch` date le releve meme sans changement : on l'a demande, et la
-        date dit alors que la disposition a ete verifiee.
+        `touch` timestamps the capture even without a change: it was
+        requested, and the date then says the layout has been checked.
         """
         snapshot = [
             ScreenPosition(
@@ -789,12 +822,12 @@ class ScreenController:
         return changed
 
     def _note_capture(self, found: list[str]) -> None:
-        """Retient l'issue d'un releve demande, pour l'interface."""
+        """Remember the outcome of a requested capture, for the interface."""
         self.capture_problems = found
         self.capture_attempted_at = time.time()
 
     def _note_ghosts(self, ghosts: list[str]) -> None:
-        """Retient les ecrans fantomes ; ne journalise que leur apparition."""
+        """Remember ghost screens; only log their appearance."""
         appeared = [g for g in ghosts if g not in self.ghost_screens]
         if appeared:
             self._log(
@@ -804,17 +837,17 @@ class ScreenController:
         self.ghost_screens = ghosts
 
     def remember_screens(self, states: dict[str, SwitchState]) -> bool:
-        """Releve passif : retient la disposition quand tout concorde et se tient.
+        """Passive capture: keep the layout when everything agrees and holds.
 
-        Appele a chaque rafraichissement. Il faut que rien ne s'y oppose
-        (voir screen_layout) et que la lecture soit identique a la
-        precedente : quand un ecran revient, Windows reordonne le bureau en
-        plusieurs temps, et une lecture prise au milieu serait fausse.
+        Called on every refresh. Nothing must stand in the way (see
+        screen_layout) and the reading must be identical to the previous
+        one: when a screen comes back, Windows rearranges the desktop in
+        several steps, and a reading taken halfway would be wrong.
 
-        Il s'efface devant toute manoeuvre en cours : un profil qu'on
-        applique, un releve demande. Il jugerait sinon l'etat des prises lu
-        avant la manoeuvre sur les ecrans d'apres. Ses refus ne sont pas
-        journalises : ecrans eteints, ils sont la regle.
+        It steps aside for any operation in progress: a profile being
+        applied, a requested capture. Otherwise it would judge the outlet
+        state read before the operation against the screens after it. Its
+        refusals are not logged: with screens off, they are the rule.
         """
         if not self._lock.acquire(blocking=False):
             return False
@@ -837,11 +870,11 @@ class ScreenController:
         links: dict[str, str] | None = None,
         unswitched: set[str] | None = None,
     ) -> tuple[bool, str]:
-        """Attend que tout concorde et se stabilise, puis releve la disposition.
+        """Wait until everything agrees and settles, then capture the layout.
 
-        Relit prises et ecrans toutes les deux secondes, jusqu'au delai
-        d'attente des ecrans : il faut deux lectures identiques et sans
-        probleme. Au-dela, rend la raison du refus.
+        Re-reads outlets and screens every two seconds, up to the screen
+        wait timeout: two identical, problem-free readings are required.
+        Beyond that, return the reason for the refusal.
         """
         deadline = time.monotonic() + self.config.settings.display_settle_timeout_s
         previous = None
@@ -868,18 +901,19 @@ class ScreenController:
         restore: bool = True,
         progress: Callable[[str], None] | None = None,
     ) -> "LayoutCapture":
-        """Passe en « All on » et releve la disposition des ecrans.
+        """Switch to "All on" and capture the screen layout.
 
-        La disposition ne se lit qu'avec tous les ecrans allumes : c'est la
-        procedure qui l'etablit a la demande. Elle allume ce qu'allume le
-        profil integre -- toutes les prises --, sans encore le retenir comme
-        profil en cours : on peut vouloir revenir a celui d'avant
-        (`undo_capture`) ou rester ainsi (`adopt_profile`).
+        The layout can only be read with every screen on: this is the
+        procedure that establishes it on demand. It switches on what the
+        built-in profile switches on -- every outlet --, without yet keeping
+        it as the current profile: one may want to go back to the previous
+        one (`undo_capture`) or stay that way (`adopt_profile`).
 
-        `restore` recoupe ensuite ce qui a ete allume pour l'occasion. Sans
-        lui, les ecrans restent allumes et l'appelant decide : l'interface
-        demande s'il faut rester ainsi ou revenir au profil d'avant, via
-        `undo_capture`. `progress` recoit les etapes, pour les afficher.
+        `restore` then switches off again what was switched on for the
+        occasion. Without it, the screens stay on and the caller decides:
+        the interface asks whether to stay that way or go back to the
+        previous profile, via `undo_capture`. `progress` receives the steps,
+        to display them.
         """
         say = progress or (lambda _text: None)
         capture = LayoutCapture(False, "")
@@ -921,11 +955,11 @@ class ScreenController:
         return capture
 
     def adopt_profile(self, name: str) -> None:
-        """Retient comme profil en cours un profil dont les prises sont deja en place.
+        """Keep as current a profile whose outlets are already in place.
 
-        Apres un releve qu'on choisit de garder : tout est allume, c'est donc
-        « All on » qui est en cours -- pour le menu, pour le reveil, et pour
-        le script embarque qui rallume les ecrans au demarrage.
+        After a capture one chooses to keep: everything is on, so "All on"
+        is the current one -- for the menu, for wake, and for the on-device
+        script that switches the screens back on at boot.
         """
         if self.config.profile(name) is None:
             return
@@ -935,7 +969,7 @@ class ScreenController:
         self._log(f"Profile '{name}' kept as the current one")
 
     def undo_capture(self, capture: "LayoutCapture") -> None:
-        """Recoupe ce que le releve a allume, et ramene les fenetres egarees."""
+        """Switch off again what the capture switched on, and bring back stray windows."""
         if not capture.turned_on:
             return
         report = ApplyReport(profile="Screen layout")
@@ -948,13 +982,13 @@ class ScreenController:
         capture.turned_on = []
 
     def _rescue_windows(self, targets: dict[str, bool], screens_before: list) -> int:
-        """Ramene les fenetres perdues sur l'ecran allume le plus proche.
+        """Bring lost windows back onto the nearest lit screen.
 
-        Un ecran que Windows voit encore n'est pas forcement allume : un
-        moniteur alimente par l'USB-C du PC reste enumere une fois sa prise
-        coupee, et une fenetre posee dessus est aussi perdue que si l'ecran
-        avait disparu. Les ecrans dont la prise est coupee par le profil ne
-        comptent donc pas comme utilisables -- sauf s'il n'en restait aucun.
+        A screen Windows still sees is not necessarily on: a monitor powered
+        by the PC's USB-C stays enumerated once its outlet is switched off,
+        and a window placed on it is as lost as if the screen had
+        disappeared. Screens whose outlet is switched off by the profile
+        therefore do not count as usable -- unless none were left.
         """
         current = monitors.list_monitors()
         dark = set()
@@ -984,19 +1018,19 @@ class ScreenController:
     def _switch_many(
         self, refs: list[str], on: bool, report: ApplyReport, urgent: bool = False
     ) -> list[str]:
-        """Manoeuvre une serie de prises, en notant les echecs sans tout stopper.
+        """Operate a series of outlets, noting failures without stopping everything.
 
-        En mode urgent (mise en veille, arret) on enchaine sans pause : Windows
-        ne laisse que quelques instants avant de suspendre le processus.
+        In urgent mode (sleep, shutdown) we go straight through without a
+        pause: Windows only leaves a few moments before suspending the process.
         """
         done: list[str] = []
         delay = 0.0 if urgent else max(0.0, self.config.settings.switch_delay_ms / 1000.0)
         ordered = sorted(refs)
         for index, ref in enumerate(ordered):
             key, switch_id = parse_ref(ref)
-            # Deuxieme verrou, avant meme d'appeler le client : une prise
-            # protegee n'a rien a faire dans cette liste, et si elle y est
-            # c'est qu'un appelant l'a mal construite.
+            # Second lock, before even calling the client: a protected
+            # outlet has no business being in this list, and if it is there
+            # a caller built it wrong.
             outlet = self.config.outlet(ref)
             if not on and outlet is not None and outlet.never_switch_off:
                 message = f"{ref}: protected, refused ({outlet.label})"
@@ -1019,7 +1053,7 @@ class ScreenController:
         return done
 
     def _expected_monitor_keys(self, targets: dict[str, bool]) -> set[str]:
-        """Ecrans qui devraient etre presents une fois le profil applique."""
+        """Screens that should be present once the profile is applied."""
         keys: set[str] = set()
         for ref, want in targets.items():
             outlet = self.config.outlet(ref)
@@ -1028,11 +1062,11 @@ class ScreenController:
         return keys
 
     def _wait_for_displays(self, expected_keys: set[str]) -> float:
-        """Attend que Windows ait pris en compte les ecrans rallumes.
+        """Wait for Windows to take the screens switched back on into account.
 
-        Si l'association prise/ecran n'est pas encore faite, on ne sait pas
-        quoi attendre precisement : on se contente alors d'attendre que la
-        liste des ecrans cesse de bouger.
+        If the outlet/screen association is not made yet, we do not know
+        exactly what to wait for: we then simply wait for the screen list
+        to stop changing.
         """
         timeout = self.config.settings.display_settle_timeout_s
         started = time.monotonic()
@@ -1043,13 +1077,13 @@ class ScreenController:
             time.sleep(POLL_INTERVAL_S)
             present = monitors.monitor_keys()
             if expected_keys and expected_keys.issubset(present):
-                time.sleep(DISPLAY_GRACE_S)  # laisser la dalle finir de s'initialiser
+                time.sleep(DISPLAY_GRACE_S)  # let the panel finish initialising
                 return time.monotonic() - started
             if present != previous:
                 previous = present
                 stable_since = time.monotonic()
             elif not expected_keys and time.monotonic() - stable_since > DISPLAY_GRACE_S:
-                # Rien de precis a attendre et plus rien ne bouge : on continue.
+                # Nothing specific to wait for and nothing moves any more: carry on.
                 return time.monotonic() - started
 
         waited = time.monotonic() - started
@@ -1074,6 +1108,6 @@ def _is_on(states: dict[str, SwitchState], ref: str) -> bool:
 
 
 def _is_off(states: dict[str, SwitchState], ref: str) -> bool:
-    """Faux si l'etat est inconnu : on ne commande pas a l'aveugle."""
+    """False if the state is unknown: we do not command blindly."""
     state = states.get(ref)
     return bool(state and not state.output)

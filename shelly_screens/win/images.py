@@ -1,14 +1,14 @@
-"""Lecture de PNG, sans dependance exterieure.
+"""PNG reading, with no external dependency.
 
-L'icone de la zone de notification se compose : le visuel de l'application,
-surmonte d'une pastille qui dit l'etat des prises. Composer suppose de lire
-les pixels, donc de decoder un PNG -- ce que la bibliotheque standard ne
-fait pas.
+The notification area icon is composited: the application artwork,
+topped with a badge showing the state of the outlets. Compositing means
+reading pixels, hence decoding a PNG -- which the standard library does
+not do.
 
-Le decodeur couvre ce dont on a besoin et rien de plus : 8 bits par canal,
-non entrelace, en niveaux de gris ou en couleurs, avec ou sans transparence.
-Les images fournies avec l'application entrent dans ce cadre ; toute autre
-leve une erreur explicite plutot que de produire une image fausse.
+The decoder covers what we need and nothing more: 8 bits per channel,
+non-interlaced, greyscale or colour, with or without transparency. The
+images shipped with the application fit this frame; anything else raises
+an explicit error rather than producing a wrong image.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import zlib
 from pathlib import Path
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-# Nombre de canaux par type de couleur PNG.
+# Number of channels per PNG colour type.
 CHANNELS = {0: 1, 2: 3, 4: 2, 6: 4}
 
 Pixel = tuple[int, int, int, int]
@@ -26,7 +26,7 @@ Pixels = list[list[Pixel]]
 
 
 class UnsupportedImage(ValueError):
-    """Le fichier sort de ce que ce decodeur sait lire."""
+    """The file is outside what this decoder can read."""
 
 
 def _paeth(left: int, up: int, corner: int) -> int:
@@ -38,7 +38,7 @@ def _paeth(left: int, up: int, corner: int) -> int:
 
 
 def _unfilter(raw: bytes, width: int, height: int, stride: int) -> bytearray:
-    """Annule les filtres par ligne du PNG."""
+    """Undo the PNG per-row filters."""
     out = bytearray()
     previous = bytearray(width * stride)
     position = 0
@@ -70,7 +70,7 @@ def _unfilter(raw: bytes, width: int, height: int, stride: int) -> bytearray:
 
 
 def load_png(path: Path | str) -> tuple[int, int, Pixels]:
-    """Renvoie (largeur, hauteur, pixels RVBA) d'un fichier PNG."""
+    """Return (width, height, RGBA pixels) of a PNG file."""
     data = Path(path).read_bytes()
     if data[:8] != PNG_SIGNATURE:
         raise UnsupportedImage(f"{path}: not a PNG file")
@@ -82,7 +82,7 @@ def load_png(path: Path | str) -> tuple[int, int, Pixels]:
         (length,) = struct.unpack(">I", data[position : position + 4])
         chunk = data[position + 4 : position + 8]
         payload = data[position + 8 : position + 8 + length]
-        position += 12 + length  # longueur + type + donnees + CRC
+        position += 12 + length  # length + type + data + CRC
 
         if chunk == b"IHDR":
             width, height, depth, color_type, _comp, _filt, interlace = struct.unpack(

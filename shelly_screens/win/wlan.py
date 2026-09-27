@@ -1,13 +1,13 @@
-"""La carte Wi-Fi du PC, pilotee par netsh : lister, rejoindre, quitter.
+"""The PC's Wi-Fi adapter, driven through netsh: list, join, leave.
 
-Sert a la premiere mise en service d'un Shelly : il faut rejoindre le point
-d'acces que l'appareil ouvre, le temps de lui donner le Wi-Fi de la maison.
-netsh est present sur tout Windows, et un profil limite a l'utilisateur
-courant ne demande pas de droits d'administrateur.
+Used for a Shelly's first setup: we must join the access point the device
+opens, long enough to give it the home Wi-Fi. netsh is present on every
+Windows, and a profile limited to the current user doesn't require
+administrator rights.
 
-Sa sortie est traduite selon la langue de Windows. On n'en lit donc que ce
-qui ne l'est pas -- le mot SSID et les valeurs --, et l'on juge du succes
-non sur ses messages mais en joignant l'appareil.
+Its output is translated according to the Windows language. So we only
+read what isn't -- the word SSID and the values --, and judge success not
+from its messages but by reaching the device.
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ import time
 from ctypes import wintypes
 from xml.sax.saxutils import escape
 
-CREATE_NO_WINDOW = 0x08000000  # pas de console qui clignote
+CREATE_NO_WINDOW = 0x08000000  # no flashing console window
 
-# « SSID 3 : nom » dans la liste des reseaux, « SSID : nom » pour la carte.
+# "SSID 3 : name" in the network list, "SSID : name" for the adapter.
 _NETWORK_LINE = re.compile(r"^\s*SSID\s+\d+\s*:\s?(.*)$")
 _SIGNAL_LINE = re.compile(r"^\s*Signal\s*:\s*(\d+)\s*%")
-# Le mot change avec la langue de Windows ; le numero, non.
+# The word changes with the Windows language; the number doesn't.
 _CHANNEL_LINE = re.compile(r"^\s*(?:Channel|Canal|Kanal|Canale)\s*:\s*(\d+)", re.I)
 _CONNECTED_LINE = re.compile(r"^\s*SSID\s*:\s?(.*)$")
 
@@ -53,7 +53,7 @@ def _netsh(*args: str, timeout: float = 20.0) -> subprocess.CompletedProcess:
     )
 
 
-# --- scan force, par l'API Wi-Fi native : netsh ne sait pas le demander
+# --- forced scan, through the native Wi-Fi API: netsh can't request one
 
 
 class _GUID(ctypes.Structure):
@@ -72,15 +72,15 @@ class _INTERFACE_INFO_LIST(ctypes.Structure):
                 ("InterfaceInfo", _INTERFACE_INFO * 1)]
 
 
-SCAN_WAIT_S = 4.0  # un scan complet des canaux prend trois a quatre secondes
+SCAN_WAIT_S = 4.0  # a full channel scan takes three to four seconds
 
 
 def scan() -> None:
-    """Demande a la carte un scan frais, et en attend le resultat.
+    """Ask the adapter for a fresh scan, and wait for the result.
 
-    Connecte, Windows ne rafraichit presque plus sa liste des reseaux : il
-    ne montrait alors d'un reseau double bande que sa borne 5 GHz. Le scan
-    est fait par la carte du PC ; il ne touche a aucun appareil.
+    While connected, Windows hardly refreshes its network list any more: it
+    would then show only the 5 GHz access point of a dual-band network. The
+    scan is done by the PC's adapter; it doesn't touch any device.
     """
     try:
         wlanapi = ctypes.WinDLL("wlanapi")
@@ -109,16 +109,16 @@ def scan() -> None:
 
 
 def visible_networks() -> list[tuple[str, int, int]]:
-    """Bornes que voit la carte : SSID, signal en pourcentage, canal.
+    """Access points the adapter sees: SSID, signal in percent, channel.
 
-    Une ligne par borne, et non par reseau : un reseau double bande porte
-    le meme nom en 2,4 et en 5 GHz, et ne garder que sa meilleure borne
-    faisait disparaitre la bande 2,4 GHz -- celle qui compte pour un
-    appareil qui ne capte qu'elle. Du meilleur signal au pire. Le canal
-    vaut 0 si Windows parle une langue dont on ignore le mot.
+    One line per access point, not per network: a dual-band network carries
+    the same name on 2.4 and 5 GHz, and keeping only its best access point
+    made the 2.4 GHz band disappear -- the one that matters for a device
+    that only picks up that band. From best signal to worst. The channel
+    is 0 if Windows speaks a language whose word we don't know.
 
-    Vide si la carte manque, est coupee, ou si Windows refuse la liste --
-    depuis Windows 11 24H2, il faut l'autorisation de localisation.
+    Empty if the adapter is missing, turned off, or if Windows refuses the
+    list -- since Windows 11 24H2, location permission is required.
     """
     try:
         output = _netsh("show", "networks", "mode=bssid").stdout
@@ -138,7 +138,7 @@ def visible_networks() -> list[tuple[str, int, int]]:
             continue
         match = _CHANNEL_LINE.match(line)
         if match and ssid:
-            # Le canal suit le signal de chaque borne : la paire est complete.
+            # The channel follows each access point's signal: the pair is complete.
             key = (ssid, int(match.group(1)))
             bssids[key] = max(bssids.get(key, 0), signal)
     return sorted(
@@ -148,7 +148,7 @@ def visible_networks() -> list[tuple[str, int, int]]:
 
 
 def connected_ssid() -> str | None:
-    """Le reseau auquel la carte est connectee, ou None."""
+    """The network the adapter is connected to, or None."""
     try:
         output = _netsh("show", "interfaces").stdout
     except (OSError, subprocess.SubprocessError):
@@ -161,10 +161,10 @@ def connected_ssid() -> str | None:
 
 
 def join_open_network(ssid: str) -> bool:
-    """Rejoint un reseau ouvert -- le point d'acces d'un Shelly neuf.
+    """Join an open network -- the access point of a new Shelly.
 
-    Rend vrai si netsh a accepte la demande ; la connexion elle-meme prend
-    quelques secondes, et c'est en joignant l'appareil qu'on la constate.
+    Returns True if netsh accepted the request; the connection itself takes
+    a few seconds, and it is confirmed by reaching the device.
     """
     handle, path = tempfile.mkstemp(suffix=".xml", prefix="shelly-ap-")
     try:
@@ -184,7 +184,7 @@ def join_open_network(ssid: str) -> bool:
 
 
 def disconnect() -> None:
-    """Deconnecte la carte, sans rien effacer."""
+    """Disconnect the adapter, without deleting anything."""
     try:
         _netsh("disconnect")
     except (OSError, subprocess.SubprocessError):
@@ -192,7 +192,7 @@ def disconnect() -> None:
 
 
 def forget(ssid: str) -> None:
-    """Quitte ce reseau et efface le profil cree pour lui."""
+    """Leave this network and delete the profile created for it."""
     try:
         _netsh("disconnect")
         _netsh("delete", "profile", f"name={ssid}")
@@ -201,7 +201,7 @@ def forget(ssid: str) -> None:
 
 
 def reconnect(ssid: str) -> None:
-    """Revient a un reseau deja connu de Windows."""
+    """Return to a network Windows already knows."""
     try:
         _netsh("connect", f"name={ssid}")
     except (OSError, subprocess.SubprocessError):

@@ -1,15 +1,15 @@
-"""Localisation de la power strip sur le reseau local.
+"""Locating the power strip on the local network.
 
-L'appareil est en DHCP : son adresse peut changer. On resout donc dans cet
-ordre, du moins cher au plus cher :
+The device uses DHCP: its address may change. We therefore resolve in this
+order, from cheapest to most expensive:
 
-1. l'adresse memorisee dans la configuration ;
-2. le nom mDNS `<device-id>.local`, que Windows sait resoudre nativement ;
-3. un balayage des sous-reseaux des cartes reseau actives.
+1. the address remembered in the configuration;
+2. the mDNS name `<device-id>.local`, which Windows resolves natively;
+3. a sweep of the subnets of the active network adapters.
 
-Chaque candidat est valide en interrogeant /shelly, qui renvoie l'identite de
-l'appareil sans authentification -- on verifie ainsi qu'on parle bien a NOTRE
-multiprise et pas a un autre Shelly de la maison.
+Each candidate is validated by querying /shelly, which returns the device's
+identity without authentication -- this checks that we are really talking to
+OUR power strip and not to another Shelly in the house.
 """
 
 from __future__ import annotations
@@ -24,21 +24,21 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 PROBE_TIMEOUT = 1.5
-# Une premiere resolution mDNS interroge le reseau en multicast et attend
-# la reponse : trois secondes ne sont pas rares, la ou une adresse deja
-# connue repond en quelques dizaines de millisecondes. Avec le delai
-# ordinaire, le nom etait abandonne avant d'avoir repondu et l'on
-# retombait sur l'adresse memorisee -- justement celle qu'un bail DHCP
-# rend caduque. Le systeme met ensuite le resultat en cache : ce delai ne
-# se paie qu'une fois.
+# A first mDNS resolution queries the network over multicast and waits for
+# the answer: three seconds is not unusual, whereas an already known
+# address answers within a few tens of milliseconds. With the ordinary
+# timeout, the name was abandoned before it had answered and we fell back
+# on the remembered address -- precisely the one a DHCP lease makes
+# obsolete. The system then caches the result: this delay is only paid
+# once.
 MDNS_TIMEOUT = 4.0
 SCAN_TIMEOUT = 1.0
 SCAN_WORKERS = 128
-# Applications connues portant au moins une sortie commandable. La liste sert
-# a trier les resultats d'un balayage : un capteur ou une passerelle n'a rien
-# a faire dans la liste des prises. Elle n'est pas exhaustive -- un appareil
-# absent d'ici reste ajoutable a la main, et un appareil deja connu est
-# reconnu par son adresse MAC quelle que soit son application.
+# Known apps carrying at least one switchable output. The list is used to
+# filter the results of a sweep: a sensor or a gateway has no place in the
+# list of outlets. It is not exhaustive -- a device missing from here can
+# still be added by hand, and an already known device is recognised by its
+# MAC address whatever its app.
 SUPPORTED_APPS = {
     "PowerStrip",
     "PlugS",
@@ -57,7 +57,7 @@ SUPPORTED_APPS = {
 
 @dataclass(frozen=True)
 class DeviceIdentity:
-    """Ce que /shelly nous apprend d'un appareil joignable."""
+    """What /shelly tells us about a reachable device."""
 
     host: str
     device_id: str
@@ -70,11 +70,11 @@ class DeviceIdentity:
 
 
 def address_of(host: str) -> str:
-    """Adresse IPv4 derriere un hote, qu'il soit deja une adresse ou un nom.
+    """IPv4 address behind a host, whether it is already an address or a name.
 
-    On joint souvent l'appareil par son nom mDNS, plus stable que son bail
-    DHCP. Pratique pour le programme, mais l'adresse reste ce qu'on veut
-    lire pour ouvrir l'interface web ou reperer un changement de bail.
+    The device is often reached by its mDNS name, more stable than its DHCP
+    lease. Handy for the program, but the address is still what one wants
+    to read to open the web interface or spot a lease change.
     """
     if not host:
         return ""
@@ -85,17 +85,17 @@ def address_of(host: str) -> str:
 
 
 def ipv4_host(host: str) -> str:
-    """Rend un hote joignable en IPv4, en resolvant les noms si besoin.
+    """Make a host reachable over IPv4, resolving names if needed.
 
-    Ces appareils annoncent aussi des adresses IPv6, dont une lien-local
-    `fe80::`. Python la choisit parfois en premier et echoue aussitot :
-    une adresse lien-local exige un identifiant de portee que la resolution
-    ne fournit pas, d'ou le `connect(): flowinfo must be 0-1048575` qui a
-    fait echouer une reprise de veille. On tranche donc nous-memes, sur le
-    seul protocole que ces appareils servent vraiment.
+    These devices also announce IPv6 addresses, including an `fe80::`
+    link-local one. Python sometimes picks it first and fails straight away:
+    a link-local address requires a scope identifier that resolution does
+    not provide, hence the `connect(): flowinfo must be 0-1048575` that
+    made a resume from sleep fail. So we decide ourselves, on the only
+    protocol these devices really serve.
 
-    En cas d'echec on rend le nom tel quel : mieux vaut laisser urllib
-    tenter sa chance que refuser la connexion d'office.
+    On failure we return the name as is: better to let urllib try its luck
+    than to refuse the connection outright.
     """
     if not host or host.replace(".", "").isdigit():
         return host
@@ -106,10 +106,10 @@ def ipv4_host(host: str) -> str:
 
 
 def probe(host: str, timeout: float = PROBE_TIMEOUT) -> DeviceIdentity | None:
-    """Interroge /shelly ; renvoie l'identite si c'est bien un Shelly."""
+    """Query /shelly; return the identity if it really is a Shelly."""
     try:
-        # Meme precaution que pour les appels RPC : on vise l'IPv4, mais
-        # l'identite gardera le nom, qui seul survit a un bail DHCP.
+        # Same precaution as for RPC calls: we target IPv4, but the identity
+        # keeps the name, which alone survives a DHCP lease.
         with urllib.request.urlopen(
             f"http://{ipv4_host(host)}/shelly", timeout=timeout
         ) as response:
@@ -136,13 +136,13 @@ def resolve(
     expected_mac: str | None = None,
     allow_scan: bool = True,
 ) -> DeviceIdentity | None:
-    """Retrouve l'appareil, en preferant les pistes les moins couteuses."""
-    # Le nom mDNS passe avant l'hote memorise, meme quand celui-ci repond
-    # encore. Un bail DHCP se renouvelle sans prevenir, et l'adresse
-    # retenue finit gravee ailleurs -- dans le script embarque, qui ne se
-    # corrige pas tout seul et cesserait de commander les prises en
-    # silence. Le nom, lui, suit l'appareil. L'hote memorise reste essaye
-    # juste apres, pour les reseaux ou la resolution mDNS ne passe pas.
+    """Find the device again, preferring the cheapest leads."""
+    # The mDNS name comes before the remembered host, even when the latter
+    # still answers. A DHCP lease renews without warning, and the stored
+    # address ends up baked in elsewhere -- in the on-device script, which
+    # does not fix itself and would silently stop controlling the outlets.
+    # The name, on the other hand, follows the device. The remembered host
+    # is still tried right after, for networks where mDNS resolution fails.
     candidates: list[str] = []
     if device_id:
         candidates.append(f"{device_id}.local")
@@ -161,7 +161,7 @@ def resolve(
 
 
 def scan_network(expected_mac: str | None = None) -> DeviceIdentity | None:
-    """Balaye les sous-reseaux locaux a la recherche d'une power strip Shelly."""
+    """Sweep the local subnets looking for a Shelly power strip."""
     for identity in scan_network_all():
         if _matches(identity, expected_mac):
             return identity
@@ -169,10 +169,10 @@ def scan_network(expected_mac: str | None = None) -> DeviceIdentity | None:
 
 
 def scan_network_all(every_shelly: bool = False) -> list[DeviceIdentity]:
-    """Renvoie les appareils Shelly visibles sur les reseaux locaux.
+    """Return the Shelly devices visible on the local networks.
 
-    Par defaut seuls ceux susceptibles de porter des prises sont retenus ;
-    `every_shelly` laisse tout passer, pour une recherche manuelle.
+    By default only those likely to carry outlets are kept;
+    `every_shelly` lets everything through, for a manual search.
     """
     addresses = sorted(_candidate_addresses())
     if not addresses:
@@ -186,11 +186,11 @@ def scan_network_all(every_shelly: bool = False) -> list[DeviceIdentity]:
 
 
 def _matches(identity: DeviceIdentity, expected_mac: str | None) -> bool:
-    """Decide si l'appareil trouve est celui qu'on cherche.
+    """Decide whether the device found is the one we are looking for.
 
-    Quand on connait son adresse MAC, elle tranche seule : l'appareil a deja
-    ete adopte, son type importe peu. Sans MAC on cherche a l'aveugle, et on
-    s'en tient alors aux applications susceptibles de porter des prises.
+    When its MAC address is known, it settles the matter alone: the device
+    has already been adopted, its type matters little. Without a MAC we are
+    searching blind, and then stick to apps likely to carry outlets.
     """
     if expected_mac:
         return identity.mac.upper() == expected_mac.upper()
@@ -198,10 +198,10 @@ def _matches(identity: DeviceIdentity, expected_mac: str | None) -> bool:
 
 
 def _candidate_addresses() -> set[str]:
-    """Adresses a sonder : tous les hotes des sous-reseaux IPv4 prives locaux."""
+    """Addresses to probe: every host of the local private IPv4 subnets."""
     addresses: set[str] = set()
     for network in _local_networks():
-        # Au-dela d'un /22 le balayage devient trop long pour un demarrage.
+        # Beyond a /22 the sweep takes too long for a startup.
         if network.num_addresses > 1024:
             continue
         for address in network.hosts():
@@ -210,7 +210,7 @@ def _candidate_addresses() -> set[str]:
 
 
 def _local_networks() -> list[ipaddress.IPv4Network]:
-    """Sous-reseaux IPv4 prives auxquels ce PC est rattache."""
+    """Private IPv4 subnets this PC is attached to."""
     networks: list[ipaddress.IPv4Network] = []
     for ip, netmask in _local_interfaces():
         try:
@@ -226,7 +226,7 @@ def _local_networks() -> list[ipaddress.IPv4Network]:
 
 
 def _local_interfaces() -> list[tuple[str, str]]:
-    """Couples (adresse, masque) des cartes reseau actives, via PowerShell."""
+    """(address, mask) pairs of the active network adapters, via PowerShell."""
     command = [
         "powershell.exe",
         "-NoProfile",
@@ -258,7 +258,7 @@ def _local_interfaces() -> list[tuple[str, str]]:
 
 
 def _fallback_interfaces() -> list[tuple[str, str]]:
-    """Repli minimal : l'adresse locale principale, supposee en /24."""
+    """Minimal fallback: the main local address, assumed to be a /24."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe_socket:
             probe_socket.connect(("8.8.8.8", 80))

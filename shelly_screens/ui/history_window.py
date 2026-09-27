@@ -1,25 +1,25 @@
-"""Fenetre de consultation de l'historique de consommation.
+"""Window for browsing the power consumption history.
 
-Une fenetre a part, ouverte depuis le menu de l'icone comme depuis les
-reglages : on vient y lire une journee, une semaine, un mois, sans avoir a
-traverser les onglets de configuration.
+A separate window, opened from the tray icon menu as well as from the
+settings: you come here to read a day, a week, a month, without having to
+go through the configuration tabs.
 
-La navigation suit les usages des graphiques de marche. La molette zoome
-autour du pointeur, le glisser fait defiler, et le bouton Live ramene au
-present -- la fenetre suit alors les nouvelles mesures toute seule. Des
-qu'on s'en ecarte pour relire le passe, elle se fige a l'endroit choisi.
+Navigation follows the conventions of stock-market charts. The mouse wheel
+zooms around the pointer, dragging scrolls, and the Live button brings you
+back to the present -- the window then follows new measurements by itself.
+As soon as you move away to look back at the past, it freezes where chosen.
 
-L'echelle verticale est logarithmique par defaut, mais recadree sur ce qui
-est visible. Sur une plage sans veille, entre 90 et 250 watts, une echelle
-figee de 0,5 a 400 W ecraserait la courbe dans un tiers de la hauteur ; la
-voila etalee sur toute. Une bascule lineaire reste a portee, pour juger
-sur pieces laquelle se lit le mieux.
+The vertical scale is logarithmic by default, but fitted to what is
+visible. Over a range without sleep, between 90 and 250 watts, a fixed
+0.5 to 400 W scale would squash the curve into a third of the height; here
+it is spread over all of it. A linear toggle stays within reach, to judge
+first-hand which one reads best.
 
-Une periode sans aucune mesure reste un trou dans la courbe. Relier les
-deux bords laisserait croire a une consommation qu'on n'a pas vue.
+A period without any measurement stays a gap in the curve. Joining both
+edges would suggest a consumption that was never observed.
 
-Chaque prise a sa courbe ; un selecteur passe de l'une a l'autre. La prise
-du PC s'ouvre d'abord, et la fenetre se souvient ensuite du dernier choix.
+Each outlet has its curve; a selector switches from one to another. The
+PC's outlet opens first, and the window then remembers the last choice.
 """
 
 from __future__ import annotations
@@ -42,18 +42,18 @@ if TYPE_CHECKING:
     from ..app import Application
     from ..config import OutletConfig
 
-# Marges du trace, en pixels.
+# Plot margins, in pixels.
 LEFT = 70
 RIGHT = 18
 TOP = 14
 BOTTOM = 34
 
-REFRESH_MS = 5000  # le rythme des releves de l'application
-MIN_SPAN_S = 120.0  # en deca, on ne voit plus que des marches
-LOG_FLOOR_W = 0.5  # plancher de l'echelle log : zero n'y a pas de place
-ZOOM_STEP = 1.25  # facteur par cran de molette
+REFRESH_MS = 5000  # the pace of the application's readings
+MIN_SPAN_S = 120.0  # below this, only steps are visible
+LOG_FLOOR_W = 0.5  # floor of the log scale: zero has no place on it
+ZOOM_STEP = 1.25  # factor per mouse wheel notch
 
-# Durees proposees d'un clic, en secondes.
+# One-click spans, in seconds.
 PRESETS = (
     ("1 h", 3600),
     ("6 h", 6 * 3600),
@@ -62,7 +62,7 @@ PRESETS = (
     ("30 d", 30 * 86400),
 )
 
-# Pas des graduations horizontales, du plus fin au plus large.
+# Horizontal gridline steps, from finest to widest.
 TIME_STEPS = (
     60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200,
     86400, 172800, 604800,
@@ -73,11 +73,11 @@ DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _state_lock = threading.Lock()
 _is_open = False
 _current: "HistoryWindow | None" = None
-_last_key: str | None = None  # la prise consultee en dernier
+_last_key: str | None = None  # the outlet viewed last
 
 
 def open_history(application: "Application") -> None:
-    """Ouvre la fenetre, ou ramene au premier plan celle qui l'est deja."""
+    """Open the window, or bring the already open one to the foreground."""
     global _is_open
     with _state_lock:
         if _is_open:
@@ -85,7 +85,7 @@ def open_history(application: "Application") -> None:
             if window is not None:
                 try:
                     window.root.after(0, window.raise_window)
-                except Exception:  # noqa: BLE001 - fenetre en cours de fermeture
+                except Exception:  # noqa: BLE001 - window already closing
                     pass
             return
         _is_open = True
@@ -96,7 +96,7 @@ def open_history(application: "Application") -> None:
             root = tk.Tk()
             _current = HistoryWindow(root, application)
             root.mainloop()
-        except Exception as exc:  # noqa: BLE001 - une UI ratee ne doit pas tuer l'appli
+        except Exception as exc:  # noqa: BLE001 - a failed UI must not kill the app
             application.log(f"History window failed: {exc}")
         finally:
             with _state_lock:
@@ -107,7 +107,7 @@ def open_history(application: "Application") -> None:
 
 
 def _duration(seconds: float) -> str:
-    """Duree lisible, arrondie a la minute."""
+    """Readable duration, rounded to the minute."""
     minutes = int(round(seconds / 60))
     if minutes < 60:
         return t("{m} min", m=minutes)
@@ -119,7 +119,7 @@ def _duration(seconds: float) -> str:
 
 
 def _stamp(moment: float, seconds: bool = False) -> str:
-    """Date et heure locales, jour de la semaine traduit."""
+    """Local date and time, with the weekday translated."""
     local = time.localtime(moment)
     day = t(DAY_NAMES[local.tm_wday])
     clock = time.strftime("%H:%M:%S" if seconds else "%H:%M", local)
@@ -127,11 +127,11 @@ def _stamp(moment: float, seconds: bool = False) -> str:
 
 
 def _regional_separators() -> tuple[str, str]:
-    """Separateurs de liste et decimal des reglages regionaux de Windows.
+    """List and decimal separators from the Windows regional settings.
 
-    C'est ce qu'Excel applique a l'ouverture d'un CSV : les reprendre tels
-    quels est le seul moyen d'obtenir des colonnes et des nombres lus
-    correctement d'un simple double-clic.
+    That is what Excel applies when opening a CSV: reusing them as-is is the
+    only way to get columns and numbers read correctly from a simple
+    double-click.
     """
     try:
         import winreg
@@ -144,12 +144,12 @@ def _regional_separators() -> tuple[str, str]:
     except OSError:
         return ";", ","
     if delimiter == decimal:
-        return ";", ","  # reglage incoherent : on retombe sur l'usage francais
+        return ";", ","  # inconsistent setting: fall back to the French convention
     return delimiter, decimal
 
 
 class HistoryWindow:
-    """Le graphique, sa barre d'outils et ses lectures."""
+    """The chart, its toolbar and its readouts."""
 
     def __init__(self, root: tk.Tk, application: "Application") -> None:
         self.root = root
@@ -243,8 +243,8 @@ class HistoryWindow:
         export["menu"] = menu
         export.pack(side="right", padx=(0, 18))
 
-        # Le bas se reserve avant le graphique extensible, sinon il
-        # disparait quand la fenetre manque de hauteur.
+        # The bottom row is reserved before the expanding chart, otherwise
+        # it disappears when the window lacks height.
         bottom = ttk.Frame(self.root, padding=(12, 2, 12, 10))
         bottom.pack(fill="x", side="bottom")
         self.mode = tk.StringVar(self.root, value="")
@@ -291,14 +291,14 @@ class HistoryWindow:
         self.root.lift()
         self.root.focus_force()
 
-    # ------------------------------------------------------------ prises
+    # ------------------------------------------------------------ outlets
 
     def _list_outlets(self) -> list[tuple[str, str, "OutletConfig | None"]]:
-        """Prises proposees : cle, nom affiche, configuration.
+        """Offered outlets: key, displayed name, configuration.
 
-        Les prises configurees d'abord, dans leur ordre ; puis celles que la
-        base connait encore mais que la configuration a oubliees -- leur
-        historique reste lisible jusqu'a ce que l'elagage l'emporte.
+        Configured outlets first, in their order; then those the database
+        still knows but the configuration has dropped -- their history stays
+        readable until pruning removes it.
         """
         choices: list[tuple[str, str, "OutletConfig | None"]] = [
             (power_history.outlet_key(self.config, o), o.label, o)
@@ -311,7 +311,7 @@ class HistoryWindow:
                 if key not in known:
                     name = t("{outlet} (removed)", outlet=label or key)
                     choices.append((key, name, None))
-        # Deux prises du meme nom se distinguent par leur reference.
+        # Two outlets with the same name are told apart by their reference.
         names = [name for _key, name, _outlet in choices]
         return [
             (key, f"{name} ({outlet.ref})", outlet)
@@ -321,7 +321,7 @@ class HistoryWindow:
         ]
 
     def _initial_key(self) -> str | None:
-        """La derniere prise consultee, a defaut celle du PC, a defaut la premiere."""
+        """The last outlet viewed, failing that the PC's, failing that the first."""
         keys = [key for key, _name, _outlet in self.choices]
         if _last_key in keys:
             return _last_key
@@ -350,10 +350,10 @@ class HistoryWindow:
         self._reload()
         self.draw()
 
-    # ------------------------------------------------------------ donnees
+    # ------------------------------------------------------------ data
 
     def _reader(self) -> "power_history.HistoryStore | None":
-        """La base, ouverte a la premiere lecture qui la trouve."""
+        """The database, opened on the first read that finds it."""
         if self.store is None:
             self.store = power_history.open_reader(self.config)
         return self.store
@@ -363,12 +363,12 @@ class HistoryWindow:
         self._read_more()
 
     def _read_more(self) -> bool:
-        """Lit ce qui a ete ajoute depuis la derniere fois."""
+        """Read what was added since last time."""
         store = self._reader()
         if store is None or self.key is None:
             return False
         oldest = time.time() - self._max_span()
-        # Ce que l'elagage a retire de la base s'en va aussi de la memoire.
+        # What pruning removed from the database also leaves memory.
         cut = bisect_left(self.times, oldest)
         if cut:
             del self.samples[:cut]
@@ -381,7 +381,7 @@ class HistoryWindow:
         in_order = not self.samples or new[0].t >= self.samples[-1].t
         self.samples.extend(new)
         if not in_order:
-            # Des points arrivant dans le desordre -- rare -- imposent un tri.
+            # Points arriving out of order -- rare -- require a sort.
             self.samples.sort(key=lambda s: s.t)
             self.times = [s.t for s in self.samples]
         else:
@@ -393,12 +393,12 @@ class HistoryWindow:
             changed = self._read_more()
             if self.follow or changed:
                 self.draw()
-        except Exception as exc:  # noqa: BLE001 - un rafraichissement rate n'est pas fatal
+        except Exception as exc:  # noqa: BLE001 - a failed refresh is not fatal
             self.app.log(f"History refresh failed: {exc}")
         self.root.after(REFRESH_MS, self._refresh)
 
     def _value_at(self, moment: float, now: float) -> power_history.Sample | None:
-        """Le point en vigueur a cet instant, s'il y en a un."""
+        """The point in effect at this instant, if there is one."""
         index = bisect_right(self.times, moment) - 1
         if index < 0:
             return None
@@ -423,8 +423,8 @@ class HistoryWindow:
             self.end = now
             return
         oldest = self.times[0] if self.times else now - self.span
-        # On ne laisse pas la fenetre partir entierement dans le vide
-        # d'avant le premier point.
+        # Do not let the window drift entirely into the void before the
+        # first point.
         self.end = max(self.end, oldest + self.span * 0.1)
         if self.end >= now - self.span * 0.01:
             self.end = now
@@ -453,7 +453,7 @@ class HistoryWindow:
         self.draw()
 
     def _zoom(self, factor: float, x: int | None) -> None:
-        """Zoome autour du pointeur ; en suivi du direct, autour du present."""
+        """Zoom around the pointer; when following live, around the present."""
         if self.view is None:
             return
         start, _end, x0, _y0, x1, _y1 = self.view
@@ -499,7 +499,7 @@ class HistoryWindow:
         self.cursor_x = None
         self._draw_cursor()
 
-    # ------------------------------------------------------------ trace
+    # ------------------------------------------------------------ plot
 
     def _y(self, watts: float) -> float:
         _s, _e, _x0, y0, _x1, y1 = self.view
@@ -513,13 +513,13 @@ class HistoryWindow:
         return y1 - ratio * (y1 - y0)
 
     def _columns(self, start: float, end: float, count: int, now: float):
-        """Minimum et maximum de la puissance dans chaque colonne de pixels.
+        """Minimum and maximum power in each pixel column.
 
-        Un mois de mesures compte bien plus de points que l'ecran n'a de
-        colonnes : on resume chaque colonne par son etendue plutot que de
-        tracer des milliers de segments superposes. En zoom serre, chaque
-        point couvre au contraire plusieurs colonnes, et le meme calcul
-        dessine naturellement ses marches.
+        A month of measurements holds far more points than the screen has
+        columns: each column is summarized by its range rather than drawing
+        thousands of overlapping segments. When zoomed in tight, each point
+        instead covers several columns, and the same calculation naturally
+        draws its steps.
         """
         columns: list[list[float] | None] = [None] * count
         if count <= 0 or not self.samples:
@@ -551,14 +551,14 @@ class HistoryWindow:
         return columns
 
     def _fit_y(self, values: list[float]) -> tuple[float, float]:
-        """Etendue verticale, recadree sur ce qui est visible."""
+        """Vertical range, fitted to what is visible."""
         if self.log_scale.get():
             if not values:
                 return LOG_FLOOR_W, 400.0
             positive = [v for v in values if v > 0]
             low = max(LOG_FLOOR_W, min(positive) * 0.8) if positive else LOG_FLOOR_W
             if len(positive) < len(values):
-                low = LOG_FLOOR_W  # un zero visible descend jusqu'au plancher
+                low = LOG_FLOOR_W  # a visible zero goes down to the floor
             high = max(max(values) * 1.25, low * 4)
             return low, high
         high = max(max(values) * 1.1, 1.0) if values else 100.0
@@ -632,9 +632,9 @@ class HistoryWindow:
         else:
             raw = (high - low) / 5
             magnitude = 10 ** math.floor(math.log10(raw)) if raw > 0 else 1
-            # Le pas rond le plus proche de la cible, et non le premier qui
-            # la depasse : sur 0 - 286 W, ce dernier donnait 100 W, soit
-            # trois graduations seulement ; le plus proche donne 50 W.
+            # The round step closest to the target, not the first one that
+            # exceeds it: over 0 - 286 W, the latter gave 100 W, i.e. only
+            # three gridlines; the closest gives 50 W.
             step = min(
                 (m * magnitude for m in (1, 2, 2.5, 5, 10)),
                 key=lambda s: abs(math.log(s / raw)),
@@ -653,8 +653,8 @@ class HistoryWindow:
         palette = self.palette
         span = end - start
         step = next((s for s in TIME_STEPS if span / s <= 8), TIME_STEPS[-1])
-        # Les graduations tombent sur l'heure locale ronde, et minuit sur
-        # une graduation : c'est ce que l'oeil cherche pour se reperer.
+        # Gridlines fall on round local times, and midnight on a gridline:
+        # that is what the eye looks for to get its bearings.
         shift = time.localtime(start).tm_gmtoff
         tick = math.ceil((start + shift) / step) * step - shift
         while tick <= end:
@@ -675,10 +675,10 @@ class HistoryWindow:
             tick += step
 
     def _draw_thresholds(self, x0: int, x1: int) -> None:
-        """Les seuils de la detection, pour situer la veille d'un coup d'oeil."""
+        """The detection thresholds, to spot sleep at a glance."""
         sensing = self.config.sensing
-        # Les seuils ne valent que pour la prise dont la consommation dit si
-        # le PC tourne.
+        # The thresholds only apply to the outlet whose consumption tells
+        # whether the PC is running.
         if not sensing.enabled or self.outlet is None or not self.outlet.host_pc:
             return
         low, high = self.y_range
@@ -710,8 +710,8 @@ class HistoryWindow:
             self.cursor_x, y0, self.cursor_x, y1,
             fill=self.palette.text_muted, dash=(2, 3), tags="cursor",
         )
-        # L'heure sur l'axe du temps, sous le pointeur. Au-dela d'une
-        # journee affichee, l'heure seule ne dit plus de quel jour il s'agit.
+        # The time on the time axis, under the pointer. Beyond one day
+        # displayed, the time alone no longer tells which day it is.
         clock = (
             _stamp(moment, seconds=True)
             if end - start > 86400
@@ -726,8 +726,8 @@ class HistoryWindow:
             self.readout.set(f"{_stamp(moment, seconds=True)}   {t('no data')}")
             return
         y = self._y(sample.watts)
-        # Un repere horizontal jusqu'a l'axe des puissances, pour lire la
-        # valeur sur la graduation autant que dans l'etiquette.
+        # A horizontal guide to the power axis, to read the value on the
+        # scale as well as in the label.
         canvas.create_line(
             x0, y, self.cursor_x, y,
             fill=self.palette.text_muted, dash=(2, 3), tags="cursor",
@@ -741,9 +741,9 @@ class HistoryWindow:
         value = f"{sample.watts:.1f} W"
         if asleep:
             value += "  " + t("asleep")
-        # L'etiquette se colle au point, du cote ou il reste de la place.
-        # Fond sombre et liseré d'accent : un fond de la couleur de la courbe
-        # s'y fondait des qu'on la survolait, et l'etiquette devenait illisible.
+        # The label sticks to the point, on the side where there is room.
+        # Dark background with an accent border: a background the color of
+        # the curve blended into it on hover, and the label became unreadable.
         self._tag(self.cursor_x + 12, y, value, "w", x0, x1,
                   self.palette.bg, self.palette.text, bold=True,
                   outline=self.palette.accent)
@@ -754,19 +754,19 @@ class HistoryWindow:
 
     def _tag(self, x, y, text, anchor, left, right, fill, colour, bold=False,
              outline=""):
-        """Etiquette sur fond plein, retournee si elle deborderait du cadre."""
+        """Label on a solid background, flipped if it would overflow the frame."""
         canvas = self.canvas
         font = ("", 10, "bold") if bold else ("", 9)
         item = canvas.create_text(
             x, y, text=text, anchor=anchor, fill=colour, font=font, tags="cursor"
         )
         x_a, y_a, x_b, y_b = canvas.bbox(item)
-        # Trop pres du bord droit : on la passe de l'autre cote du pointeur.
+        # Too close to the right edge: move it to the other side of the pointer.
         if anchor == "w" and x_b > right - 4:
             canvas.coords(item, 2 * self.cursor_x - x, y)
             canvas.itemconfigure(item, anchor="e")
             x_a, y_a, x_b, y_b = canvas.bbox(item)
-        # Centree sur le pointeur, elle ne doit deborder d'aucun cote.
+        # Centered on the pointer, it must not overflow on either side.
         if anchor == "center":
             shift = max(0, left - x_a) - max(0, x_b - right)
             if shift:
@@ -779,7 +779,7 @@ class HistoryWindow:
         canvas.tag_raise(item, box)
 
     def _export(self, regional: bool) -> None:
-        """Exporte en CSV les points de la periode affichee."""
+        """Export the points of the displayed period to CSV."""
         if self.view is None:
             return
         start, end = self.view[0], self.view[1]
@@ -816,14 +816,14 @@ class HistoryWindow:
             t("{count} point(s) exported to {name}", count=count, name=Path(path).name)
         )
 
-    # ------------------------------------------------------------ lectures
+    # ------------------------------------------------------------ readouts
 
     def _update_stats(self, start: float, end: float, now: float) -> None:
-        """Minimum, moyenne, maximum et energie sur ce qui est visible.
+        """Minimum, average, maximum and energy over what is visible.
 
-        La moyenne est ponderee par la duree : un pic de dix secondes ne
-        pese pas comme une heure de veille. L'energie ne compte que le
-        temps effectivement mesure, et la couverture le dit.
+        The average is weighted by duration: a ten-second spike does not
+        weigh as much as an hour of sleep. Energy only counts the time
+        actually measured, and the coverage says so.
         """
         energy = 0.0
         covered = 0.0

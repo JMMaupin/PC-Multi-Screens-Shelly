@@ -1,17 +1,16 @@
-"""Assistant de premiere mise en service d'un appareil neuf.
+"""First-setup assistant for a brand-new device.
 
-Cinq etapes, dans l'ordre ou on les vit devant l'appareil :
+Five steps, in the order they happen in front of the device:
 
-1. le modele ;
-2. ouvrir son point d'acces, aux boutons ;
-3. y connecter le PC -- l'assistant le fait lui-meme s'il le peut ;
-4. choisir le Wi-Fi de la maison et saisir son mot de passe ;
-5. l'envoyer, attendre que l'appareil annonce une adresse, rendre au PC
-   son Wi-Fi, puis chercher l'appareil sur le reseau.
+1. the model;
+2. open its access point, using its buttons;
+3. connect the PC to it -- the assistant does it itself when it can;
+4. choose the home Wi-Fi and enter its password;
+5. send it, wait for the device to announce an address, give the PC its
+   Wi-Fi back, then look for the device on the network.
 
-A aucun moment on ne demande a l'appareil de scanner les reseaux : certains
-exemplaires ferment leur point d'acces pour le faire, et la mise en service
-s'arrete net. Voir wifi_setup.
+At no point is the device asked to scan for networks: some units close
+their access point to do so, and the setup stops dead. See wifi_setup.
 """
 
 from __future__ import annotations
@@ -28,11 +27,11 @@ from ..win import wlan
 if TYPE_CHECKING:
     from ..discovery import DeviceIdentity
 
-POLL_MS = 2000  # recherche du point d'acces, a l'etape 3
+POLL_MS = 2000  # access point lookup, at step 3
 
 
 class FirstSetupDialog:
-    """La fenetre de l'assistant, une page par etape."""
+    """The assistant window, one page per step."""
 
     def __init__(
         self,
@@ -41,16 +40,16 @@ class FirstSetupDialog:
         theme_dialog: Callable,
         on_done: Callable[[str, str], None],
     ) -> None:
-        """`on_done(mac, ip)` : l'appareil a rejoint le Wi-Fi ; a l'appelant de le chercher."""
+        """`on_done(mac, ip)`: the device joined the Wi-Fi; the caller looks for it."""
         self.on_done = on_done
         self.palette = palette
         self.model = wifi_setup.MODELS[0]
         self.ap = wifi_setup.AccessPoint()
         self.identity: "DeviceIdentity | None" = None
-        self.joined_ap: str | None = None  # AP rejoint par l'assistant, a quitter
-        self.ap_ssid: str | None = None  # AP de l'appareil, auquel revenir s'il se coupe
-        # Le Wi-Fi du PC avant nous, a lui rendre a la fin -- sauf si c'est
-        # deja le point d'acces d'un Shelly : on y reviendrait pour rien.
+        self.joined_ap: str | None = None  # AP joined by the assistant, to leave
+        self.ap_ssid: str | None = None  # device AP, to go back to if it drops
+        # The PC's Wi-Fi before us, to give back at the end -- unless it is
+        # already a Shelly access point: going back to it would be pointless.
         previous = wlan.connected_ssid()
         self.previous_ssid = None if (previous or "").startswith("Shelly") else previous
         self.polling = False
@@ -68,7 +67,7 @@ class FirstSetupDialog:
         self.title = tk.StringVar(self.window)
         ttk.Label(self.window, textvariable=self.title, style="Title.TLabel",
                   padding=(16, 14, 16, 4)).pack(anchor="w")
-        # Le bas se reserve avant la page extensible.
+        # The bottom row is reserved before the expanding page.
         buttons = ttk.Frame(self.window, padding=12)
         buttons.pack(side="bottom", fill="x")
         self.next_button = ttk.Button(buttons, text=t("Next"), command=self._next)
@@ -116,16 +115,16 @@ class FirstSetupDialog:
             pass
 
     def _off_thread(self, work, done) -> None:
-        """Appel lent hors de l'interface ; `done(resultat)` y revient."""
+        """Slow call off the UI thread; `done(result)` comes back to it."""
         def worker() -> None:
             try:
                 result = work()
-            except Exception as exc:  # noqa: BLE001 - rendu tel quel a la page
+            except Exception as exc:  # noqa: BLE001 - handed as-is to the page
                 result = exc
             self._after(0, lambda: None if self.closed else done(result))
         threading.Thread(target=worker, daemon=True).start()
 
-    # ------------------------------------------------------------ 1. modele
+    # ------------------------------------------------------------ 1. model
 
     def _page_model(self) -> None:
         self.title.set(t("1. Which device?"))
@@ -135,7 +134,7 @@ class FirstSetupDialog:
             ttk.Radiobutton(self.page, text=model.name, value=model.name,
                             variable=self.model_var).pack(anchor="w", padx=12)
 
-    # ------------------------------------------------------------ 2. point d'acces
+    # ------------------------------------------------------------ 2. access point
 
     def _page_ap(self) -> None:
         self.model = next(m for m in wifi_setup.MODELS if m.name == self.model_var.get())
@@ -144,7 +143,7 @@ class FirstSetupDialog:
         self._text(t("Its Wi-Fi network then appears, named {prefix}... followed "
                      "by its MAC address.", prefix=self.model.ap_prefix))
 
-    # ------------------------------------------------------------ 3. connexion du PC
+    # ------------------------------------------------------------ 3. PC connection
 
     def _page_connect(self) -> None:
         self.title.set(t("3. Connect this PC to it"))
@@ -180,7 +179,7 @@ class FirstSetupDialog:
                 if self.ap_list.size():
                     self.ap_list.selection_set(0)
             except tk.TclError:
-                pass  # page deja quittee
+                pass  # page already left
         self._off_thread(lambda: (wlan.scan(), wlan.visible_networks())[1], done)
 
     def _join_ap(self) -> None:
@@ -201,7 +200,7 @@ class FirstSetupDialog:
         self._off_thread(lambda: wlan.join_open_network(ssid), done)
 
     def _poll_device(self) -> None:
-        """Tant que la page est ouverte : l'appareil repond-il a son adresse ?"""
+        """While the page is open: does the device answer at its address?"""
         if not self.polling or self.closed:
             return
 
@@ -212,8 +211,8 @@ class FirstSetupDialog:
                 self._after(POLL_MS, self._poll_device)
                 return
             self.identity = identity
-            # Le nom exact du point d'acces : celui auquel le PC est connecte,
-            # a defaut celui que forment le prefixe et la MAC.
+            # The exact access point name: the one the PC is connected to,
+            # failing that the one built from the prefix and the MAC.
             self._off_thread(wlan.connected_ssid, self._remember_ap)
             self.connect_state.set(t(
                 "Connected to {model}, MAC {mac}, firmware {firmware}.",
@@ -228,7 +227,7 @@ class FirstSetupDialog:
         elif self.identity is not None:
             self.ap_ssid = f"{self.model.ap_prefix}{self.identity.mac.upper()}"
 
-    # ------------------------------------------------------------ 4. reseau
+    # ------------------------------------------------------------ 4. network
 
     def _page_network(self) -> None:
         self.title.set(t("4. Choose the Wi-Fi network"))
@@ -247,7 +246,7 @@ class FirstSetupDialog:
         self.networks.column("#0", width=250)
         for column, width in (("signal", 90), ("quality", 110), ("channel", 70)):
             self.networks.column(column, width=width, anchor="center")
-        # Le code couleur du signal : vert excellent, orange bon, rouge mauvais.
+        # Signal color code: green excellent, orange good, red bad.
         self.networks.tag_configure("excellent", foreground=self.palette.on)
         self.networks.tag_configure("good", foreground=self.palette.caution)
         self.networks.tag_configure("bad", foreground=self.palette.warn)
@@ -280,7 +279,7 @@ class FirstSetupDialog:
         self._scan_networks()
 
     def _scan_networks(self) -> None:
-        """Scan frais du PC -- quelques secondes -- puis la liste."""
+        """Fresh scan from the PC -- a few seconds -- then the list."""
         self.network_list = []
         self.networks.delete(*self.networks.get_children())
         self.network_hint.set(t("Scanning the Wi-Fi networks from this PC..."))
@@ -323,7 +322,7 @@ class FirstSetupDialog:
         else:
             self.network_hint.set("")
 
-    # ------------------------------------------------------------ 5. envoi
+    # ------------------------------------------------------------ 5. sending
 
     def _page_send(self) -> None:
         ssid, password = self.ssid.get().strip(), self.password.get()
@@ -357,11 +356,11 @@ class FirstSetupDialog:
         self.progress.set("\n".join(self.lines))
 
     def _rejoin_ap(self) -> None:
-        """Ramene la carte Wi-Fi du PC sur le point d'acces de l'appareil.
+        """Bring the PC's Wi-Fi adapter back onto the device's access point.
 
-        En rejoignant le reseau, l'appareil coupe son point d'acces un
-        instant, et Windows ne s'y reconnecte pas de lui-meme. Appele depuis
-        le fil de l'attente, a chaque silence.
+        While joining the network, the device drops its access point for a
+        moment, and Windows does not reconnect to it on its own. Called from
+        the waiting thread, on every silence.
         """
         if self.ap_ssid and wlan.connected_ssid() != self.ap_ssid:
             if not getattr(self, "_rejoin_said", False):
@@ -371,9 +370,9 @@ class FirstSetupDialog:
             wlan.reconnect(self.ap_ssid)
 
     def _ap_gone(self) -> None:
-        """Le point d'acces ne revient pas : on cherche l'appareil sur le reseau.
+        """The access point does not come back: look for the device on the network.
 
-        Un PC en Wi-Fi seul doit d'abord retrouver le sien pour le voir.
+        A Wi-Fi-only PC must first get its own network back to see it.
         """
         self._after(0, lambda: self._say(t(
             "The device closed its access point: looking for it on your network...")))
@@ -411,22 +410,22 @@ class FirstSetupDialog:
         threading.Thread(target=restore, daemon=True).start()
 
     def _retry(self) -> None:
-        """Retour a l'etape du reseau : le mot de passe est souvent en cause."""
+        """Back to the network step: the password is often the culprit."""
         self.back_button.configure(state="normal")
-        self.step = 4  # « Retour » ramene a l'etape 4
+        self.step = 4  # "Back" returns to step 4
 
     def _finish(self, mac: str, ip: str) -> None:
         self._say(t("Done. Looking for the device on your network..."))
         self.next_button.configure(state="normal", command=lambda: self._close(mac, ip))
         self._after(1500, lambda: self._close(mac, ip))
 
-    # ------------------------------------------------------------ fermeture
+    # ------------------------------------------------------------ closing
 
     def _leave_ap(self) -> None:
-        """Quitte le point d'acces et rend au PC le Wi-Fi d'avant.
+        """Leave the access point and give the PC its previous Wi-Fi back.
 
-        Le profil Windows n'est efface que si l'assistant l'a cree : un
-        point d'acces rejoint a la main garde le sien.
+        The Windows profile is only deleted if the assistant created it: an
+        access point joined by hand keeps its own.
         """
         if self.joined_ap:
             wlan.forget(self.joined_ap)

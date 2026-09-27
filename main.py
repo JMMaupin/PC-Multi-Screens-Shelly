@@ -1,15 +1,15 @@
-"""Point d'entree de Shelly Screens.
+"""Entry point of Shelly Screens.
 
-Usage courant -- aucune console, c'est le mode normal :
-    le raccourci cree par install-startup.ps1, qui vise directement
-    pythonw.exe. Ajouter -Desktop pour en poser un sur le Bureau.
+Everyday use -- no console, this is the normal mode:
+    the shortcut created by install-startup.ps1, which targets pythonw.exe
+    directly. Add -Desktop to also place one on the Desktop.
 
-Diagnostic -- console ouverte, journaux a l'ecran :
-    run-console.cmd          ou    python main.py --verbose
+Diagnostics -- console open, logs on screen:
+    run-console.cmd          or    python main.py --verbose
 
-Dans les deux cas, tout est aussi ecrit dans shelly-screens.log, a cote de
-ce fichier. Sans console, `print` ne leve pas d'erreur mais n'ecrit nulle
-part : le journal est alors le seul temoin.
+In both cases, everything is also written to shelly-screens.log, next to
+this file. Without a console, `print` raises no error but writes nowhere:
+the log is then the only witness.
 """
 
 from __future__ import annotations

@@ -1,15 +1,16 @@
-"""Detection de l'activite du PC par sa consommation.
+"""Detecting PC activity from its power draw.
 
-Quand le PC est eteint, aucun logiciel ne tourne sur lui pour commander les
-prises. C'est donc la multiprise qui doit s'en charger : un script embarque
-surveille la consommation de l'unite centrale et rallume les ecrans des
-qu'elle repart. C'est ce qui autorise a tout couper a l'arret, ecran de
-demarrage compris, sans se retrouver aveugle au prochain allumage.
+When the PC is off, no software runs on it to command the outlets. The
+power strip therefore has to do it: an on-device script watches the PC's
+power draw and switches the screens back on as soon as it picks up again.
+This is what makes it possible to cut everything at shutdown, boot screen
+included, without being left blind at the next power-on.
 
-Ce module genere ce script, l'installe et le tient a jour. Il s'occupe aussi
-du relais entre l'application et lui : la liste des prises a rallumer voyage
-par le KVS de l'appareil, dont chaque valeur est limitee a 255 caracteres --
-d'ou une simple liste d'index dans la table que le script embarque.
+This module generates that script, installs it and keeps it up to date. It
+also handles the relay between the application and the script: the list of
+outlets to switch back on travels through the device's KVS, where each
+value is limited to 255 characters -- hence a plain list of indexes into
+the table the script carries.
 """
 
 from __future__ import annotations
@@ -32,38 +33,38 @@ if TYPE_CHECKING:
 SCRIPT_NAME = "pc_sensing"
 KVS_PROFILE_KEY = "scr_profile"
 KVS_MAX_VALUE = 255
-# Code renvoye par le firmware quand la cle demandee n'existe pas.
+# Code returned by the firmware when the requested key does not exist.
 KVS_KEY_NOT_FOUND = -105
-# Pause entre deux commandes envoyees par le script, en millisecondes. Une
-# rafale trop serree se perd : les premieres commandes passent, les
-# suivantes sont abandonnees sans un mot. Les ordres a distance partent en
-# HTTP, plus lents qu'une commande locale.
+# Pause between two commands sent by the script, in milliseconds. A burst
+# that is too tight gets lost: the first commands go through, the rest are
+# silently dropped. Remote orders go out over HTTP, slower than a local
+# command.
 #
-# Elargie de 600 a 1200 ms apres deux plantages de la multiprise qui porte
-# le script, tous deux pendant une restitution. Chaque ordre distant coute
-# deux allers-retours -- l'authentification Digest impose d'abord un refus
-# 401 porteur du defi -- et jusqu'a trois tentatives : de quoi saturer le
-# firmware quand l'application l'interroge en meme temps. Les ecrans
-# reviennent en cinq secondes au lieu de deux et demie, toujours avant le
-# bureau Windows.
+# Widened from 600 to 1200 ms after two crashes of the power strip that
+# hosts the script, both during a restore. Each remote order costs two
+# round trips -- Digest authentication first requires a 401 refusal
+# carrying the challenge -- and up to three attempts: enough to saturate
+# the firmware when the application polls it at the same time. The screens
+# come back in five seconds instead of two and a half, still before the
+# Windows desktop.
 COMMAND_GAP_MS = 1200
-# Nombre d'essais par commande distante avant d'abandonner.
+# Number of attempts per remote command before giving up.
 COMMAND_TRIES = 3
-# Taille maximale d'un envoi de code. Le firmware refuse les requetes trop
-# grosses (HTTP 413) : le code part donc par tranches, la premiere
-# remplacant le contenu et les suivantes s'y ajoutant.
+# Maximum size of one code upload. The firmware rejects requests that are
+# too large (HTTP 413): the code is therefore sent in chunks, the first
+# replacing the content and the following ones appended to it.
 CODE_CHUNK = 1024
 TEMPLATE_PATH = Path(__file__).resolve().parent / "scripts" / "pc_sensing.js"
 CONFIG_MARKER = "// --- CONFIG ---"
 
 
 class SensingError(RuntimeError):
-    """La detection ne peut pas etre configuree en l'etat."""
+    """Sensing cannot be configured in the current state."""
 
 
 @dataclass
 class ScriptStatus:
-    """Ce que l'appareil dit du script installe."""
+    """What the device reports about the installed script."""
 
     installed: bool = False
     running: bool = False
@@ -80,23 +81,23 @@ class ScriptStatus:
 
 
 def controlled_outlets(config: AppConfig) -> list[OutletConfig]:
-    """Prises que le script a le droit de manoeuvrer.
+    """Outlets the script is allowed to operate.
 
-    La prise de l'unite centrale en est evidemment exclue -- elle est ce
-    qu'on observe. Les prises critiques aussi : un concentrateur USB portant
-    le clavier doit rester alimente en permanence, faute de quoi il ne serait
-    pas enumere a temps pour entrer dans le BIOS.
+    The PC's outlet is obviously excluded -- it is what is being watched.
+    Critical outlets too: a USB hub carrying the keyboard must stay powered
+    at all times, otherwise it would not be enumerated in time to enter the
+    BIOS.
 
-    Restent enfin dehors les prises dont la case "suit la veille" est
-    decochee : un accessoire qu'on veut garder sous tension ne doit meme
-    pas figurer dans la table embarquee, sans quoi le script le couperait
-    malgre l'intention exprimee.
+    Finally, outlets whose "follows sleep" box is unticked stay out as
+    well: an accessory meant to stay powered must not even appear in the
+    on-device table, or the script would switch it off despite the stated
+    intent.
     """
     return [o for o in config.outlets if o.cuts_on_sleep]
 
 
 def outlet_index(config: AppConfig, ref: str) -> int:
-    """Rang d'une prise dans la table embarquee, ou -1."""
+    """Rank of an outlet in the on-device table, or -1."""
     for index, outlet in enumerate(controlled_outlets(config)):
         if outlet.ref == ref:
             return index
@@ -104,14 +105,14 @@ def outlet_index(config: AppConfig, ref: str) -> int:
 
 
 def host_device_key(config: AppConfig) -> str:
-    """Appareil qui porte la prise du PC, et donc qui hebergera le script."""
+    """Device carrying the PC's outlet, and therefore hosting the script."""
     if not config.sensing.pc_ref:
         raise SensingError("No outlet is marked as powering the PC")
     return parse_ref(config.sensing.pc_ref)[0]
 
 
 def build_script_config(config: AppConfig) -> dict[str, Any]:
-    """Assemble la configuration injectee dans le script."""
+    """Assemble the configuration injected into the script."""
     sensing = config.sensing
     if not sensing.pc_ref:
         raise SensingError("No outlet is marked as powering the PC")
@@ -121,7 +122,7 @@ def build_script_config(config: AppConfig) -> dict[str, Any]:
     outlets: list[dict[str, Any]] = []
     for outlet in controlled_outlets(config):
         if outlet.device == host_key:
-            # Sortie de l'appareil qui execute le script : appel direct.
+            # Output of the device running the script: direct call.
             outlets.append({"h": None, "i": outlet.switch_id})
         else:
             device = config.device(outlet.device)
@@ -129,12 +130,12 @@ def build_script_config(config: AppConfig) -> dict[str, Any]:
                 raise SensingError(
                     f"Device '{outlet.device}' has no known address; reconnect it first"
                 )
-            # Les identifiants voyagent dans l'URL, seule forme que le
-            # client HTTP embarque accepte : ni l'en-tete Basic ni un champ
-            # `auth` ne sont honores -- tous deux repondent 401, la ou
-            # `http://admin:mdp@hote/` repond 200. Sans cela, une multiprise
-            # protegee par mot de passe refuse toutes les commandes du
-            # script, et ses prises restent figees.
+            # The credentials travel in the URL, the only form the on-device
+            # HTTP client accepts: neither the Basic header nor an `auth`
+            # field is honoured -- both answer 401, whereas
+            # `http://admin:pwd@host/` answers 200. Without this, a
+            # password-protected power strip rejects every command from the
+            # script, and its outlets stay frozen.
             userinfo = ""
             password = device.get_password()
             if password:
@@ -146,9 +147,9 @@ def build_script_config(config: AppConfig) -> dict[str, Any]:
     boot = config.boot_screen_outlet()
     boot_index = outlet_index(config, boot.ref) if boot is not None else -1
 
-    # Les delais sont convertis en nombre de mesures ici plutot que dans le
-    # script : mJS n'offre qu'un sous-ensemble de JavaScript, et il n'y a
-    # aucune raison de lui confier un arrondi.
+    # Delays are converted into a number of readings here rather than in the
+    # script: mJS only offers a subset of JavaScript, and there is no reason
+    # to trust it with rounding.
     poll = max(0.5, float(sensing.poll_interval_s))
     on_ticks = max(1, math.ceil(float(sensing.on_delay_s) / poll))
     off_ticks = max(1, math.ceil(float(sensing.off_delay_s) / poll))
@@ -169,7 +170,7 @@ def build_script_config(config: AppConfig) -> dict[str, Any]:
 
 
 def render(config: AppConfig) -> str:
-    """Produit le code du script, configuration incluse."""
+    """Produce the script code, configuration included."""
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     if CONFIG_MARKER not in template:
         raise SensingError("Script template is missing its configuration marker")
@@ -178,7 +179,7 @@ def render(config: AppConfig) -> str:
 
 
 def profile_indexes(config: AppConfig, profile_name: str) -> list[int]:
-    """Index, dans la table embarquee, des prises alimentees par un profil."""
+    """Indexes, in the on-device table, of the outlets powered by a profile."""
     profile = config.profile(profile_name)
     if profile is None:
         return []
@@ -191,22 +192,22 @@ def profile_indexes(config: AppConfig, profile_name: str) -> list[int]:
 
 
 def encode_profile(indexes: list[int]) -> str:
-    """Encode la liste pour le KVS, en respectant sa limite de taille."""
+    """Encode the list for the KVS, respecting its size limit."""
     payload = json.dumps(indexes, separators=(",", ":"))
     while len(payload) > KVS_MAX_VALUE and indexes:
-        # Cas theorique avec nos huit prises, mais mieux vaut tronquer que
-        # se faire refuser l'ecriture et laisser une valeur perimee.
+        # Theoretical with our eight outlets, but better to truncate than
+        # to have the write rejected and leave a stale value behind.
         indexes = indexes[:-1]
         payload = json.dumps(indexes, separators=(",", ":"))
     return payload
 
 
 def _put_code(device, script_id: int, code: str) -> None:
-    """Televerse le code par tranches.
+    """Upload the code in chunks.
 
-    Un envoi unique depasse ce que le firmware accepte (HTTP 413) des que
-    le script atteint quelques kilo-octets. La premiere tranche remplace
-    le contenu, les suivantes s'y ajoutent.
+    A single upload exceeds what the firmware accepts (HTTP 413) as soon as
+    the script reaches a few kilobytes. The first chunk replaces the
+    content, the following ones are appended to it.
     """
     first = True
     for start in range(0, len(code), CODE_CHUNK):
@@ -222,11 +223,11 @@ def _put_code(device, script_id: int, code: str) -> None:
 
 
 def _forget_key(device, key: str) -> None:
-    """Efface une cle du KVS, qu'elle existe ou non.
+    """Delete a KVS key, whether it exists or not.
 
-    Le firmware refuse la suppression d'une cle absente (erreur -105).
-    Or c'est le cas normal au premier releve : l'absence est justement ce
-    que l'on veut obtenir, pas une anomalie a signaler.
+    The firmware refuses to delete a missing key (error -105). Yet that is
+    the normal case on the first reading: absence is exactly what we want,
+    not an anomaly to report.
     """
     try:
         device.call("KVS.Delete", {"key": key})
@@ -236,7 +237,7 @@ def _forget_key(device, key: str) -> None:
 
 
 def _find_script(device, name: str = SCRIPT_NAME) -> int:
-    """Identifiant du script portant ce nom sur l'appareil, ou 0."""
+    """Id of the script with this name on the device, or 0."""
     result = device.call("Script.List") or {}
     for entry in result.get("scripts", []):
         if entry.get("name") == name:
@@ -245,8 +246,8 @@ def _find_script(device, name: str = SCRIPT_NAME) -> int:
 
 
 def install(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
-    """Installe ou met a jour le script sur l'appareil qui porte le PC."""
-    code = render(config)  # echoue tot si la configuration est incomplete
+    """Install or update the script on the device carrying the PC."""
+    code = render(config)  # fails early if the configuration is incomplete
     host_key = host_device_key(config)
     device = controller.device_for(host_key)
 
@@ -257,25 +258,25 @@ def install(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
         if not script_id:
             raise SensingError("The device refused to create the script")
     else:
-        # Un script en cours d'execution refuse d'etre reecrit.
+        # A running script refuses to be rewritten.
         device.call("Script.Stop", {"id": script_id})
 
     _put_code(device, script_id, code)
-    # `enable` fait repartir le script apres une coupure de courant, ce qui
-    # est justement le cas qu'il doit couvrir.
+    # `enable` restarts the script after a power cut, which is precisely
+    # the case it has to cover.
     device.call("Script.SetConfig", {"id": script_id, "config": {"enable": True}})
     device.call("Script.Start", {"id": script_id})
 
     config.sensing.script_id = script_id
     config.sensing.enabled = True
-    # Ce qui vient d'etre pose fait foi jusqu'au prochain changement.
+    # What has just been installed is authoritative until the next change.
     config.sensing.installed_fingerprint = fingerprint(config)
     publish_profile(controller, config, config.settings.last_profile)
     return status(controller, config)
 
 
 def _get_code(device, script_id: int) -> str:
-    """Relit le code installe, par tranches comme il a ete envoye."""
+    """Read back the installed code, in chunks as it was sent."""
     parts: list[str] = []
     offset = 0
     while True:
@@ -291,14 +292,14 @@ def _get_code(device, script_id: int) -> str:
 
 
 def sync_installed(controller: "ScreenController", config: AppConfig) -> str:
-    """Remet le script embarque en phase avec la configuration.
+    """Bring the on-device script back in line with the configuration.
 
-    Le script porte une copie figee de la table des prises. Renommer un
-    appareil, changer le type d'une prise ou corriger le script lui-meme
-    laisse cette copie perimee, et l'ecart ne se voit nulle part : les
-    index du profil publie ne designent alors plus les memes sorties. Le
-    comparer a chaque demarrage coute une lecture et evite une nuit
-    entiere de comportement inexplicable.
+    The script carries a frozen copy of the outlet table. Renaming a
+    device, changing an outlet's kind or fixing the script itself leaves
+    that copy stale, and the drift shows up nowhere: the indexes of the
+    published profile then no longer designate the same outputs. Comparing
+    it at every startup costs one read and avoids a whole night of
+    inexplicable behaviour.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return ""
@@ -313,20 +314,20 @@ def sync_installed(controller: "ScreenController", config: AppConfig) -> str:
         return "updated"
     info = device.call("Script.GetStatus", {"id": script_id}) or {}
     if not info.get("running"):
-        # Le code est bon : inutile de tout reecrire, il suffit de le
-        # relancer. Un script arrete ne protege plus rien.
+        # The code is right: no need to rewrite everything, restarting it
+        # is enough. A stopped script no longer protects anything.
         device.call("Script.Start", {"id": script_id})
         return "restarted"
     return ""
 
 
 def installed_matches(controller: "ScreenController", config: AppConfig) -> bool:
-    """Le code pose sur l'appareil correspond-il a la configuration ?
+    """Does the code on the device match the configuration?
 
-    Changer un seuil ou un delai dans l'interface n'ecrit que le fichier :
-    l'appareil garde les anciennes valeurs jusqu'a une reinstallation. Rien
-    ne le disait, et l'on croyait regler une detection qui continuait de
-    suivre des consignes perimees.
+    Changing a threshold or a delay in the interface only writes the file:
+    the device keeps the old values until a reinstall. Nothing said so, and
+    one believed they were tuning a sensing that kept following stale
+    instructions.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return True
@@ -336,30 +337,30 @@ def installed_matches(controller: "ScreenController", config: AppConfig) -> bool
         if not script_id:
             return False
         return _get_code(device, script_id) == render(config)
-    except Exception:  # noqa: BLE001 - un appareil injoignable se dit ailleurs
+    except Exception:  # noqa: BLE001 - an unreachable device is reported elsewhere
         return True
 
 
 def fingerprint(config: AppConfig) -> str:
-    """Empreinte du code que la configuration actuelle produirait."""
+    """Fingerprint of the code the current configuration would produce."""
     return hashlib.sha256(render(config).encode("utf-8")).hexdigest()
 
 
 def needs_update(config: AppConfig) -> bool:
-    """Le script pose sur l'appareil est-il devenu obsolete ?
+    """Has the script on the device become outdated?
 
-    Question posee sans toucher au reseau : on compare l'empreinte
-    retenue lors de la derniere installation a celle du code qu'on
-    ecrirait maintenant. Changer un seuil, un type de prise ou un mot de
-    passe modifie ce code -- et l'appareil, lui, continuerait d'appliquer
-    l'ancien sans rien en dire.
+    Answered without touching the network: compare the fingerprint
+    recorded at the last install with that of the code we would write
+    now. Changing a threshold, an outlet kind or a password alters that
+    code -- and the device would keep applying the old one without saying
+    a word.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return False
     if not config.sensing.installed_fingerprint:
-        # Rien de retenu : installation anterieure a ce suivi, ou script
-        # jamais pose. On ne crie pas au loup, la synchronisation au
-        # demarrage tranchera.
+        # Nothing recorded: an install predating this tracking, or a script
+        # never installed. No crying wolf; the startup sync will settle
+        # it.
         return False
     try:
         return fingerprint(config) != config.sensing.installed_fingerprint
@@ -368,11 +369,11 @@ def needs_update(config: AppConfig) -> bool:
 
 
 def uninstall(controller: "ScreenController", config: AppConfig) -> None:
-    """Arrete et supprime le script."""
+    """Stop and delete the script."""
     try:
         host_key = host_device_key(config)
         device = controller.device_for(host_key)
-    except (SensingError, Exception):  # noqa: BLE001 - desinstaller ne doit pas echouer
+    except (SensingError, Exception):  # noqa: BLE001 - uninstalling must not fail
         config.sensing.enabled = False
         config.sensing.script_id = 0
         return
@@ -388,7 +389,7 @@ def uninstall(controller: "ScreenController", config: AppConfig) -> None:
 
 
 def status(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
-    """Interroge l'appareil sur l'etat du script."""
+    """Ask the device for the script's state."""
     try:
         device = controller.device_for(host_device_key(config))
     except Exception as exc:  # noqa: BLE001
@@ -411,12 +412,11 @@ def status(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
 def publish_profile(
     controller: "ScreenController", config: AppConfig, profile_name: str
 ) -> bool:
-    """Depose dans le KVS les prises que le script rallumera au demarrage.
+    """Store in the KVS the outlets the script will switch back on at boot.
 
-    Un profil vide n'est jamais publie. Appliquer « All off » avant
-    d'eteindre le PC est un geste naturel, mais il ne veut pas dire « au
-    prochain demarrage, un seul ecran » : on conserve alors la derniere
-    disposition utile.
+    An empty profile is never published. Applying "All off" before shutting
+    down the PC is a natural gesture, but it does not mean "at the next
+    boot, a single screen": the last useful layout is kept instead.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return False
@@ -427,17 +427,16 @@ def publish_profile(
         device = controller.device_for(host_device_key(config))
         device.call("KVS.Set", {"key": KVS_PROFILE_KEY, "value": encode_profile(indexes)})
         return True
-    except Exception:  # noqa: BLE001 - un KVS muet ne doit pas bloquer un profil
+    except Exception:  # noqa: BLE001 - a silent KVS must not block a profile
         return False
 
 
 def read_published_profile(controller: "ScreenController", config: AppConfig) -> list[int]:
-    """Relit ce que le script trouvera dans le KVS.
+    """Read back what the script will find in the KVS.
 
-    Les index hors de la table courante sont ecartes : ils viennent d'une
-    configuration qui a change depuis la publication, et les laisser
-    passer ferait croire a un profil exploitable alors qu'il ne designe
-    plus rien.
+    Indexes outside the current table are dropped: they come from a
+    configuration that changed since publication, and letting them through
+    would suggest a usable profile when it no longer designates anything.
     """
     try:
         device = controller.device_for(host_device_key(config))
@@ -457,25 +456,25 @@ PROBE_NAME = "pc_probe"
 KVS_PROBE_KEY = "scr_probe"
 PROBE_TEMPLATE = Path(__file__).resolve().parent / "scripts" / "pc_probe.js"
 PROBE_POLL_S = 5.0
-PROBE_WRITE_EVERY = 12  # une ecriture par minute au plus, hors nouveau palier
-# Courbe : des ticks horodates, enregistres seulement quand la puissance
-# bouge. Un PC au repos, ou en veille toute une nuit, ne produit alors
-# qu'un point -- la ou un echantillonnage regulier aurait sature la
-# memoire de mesures identiques. Une valeur du KVS tient 255 caracteres,
-# soit 84 ticks de trois caracteres.
+PROBE_WRITE_EVERY = 12  # at most one write per minute, except on a new level
+# Curve: timestamped ticks, recorded only when the power moves. A PC
+# idling, or asleep for a whole night, then produces a single point --
+# where regular sampling would have filled the memory with identical
+# readings. A KVS value holds 255 characters, i.e. 84 ticks of three
+# characters.
 KVS_SERIES_KEY = "scr_series"
 TICK_CHARS = 3
-PROBE_SERIES_CHARS = 252  # multiple de TICK_CHARS
-# Ecart de niveau a partir duquel un changement merite un tick. Trois
-# niveaux sur l'echelle logarithmique valent environ 35 % de variation :
-# assez pour ignorer les fluctuations d'un PC en marche, assez peu pour
-# saisir un passage en veille.
+PROBE_SERIES_CHARS = 252  # multiple of TICK_CHARS
+# Level difference from which a change deserves a tick. Three levels on
+# the logarithmic scale amount to about 35 % variation: enough to ignore
+# the fluctuations of a running PC, small enough to catch a transition to
+# sleep.
 PROBE_TICK_MIN_STEP = 3
-# Nombre maximal de mesures sans le moindre tick. Passe ce delai, on en
-# pose un quand meme : sans point d'ancrage, une longue periode calme
-# deviendrait un simple trait sans echelle de temps.
+# Maximum number of readings without a single tick. Past that, one is
+# recorded anyway: without an anchor point, a long quiet period would
+# become a plain line with no time scale.
 PROBE_TICK_MAX_SILENCE = 180  # 180 x 5 s = 15 min
-# Plafond de l'echelle logarithmique de la courbe, en watts.
+# Ceiling of the curve's logarithmic scale, in watts.
 PROBE_SERIES_MAX_W = 400.0
 SERIES_ALPHABET = (
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -485,17 +484,17 @@ SERIES_ALPHABET = (
 
 @dataclass(frozen=True)
 class Tick:
-    """Un changement de puissance, et depuis combien de temps il dure."""
+    """A power change, and how long it has lasted."""
 
-    age_s: float  # secondes ecoulees depuis ce tick jusqu'a maintenant
+    age_s: float  # seconds elapsed from this tick until now
     watts: float
-# Bornes de l'histogramme, identiques a celles du script.
+# Histogram bounds, identical to those of the script.
 PROBE_EDGES = [2, 5, 10, 20, 40, 80, 160]
 
 
 @dataclass
 class Levels:
-    """Paliers de consommation releves."""
+    """Recorded power levels."""
 
     samples: int = 0
     lowest: float = 0.0
@@ -516,10 +515,10 @@ class Levels:
         return low, high
 
     def populated(self, min_share: float = 0.02) -> list[int]:
-        """Tranches representant au moins `min_share` des mesures.
+        """Buckets holding at least `min_share` of the readings.
 
-        Le seuil elimine les valeurs de passage -- la montee en charge au
-        demarrage, une pointe ponctuelle -- qui ne sont pas des paliers.
+        The threshold filters out transient values -- the ramp-up at
+        startup, a one-off spike -- which are not levels.
         """
         if not self.samples:
             return []
@@ -527,14 +526,13 @@ class Levels:
         return [i for i, count in enumerate(self.buckets) if count >= floor]
 
     def split_levels(self) -> tuple[list[int], list[int]]:
-        """Separe les tranches peuplees en groupe bas et groupe haut.
+        """Split the populated buckets into a low group and a high group.
 
-        La coupure se fait sur la plus grande discontinuite. Un PC ne
-        produit pas deux paliers mais quatre -- eteint, en veille, au repos,
-        en charge -- et c'est le vide entre « eteint ou en veille » et
-        « allume » qui nous interesse. Prendre simplement la tranche la plus
-        haute reviendrait a caler les seuils sur les pointes de charge, et
-        les placerait bien trop haut.
+        The cut is made at the widest gap. A PC does not produce two levels
+        but four -- off, asleep, idle, under load -- and what matters is the
+        gap between "off or asleep" and "on". Simply taking the highest
+        bucket would pin the thresholds to load spikes, and would place
+        them far too high.
         """
         slots = self.populated()
         if len(slots) < 2:
@@ -551,11 +549,11 @@ class Levels:
         return slots[: cut + 1], slots[cut + 1 :]
 
     def standby_ceiling(self) -> float:
-        """Majorant de ce que consomme le PC eteint ou en veille.
+        """Upper bound of what the PC draws when off or asleep.
 
-        Borne haute de la derniere tranche du groupe bas, et non le minimum
-        observe : un seuil place juste au-dessus d'un creux ponctuel se
-        ferait franchir par la moindre variation.
+        Upper edge of the last bucket in the low group, not the observed
+        minimum: a threshold placed just above a one-off dip would be
+        crossed by the slightest variation.
         """
         low_group, _ = self.split_levels()
         if not low_group:
@@ -564,10 +562,10 @@ class Levels:
         return self.highest if high == float("inf") else high
 
     def active_floor(self) -> float:
-        """Minorant de ce que consomme le PC en marche.
+        """Lower bound of what the PC draws when running.
 
-        Borne basse de la premiere tranche du groupe haut : le PC au repos
-        peut descendre jusque-la, et le seuil doit rester en dessous.
+        Lower edge of the first bucket in the high group: the idle PC can
+        drop that far, and the threshold must stay below it.
         """
         _, high_group = self.split_levels()
         if not high_group:
@@ -576,18 +574,18 @@ class Levels:
         return low
 
     def has_two_levels(self) -> bool:
-        """Vrai si l'on distingue bien un palier bas et un palier haut."""
+        """True if a low level and a high level can be clearly told apart."""
         low_group, high_group = self.split_levels()
         return bool(low_group) and bool(high_group)
 
 
 def suggest_thresholds(levels: Levels) -> tuple[float, float, str]:
-    """Propose les deux seuils a partir des paliers releves.
+    """Suggest the two thresholds from the recorded levels.
 
-    Renvoie (allumage, coupure, avertissement). Les seuils se placent dans
-    l'intervalle separant les deux paliers, plus pres du bas que du haut :
-    un PC au repos profond descend parfois bien en dessous de sa
-    consommation habituelle, alors qu'un PC eteint ne remonte pas.
+    Returns (on, off, warning). The thresholds go in the interval between
+    the two levels, closer to the bottom than to the top: a PC in deep
+    idle sometimes drops well below its usual draw, whereas a PC that is
+    off does not creep up.
     """
     if not levels.has_two_levels():
         return (
@@ -618,7 +616,7 @@ def suggest_thresholds(levels: Levels) -> tuple[float, float, str]:
 
 
 def render_probe(config: AppConfig) -> str:
-    """Code du releveur, configuration incluse."""
+    """Power logger code, configuration included."""
     if not config.sensing.pc_ref:
         raise SensingError("No outlet is marked as powering the PC")
     template = PROBE_TEMPLATE.read_text(encoding="utf-8")
@@ -642,12 +640,12 @@ def render_probe(config: AppConfig) -> str:
 def install_probe(
     controller: "ScreenController", config: AppConfig, fresh: bool
 ) -> int:
-    """Pose le releveur ; `fresh` efface ce qu'il avait deja enregistre.
+    """Install the power logger; `fresh` erases what it had already recorded.
 
-    Deux usages opposes. Lancer une mesure demande une ardoise vierge : un
-    releve precedent fausserait les paliers proposes. Mettre le releveur a
-    jour, au contraire, ne doit rien perdre : ses ticks alimentent
-    l'historique de consommation, et le releveur les relit a son demarrage.
+    Two opposite uses. Starting a measurement calls for a clean slate: a
+    previous recording would skew the suggested levels. Updating the
+    logger, on the contrary, must lose nothing: its ticks feed the power
+    history, and the logger reads them back when it starts.
     """
     code = render_probe(config)
     device = controller.device_for(host_device_key(config))
@@ -667,17 +665,17 @@ def install_probe(
 
 
 def start_probe(controller: "ScreenController", config: AppConfig) -> int:
-    """Lance une nouvelle mesure, sur une ardoise vierge."""
+    """Start a new measurement, on a clean slate."""
     return install_probe(controller, config, fresh=True)
 
 
 def sync_probe(controller: "ScreenController", config: AppConfig) -> str:
-    """Tient le releveur a jour et en marche, sans effacer ses ticks.
+    """Keep the power logger up to date and running, without erasing its ticks.
 
-    Il n'est plus un simple outil de calibration : c'est lui qui voit la
-    consommation pendant que le PC dort, et l'historique en depend. On le
-    pose donc s'il manque, on le remplace si son code a vieilli, et on le
-    relance s'il s'est arrete.
+    It is no longer just a calibration tool: it is what sees the power
+    draw while the PC sleeps, and the history depends on it. So it is
+    installed if missing, replaced if its code has aged, and restarted if
+    it has stopped.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return ""
@@ -699,13 +697,13 @@ def sync_probe(controller: "ScreenController", config: AppConfig) -> str:
 def read_probe_timeline(
     controller: "ScreenController", config: AppConfig
 ) -> list[tuple[float, float]]:
-    """Ticks du releveur, dates en temps Unix, du plus ancien au plus recent.
+    """Power logger ticks, dated in Unix time, from oldest to newest.
 
-    Le releveur publie l'instant de son dernier tick ; les autres s'en
-    deduisent par les ecarts qu'il encode. Faute de ce repere -- releveur
-    anterieur, ou horloge pas encore synchronisee --, on prend l'heure
-    courante : l'approximation est bonne a la sortie de veille, ou le
-    dernier tick est justement celui du reveil.
+    The logger publishes the time of its last tick; the others are derived
+    from the gaps it encodes. Without that anchor -- an older logger, or a
+    clock not yet synchronised --, the current time is used: the
+    approximation is good on resume from sleep, where the last tick is
+    precisely the wake-up one.
     """
     ticks = read_series(controller, config, strict=True)
     if not ticks:
@@ -716,10 +714,10 @@ def read_probe_timeline(
         raw = (device.call("KVS.Get", {"key": KVS_PROBE_KEY}) or {}).get("value")
         data = json.loads(raw) if isinstance(raw, str) and raw.startswith("{") else {}
         stamp = data.get("t")
-        # Un instant anterieur a 2001 est une horloge non synchronisee.
+        # A time before 2001 means an unsynchronised clock.
         if isinstance(stamp, (int, float)) and stamp > 1_000_000_000:
             reference = float(stamp)
-    except Exception:  # noqa: BLE001 - le repere est un plus, pas une condition
+    except Exception:  # noqa: BLE001 - the anchor is a bonus, not a requirement
         reference = None
     if reference is None:
         reference = time.time()
@@ -727,11 +725,11 @@ def read_probe_timeline(
 
 
 def read_probe(controller: "ScreenController", config: AppConfig) -> Levels:
-    """Relit les paliers accumules par le releveur.
+    """Read back the levels accumulated by the power logger.
 
-    Relire juste apres le lancement est normal : le releveur n'a pas encore
-    ecrit, et le firmware repond alors « cle inconnue ». Ce n'est pas une
-    erreur a montrer, c'est un releve encore vide.
+    Reading right after starting is normal: the logger has not written yet,
+    and the firmware then answers "unknown key". That is not an error to
+    show, just a recording that is still empty.
     """
     device = controller.device_for(host_device_key(config))
     try:
@@ -753,7 +751,7 @@ def read_probe(controller: "ScreenController", config: AppConfig) -> Levels:
 
 
 def stop_probe(controller: "ScreenController", config: AppConfig) -> None:
-    """Arrete et supprime le releveur, en gardant sa derniere mesure."""
+    """Stop and delete the power logger, keeping its last measurement."""
     try:
         device = controller.device_for(host_device_key(config))
     except Exception:  # noqa: BLE001
@@ -779,13 +777,13 @@ def probe_running(controller: "ScreenController", config: AppConfig) -> bool:
         return False
 
 
-# ------------------------------------------------------------------ gardien
+# ------------------------------------------------------------------ guard
 
 GUARD_NAME = "pc_guard"
 
 
 def uninstall_guard(controller: "ScreenController", config: AppConfig, device_key: str) -> None:
-    """Retire le gardien d'un appareil donne."""
+    """Remove the guard from a given device."""
     try:
         device = controller.device_for(device_key)
     except Exception:  # noqa: BLE001
@@ -801,13 +799,13 @@ def uninstall_guard(controller: "ScreenController", config: AppConfig, device_ke
 
 
 def sync_guard(controller: "ScreenController", config: AppConfig) -> str:
-    """Remet la surveillance en face de la prise reellement declaree.
+    """Point the watch back at the outlet actually declared.
 
-    Le gardien n'est plus un script separe : il vit dans `pc_sensing`.
-    L'appareil n'execute que trois scripts a la fois, et le troisieme
-    emplacement doit rester libre pour le releveur de paliers. On efface
-    donc les anciens `pc_guard` partout, puis on reinstalle le pilote, qui
-    embarque desormais la surveillance.
+    The guard is no longer a separate script: it lives in `pc_sensing`.
+    The device only runs three scripts at a time, and the third slot must
+    stay free for the power-level logger. So the old `pc_guard` scripts are
+    erased everywhere, then the driver script, which now carries the watch,
+    is reinstalled.
     """
     for device_config in config.devices:
         uninstall_guard(controller, config, device_config.key)
@@ -821,15 +819,15 @@ def sync_guard(controller: "ScreenController", config: AppConfig) -> str:
 
 
 def publish_current_state(controller: "ScreenController", config: AppConfig) -> list[int]:
-    """Publie les prises actuellement alimentees, a defaut de profil.
+    """Publish the outlets currently powered, when there is no profile.
 
-    Le script ne sait rallumer que ce que l'application lui a laisse. Tant
-    qu'aucun profil n'a ete applique, il ne trouve rien et s'en tient a
-    l'ecran de demarrage -- le PC repart alors avec un seul ecran, sans que
-    rien ne l'explique.
+    The script can only switch back on what the application left it. As
+    long as no profile has been applied, it finds nothing and sticks to the
+    boot screen -- the PC then comes back with a single screen, with
+    nothing to explain why.
 
-    Publier l'etat du moment est le repli le plus sensé : ce qui est
-    allume maintenant est vraisemblablement ce qu'on veut retrouver.
+    Publishing the current state is the most sensible fallback: what is on
+    now is most likely what one wants to find again.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return []
@@ -854,10 +852,10 @@ def publish_current_state(controller: "ScreenController", config: AppConfig) -> 
 
 
 def ensure_published(controller: "ScreenController", config: AppConfig) -> list[int]:
-    """Garantit que le script a quelque chose a rallumer.
+    """Make sure the script has something to switch back on.
 
-    Le dernier profil d'abord, puisque c'est l'intention exprimee ; sinon
-    l'etat courant, qui vaut mieux qu'un KVS vide.
+    The last profile first, since it is the stated intent; otherwise the
+    current state, which is better than an empty KVS.
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return []
@@ -870,35 +868,35 @@ def ensure_published(controller: "ScreenController", config: AppConfig) -> list[
     return publish_current_state(controller, config)
 
 
-# ------------------------------------------------------------------- courbe
+# ------------------------------------------------------------------- curve
 
 def decode_series(encoded: str) -> list[Tick]:
-    """Retrouve les ticks d'une suite encodee par le releveur.
+    """Recover the ticks from a series encoded by the power logger.
 
-    Chaque tick occupe trois caracteres : le niveau de puissance, puis le
-    temps ecoule depuis le tick precedent. Les ages sont ensuite comptes
-    a rebours depuis maintenant, le dernier tick etant le plus recent.
+    Each tick takes three characters: the power level, then the time
+    elapsed since the previous tick. Ages are then counted backwards from
+    now, the last tick being the most recent.
     """
     span = math.log1p(PROBE_SERIES_MAX_W)
     raw: list[tuple[float, float]] = []
-    # Le decoupage part de la fin. La suite est une file glissante dont la
-    # tete se fait rogner, et un releveur plus ancien a pu y laisser un
-    # tick incomplet : compter depuis le debut decalerait alors tous les
-    # ticks, et la courbe n'aurait plus aucun sens. Le residu de tete est
-    # ecarte, les mesures recentes -- les seules qui comptent -- restent
-    # justes.
+    # Slicing starts from the end. The series is a sliding queue whose head
+    # gets trimmed, and an older logger may have left an incomplete tick
+    # there: counting from the start would then shift every tick, and the
+    # curve would no longer make any sense. The leading remainder is
+    # dropped; the recent readings -- the only ones that matter -- stay
+    # correct.
     offset = len(encoded) % TICK_CHARS
     for start in range(offset, len(encoded) - TICK_CHARS + 1, TICK_CHARS):
         level = SERIES_ALPHABET.find(encoded[start])
         high = SERIES_ALPHABET.find(encoded[start + 1])
         low = SERIES_ALPHABET.find(encoded[start + 2])
         if level < 0 or high < 0 or low < 0:
-            continue  # caractere inconnu : on saute plutot que de decaler
+            continue  # unknown character: skip rather than shift
         watts = 0.0 if level == 0 else math.expm1(level / 63 * span)
         raw.append(((high * 64 + low) * PROBE_POLL_S, watts))
 
-    # Le temps encode est celui qui separe un tick du precedent : on le
-    # cumule depuis la fin pour obtenir l'age de chacun.
+    # The encoded time is the gap between a tick and the previous one:
+    # accumulate it from the end to get each tick's age.
     ticks: list[Tick] = []
     age = 0.0
     for gap, watts in reversed(raw):
@@ -911,13 +909,12 @@ def decode_series(encoded: str) -> list[Tick]:
 def read_series(
     controller: "ScreenController", config: AppConfig, strict: bool = False
 ) -> list[Tick]:
-    """Relit les ticks accumules, du plus ancien au plus recent.
+    """Read back the accumulated ticks, from oldest to newest.
 
-    Par defaut, un appareil injoignable rend une liste vide : la courbe de
-    mesure se contente d'attendre le rafraichissement suivant. Avec
-    `strict`, l'echec remonte -- l'historique doit distinguer « rien a
-    recuperer » de « pas pu lire », sans quoi il abandonne des donnees
-    qu'il aurait eues une minute plus tard.
+    By default, an unreachable device yields an empty list: the measurement
+    curve simply waits for the next refresh. With `strict`, the failure
+    propagates -- the history must tell "nothing to fetch" from "could not
+    read", otherwise it gives up on data it would have had a minute later.
     """
     try:
         device = controller.device_for(host_device_key(config))

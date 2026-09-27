@@ -1,9 +1,9 @@
-"""Declarations ctypes communes a la couche Windows.
+"""ctypes declarations shared by the Windows layer.
 
-Un point important y est regle une fois pour toutes : la conscience du DPI.
-Sans elle, Windows virtualise les coordonnees des fenetres sur les ecrans
-mis a l'echelle, et les positions relevees ne correspondent plus a la
-realite. On passe donc le processus en Per-Monitor V2 des l'import.
+One important point is settled here once and for all: DPI awareness.
+Without it, Windows virtualises window coordinates on scaled screens, and
+the positions we read no longer match reality. So the process is switched
+to Per-Monitor V2 as soon as this module is imported.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
-# ctypes ne connait pas ces types sur toutes les versions de Python.
+# ctypes doesn't define these types on every Python version.
 LRESULT = ctypes.c_ssize_t
 LONG_PTR = ctypes.c_ssize_t
 UINT_PTR = ctypes.c_size_t
@@ -50,7 +50,7 @@ class RECT(ctypes.Structure):
 
 
 def enable_dpi_awareness() -> None:
-    """Passe le processus en Per-Monitor V2, avec repli sur les API anciennes."""
+    """Switch the process to Per-Monitor V2, falling back to older APIs."""
     try:
         user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
         user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL

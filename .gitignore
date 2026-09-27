@@ -1,25 +1,25 @@
-# Configuration locale.
+# Local configuration.
 #
-# Elle porte les mots de passe des multiprises, chiffres par DPAPI avec la
-# cle du compte Windows de la machine -- illisibles ailleurs, donc inutiles
-# a qui les recupererait, mais inutiles aussi a qui clonerait le depot. Elle
-# porte surtout les adresses MAC des appareils, leurs adresses IP et
-# l'identifiant materiel de chaque ecran : l'inventaire d'un reseau prive.
+# It holds the power strips' passwords, encrypted by DPAPI with the key of
+# the machine's Windows account -- unreadable elsewhere, so useless to
+# whoever got hold of them, but also useless to whoever clones the repo.
+# Above all it holds the devices' MAC addresses, their IP addresses and the
+# hardware identifier of each screen: the inventory of a private network.
 config.json
 config.json.*
 
-# Journal d'execution.
+# Runtime log.
 #
-# Il retrace les adresses du reseau local et les noms mDNS, qui contiennent
-# les adresses MAC. Il grossit a chaque session et n'apprend rien a personne
-# d'autre qu'a celui qui diagnostique sa propre installation.
+# It records local network addresses and mDNS names, which contain the MAC
+# addresses. It grows with every session and tells nothing to anyone but
+# the person troubleshooting their own installation.
 shelly-screens.log
 shelly-screens.log.*
 
-# Historique de consommation.
+# Power consumption history.
 #
-# Des mesures propres a cette installation, qui grossissent chaque jour
-# et n'apprennent rien a qui clone le depot.
+# Measurements specific to this installation, which grow every day and
+# tell nothing to whoever clones the repo.
 history/
 
 # Python
@@ -27,18 +27,18 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Environnements virtuels
+# Virtual environments
 .venv/
 venv/
 env/
 
-# Empaquetage
+# Packaging
 build/
 dist/
 *.egg-info/
 *.spec
 
-# Editeurs et systeme de fichiers
+# Editors and file system
 .vscode/
 .idea/
 Thumbs.db

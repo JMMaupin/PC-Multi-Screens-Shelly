@@ -1,19 +1,18 @@
-"""Themes de l'interface : systeme, clair, sombre.
+"""Interface themes: system, light, dark.
 
-Trois choix possibles, et `system` suit le reglage de Windows en temps reel.
+Three possible choices, and `system` follows the Windows setting in real time.
 
-Deux points meritent une explication.
+Two points deserve an explanation.
 
-Le theme ttk retenu est `clam`, dans les trois cas. Le theme natif `vista`
-est plus joli en clair, mais il dessine ses widgets avec les images du
-systeme : ses fonds ne se colorent pas, et un mode sombre y reste
-irremediablement clair par endroits. `clam` est entierement pilotable, au
-prix de quelques indicateurs plus sobres -- un echange qui vaut la coherence
-entre les trois themes.
+The ttk theme used is `clam`, in all three cases. The native `vista` theme
+looks nicer in light mode, but it draws its widgets with system images: their
+backgrounds cannot be recolored, and a dark mode stays hopelessly light in
+places. `clam` is fully controllable, at the cost of a few plainer
+indicators -- a trade-off worth the consistency across the three themes.
 
-La barre de titre, elle, n'appartient pas a Tk mais au gestionnaire de
-fenetres. On la fait basculer par DwmSetWindowAttribute, sans quoi une
-fenetre sombre garderait un bandeau blanc.
+The title bar does not belong to Tk but to the window manager. It is
+switched through DwmSetWindowAttribute, otherwise a dark window would keep a
+white strip on top.
 """
 
 from __future__ import annotations
@@ -28,30 +27,30 @@ from tkinter import ttk
 MODES = ("system", "light", "dark")
 PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 DWM_KEY = r"Software\Microsoft\Windows\DWM"
-# Attribut Windows 11 / Windows 10 20H1 ; 19 sur les versions plus anciennes.
+# Windows 11 / Windows 10 20H1 attribute; 19 on older versions.
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
 
 
 @dataclass(frozen=True)
 class Palette:
-    """Couleurs d'un theme."""
+    """Colors of a theme."""
 
     name: str
     dark: bool
-    bg: str  # fond de fenetre
-    surface: str  # cadres, listes, champs
-    surface_alt: str  # lignes alternees, en-tetes
+    bg: str  # window background
+    surface: str  # frames, lists, fields
+    surface_alt: str  # alternating rows, headers
     border: str
     text: str
-    text_muted: str  # aides et commentaires
+    text_muted: str  # hints and comments
     text_disabled: str
-    accent: str  # selection, onglet actif
-    accent_text: str  # texte pose sur l'accent
-    on: str  # prise alimentee
-    off: str  # prise coupee
-    warn: str  # appareil injoignable, signal mauvais
-    caution: str  # entre les deux : un signal seulement bon
+    accent: str  # selection, active tab
+    accent_text: str  # text laid on the accent
+    on: str  # outlet powered
+    off: str  # outlet switched off
+    warn: str  # device unreachable, bad signal
+    caution: str  # in between: a merely good signal
 
 
 LIGHT = Palette(
@@ -92,41 +91,41 @@ DARK = Palette(
 
 
 def system_prefers_dark() -> bool:
-    """Lit le reglage clair/sombre des applications dans le registre."""
+    """Read the apps light/dark setting from the registry."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, PERSONALIZE_KEY) as key:
             value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
             return int(value) == 0
     except (OSError, ValueError):
-        return False  # en cas de doute, le clair reste le defaut de Windows
+        return False  # when in doubt, light remains the Windows default
 
 
 def system_accent() -> str | None:
-    """Couleur d'accentuation choisie dans Windows, si elle est lisible."""
+    """Accent color chosen in Windows, if it can be read."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, DWM_KEY) as key:
             value, _ = winreg.QueryValueEx(key, "AccentColor")
     except (OSError, ValueError):
         return None
-    # AccentColor est stocke en AABBGGRR : il faut inverser les octets.
+    # AccentColor is stored as AABBGGRR: the bytes must be reversed.
     blue = (int(value) >> 16) & 0xFF
     green = (int(value) >> 8) & 0xFF
     red = int(value) & 0xFF
     return f"#{red:02x}{green:02x}{blue:02x}"
 
 
-# Contraste minimal exige d'un libelle pose sur l'accent. On reste en deca
-# des 4,5:1 de WCAG AA : il s'agit de textes d'interface courts sur un aplat,
-# et viser 4,5 strictement rejetterait le bleu Windows pour 0,001 de marge.
+# Minimum contrast required of a label laid on the accent. It stays below
+# WCAG AA's 4.5:1: these are short UI texts on a flat fill, and strictly
+# aiming for 4.5 would reject the Windows blue by a 0.001 margin.
 MIN_TEXT_CONTRAST = 4.0
 
 
 def relative_luminance(color: str) -> float:
-    """Luminance relative WCAG d'une couleur #rrggbb.
+    """WCAG relative luminance of a #rrggbb color.
 
-    Les composantes sRGB sont encodees en gamma : les comparer telles quelles
-    fausse le calcul et fait choisir la mauvaise couleur de texte. On les
-    linearise donc avant de les ponderer.
+    sRGB components are gamma-encoded: comparing them as-is skews the
+    calculation and picks the wrong text color. So they are linearized
+    before being weighted.
     """
     channels = []
     for index in (1, 3, 5):
@@ -139,17 +138,17 @@ def relative_luminance(color: str) -> float:
 
 
 def contrast_ratio(first: str, second: str) -> float:
-    """Rapport de contraste WCAG entre deux couleurs, de 1 a 21."""
+    """WCAG contrast ratio between two colors, from 1 to 21."""
     light, dark = sorted((relative_luminance(first), relative_luminance(second)))
     return (dark + 0.05) / (light + 0.05)
 
 
 def readable_on(color: str) -> str:
-    """Couleur de texte a poser sur ce fond : blanc de preference.
+    """Text color to lay on this background: white by preference.
 
-    Le blanc est la convention sur un aplat colore -- c'est ce que fait
-    Windows sur son accent. On ne bascule au noir que lorsque le blanc ne
-    tient plus le contraste, ce qui arrive sur les accents clairs.
+    White is the convention on a colored flat fill -- it is what Windows does
+    on its accent. Switch to black only when white no longer holds the
+    contrast, which happens on light accents.
     """
     if contrast_ratio("#ffffff", color) >= MIN_TEXT_CONTRAST:
         return "#ffffff"
@@ -163,7 +162,7 @@ def readable_on(color: str) -> str:
 
 
 def _mix(color: str, target: str, ratio: float) -> str:
-    """Melange deux couleurs, `ratio` etant la part de `target`."""
+    """Blend two colors, `ratio` being the share of `target`."""
     out = []
     for index in (1, 3, 5):
         first = int(color[index : index + 2], 16)
@@ -172,10 +171,10 @@ def _mix(color: str, target: str, ratio: float) -> str:
     return "#{:02x}{:02x}{:02x}".format(*out)
 
 
-# Luminance visee pour l'accent, de facon qu'un texte pose dessus garde un
-# contraste confortable : clair sur fond sombre, soutenu sur fond clair.
-# C'est aussi ce que fait Windows 11, dont les accents s'eclaircissent en
-# mode sombre.
+# Target luminance for the accent, so that text laid on it keeps a
+# comfortable contrast: light on a dark background, deep on a light one.
+# It is also what Windows 11 does, whose accents get lighter in dark
+# mode.
 ACCENT_TARGET_DARK = 0.45
 ACCENT_TARGET_LIGHT = 0.22
 
@@ -185,15 +184,15 @@ def _best_text_contrast(color: str) -> float:
 
 
 def fit_accent(accent: str, dark: bool) -> str:
-    """Adapte l'accent de Windows au fond, sans toucher a sa teinte.
+    """Fit the Windows accent to the background, without touching its hue.
 
-    En clair, on n'y touche pas : l'accent tel que Windows l'affiche est ce
-    que l'utilisateur reconnait, et il ressort deja sur un fond pale. On ne
-    le corrige que dans le cas rare ou aucun texte n'y serait lisible.
+    In light mode, leave it alone: the accent as Windows shows it is what the
+    user recognizes, and it already stands out on a pale background. It is
+    only corrected in the rare case where no text would be readable on it.
 
-    En sombre, c'est different : le bleu par defaut a une luminance de 0,18
-    et se noie sur un fond a 0,02. On l'eclaircit jusqu'a ce qu'il ressorte,
-    comme le fait Windows 11 avec ses accents en mode sombre.
+    In dark mode, it is different: the default blue has a luminance of 0.18
+    and drowns on a 0.02 background. It is lightened until it stands out,
+    as Windows 11 does with its accents in dark mode.
     """
     if not dark:
         if _best_text_contrast(accent) >= MIN_TEXT_CONTRAST:
@@ -203,7 +202,7 @@ def fit_accent(accent: str, dark: bool) -> str:
 
 
 def _approach(accent: str, target: str, wanted: float, dark: bool) -> str:
-    """Melange l'accent vers `target` jusqu'a la luminance visee."""
+    """Blend the accent toward `target` until the target luminance is reached."""
     if (relative_luminance(accent) >= wanted) if dark else (
         relative_luminance(accent) <= wanted
     ):
@@ -220,7 +219,7 @@ def _approach(accent: str, target: str, wanted: float, dark: bool) -> str:
 
 
 def resolve(mode: str) -> Palette:
-    """Palette effective pour un mode donne, accent systeme compris."""
+    """Effective palette for a given mode, system accent included."""
     if mode not in MODES:
         mode = "system"
     dark = system_prefers_dark() if mode == "system" else (mode == "dark")
@@ -238,7 +237,7 @@ def resolve(mode: str) -> Palette:
     )
 
 
-# --------------------------------------------------------------- barre de titre
+# -------------------------------------------------------------------- title bar
 
 _dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -246,13 +245,13 @@ GA_ROOT = 2
 
 
 def apply_titlebar(window: tk.Misc, dark: bool) -> None:
-    """Fait basculer la barre de titre en clair ou en sombre.
+    """Switch the title bar to light or dark.
 
-    Tk n'expose que le handle de son widget : la fenetre qui porte la barre de
-    titre est son ancetre racine.
+    Tk only exposes its widget's handle: the window that carries the title
+    bar is its root ancestor.
     """
     try:
-        window.update_idletasks()  # la fenetre doit exister cote systeme
+        window.update_idletasks()  # the window must exist on the system side
         hwnd = _user32.GetAncestor(window.winfo_id(), GA_ROOT)
         if not hwnd:
             return
@@ -270,13 +269,13 @@ def apply_titlebar(window: tk.Misc, dark: bool) -> None:
             if result == 0:
                 break
     except (tk.TclError, OSError, AttributeError):
-        pass  # sans barre de titre teintee, l'application reste utilisable
+        pass  # without a tinted title bar, the application remains usable
 
 
 # ------------------------------------------------------------------ application
 
-# Widgets Tk classiques que ttk.Style ne touche pas : il faut les recolorer
-# un par un, y compris lors d'un changement de theme a chaud.
+# Classic Tk widgets that ttk.Style does not reach: they must be recolored
+# one by one, including on a live theme change.
 _PLAIN_OPTIONS = {
     "Listbox": ("background", "foreground", "selectbackground", "selectforeground",
                 "highlightbackground", "highlightcolor"),
@@ -290,10 +289,10 @@ _PLAIN_OPTIONS = {
 
 
 def apply(root: tk.Misc, mode: str) -> Palette:
-    """Applique un theme a une fenetre et a tout son contenu."""
+    """Apply a theme to a window and all its content."""
     palette = resolve(mode)
     style = ttk.Style(root)
-    # `clam` est le seul theme integre entierement colorable : voir l'entete.
+    # `clam` is the only built-in theme that is fully colorable: see the header.
     try:
         style.theme_use("clam")
     except tk.TclError:
@@ -330,7 +329,7 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
                     font=("", 11, "bold"))
     style.configure("Section.TLabel", background=p.bg, foreground=p.text,
                     font=("", 9, "bold"))
-    # Un lien : la couleur d'accent et le souligne, comme dans un navigateur.
+    # A link: the accent color and an underline, as in a browser.
     style.configure("Link.TLabel", background=p.bg, foreground=p.accent,
                     font=("", 9, "underline"))
     style.configure("Banner.TLabel", background=p.bg, foreground=p.text,
@@ -338,10 +337,10 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
     style.configure("TLabelframe", background=p.bg, bordercolor=p.border)
     style.configure("TLabelframe.Label", background=p.bg, foreground=p.text_muted)
 
-    # Variantes « carte » : un cadre pose sur un fond legerement distinct se
-    # lit bien mieux qu'un simple filet. ttk n'heritant pas le fond du
-    # parent, chaque type de widget place dans une carte a besoin de sa
-    # declinaison -- elles sont appliquees automatiquement par
+    # "Card" variants: a frame laid on a slightly distinct background reads
+    # much better than a plain rule. Since ttk does not inherit the parent's
+    # background, each widget type placed in a card needs its own variant
+    # -- they are applied automatically by
     # `apply_card_styles`.
     style.configure("Card.TLabelframe", background=p.surface, bordercolor=p.border,
                     relief="solid", borderwidth=1)
@@ -434,7 +433,7 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
         "TNotebook.Tab",
         background=[("selected", p.bg), ("active", _mix(p.surface_alt, p.accent, 0.18))],
         foreground=[("selected", p.text)],
-        # L'onglet actif doit se fondre dans la page qu'il ouvre.
+        # The active tab must blend into the page it opens.
         lightcolor=[("selected", p.bg)],
         expand=[("selected", (1, 1, 1, 0))],
     )
@@ -475,8 +474,8 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
         lightcolor=p.accent,
         darkcolor=p.accent,
     )
-    # Curseurs : sans style propre, `clam` les dessine en clair une fois
-    # desactives, et le curseur inerte ressortait plus que l'actif.
+    # Sliders: without their own style, `clam` draws them light once
+    # disabled, and the inert slider stood out more than the active one.
     style.configure(
         "Horizontal.TScale",
         background=p.accent,
@@ -506,11 +505,11 @@ def _configure_styles(style: ttk.Style, p: Palette) -> None:
 
 
 def _style_combobox_popup(root: tk.Misc, p: Palette) -> None:
-    """Colore la liste deroulante des listes de choix.
+    """Color the drop-down list of comboboxes.
 
-    Elle n'est pas un widget ttk mais une Listbox interne creee par Tk au
-    moment de l'ouverture : ttk.Style ne l'atteint pas, et sans cela elle
-    reste blanche au milieu d'une fenetre sombre.
+    It is not a ttk widget but an internal Listbox created by Tk when it
+    opens: ttk.Style does not reach it, and without this it stays white in
+    the middle of a dark window.
     """
     for option, value in (
         ("*TCombobox*Listbox.background", p.surface),
@@ -525,7 +524,7 @@ def _style_combobox_popup(root: tk.Misc, p: Palette) -> None:
 
 
 def _apply_plain_widgets(widget: tk.Misc, p: Palette) -> None:
-    """Recolore les widgets Tk classiques, en descendant l'arborescence."""
+    """Recolor classic Tk widgets, walking down the widget tree."""
     colors = {
         "background": p.surface if widget.winfo_class() == "Listbox" else p.bg,
         "foreground": p.text,
@@ -541,17 +540,17 @@ def _apply_plain_widgets(widget: tk.Misc, p: Palette) -> None:
             try:
                 widget.configure(**{option: colors[option]})
             except (tk.TclError, KeyError):
-                pass  # certaines options n'existent pas selon la version de Tk
+                pass  # some options do not exist depending on the Tk version
     for child in widget.winfo_children():
         _apply_plain_widgets(child, p)
 
 
 def refresh_plain_widgets(root: tk.Misc, palette: Palette) -> None:
-    """Recolore les widgets classiques crees apres l'application du theme."""
+    """Recolor classic widgets created after the theme was applied."""
     _apply_plain_widgets(root, palette)
 
 
-# Style de base d'un widget -> sa declinaison posee sur une carte.
+# Base style of a widget -> its variant laid on a card.
 _CARD_STYLES = {
     "TLabelframe": "Card.TLabelframe",
     "TFrame": "Card.TFrame",
@@ -572,16 +571,16 @@ _TTK_DEFAULT_STYLE = {
 
 
 def apply_card_styles(widget: tk.Misc, inside_card: bool = False) -> None:
-    """Bascule en style « carte » tout ce qui se trouve dans un cadre.
+    """Switch everything inside a frame to the "card" style.
 
-    Le fond d'un widget ttk ne s'herite pas de son parent : poser un cadre
-    sur un fond distinct impose de redeclarer chaque widget qu'il contient.
-    Plutot que de le faire a la main partout, on parcourt l'arborescence une
-    fois le theme applique.
+    A ttk widget's background is not inherited from its parent: laying a
+    frame on a distinct background means redeclaring every widget it holds.
+    Rather than doing it by hand everywhere, the widget tree is walked once
+    the theme is applied.
     """
     klass = widget.winfo_class()
-    # Un cadre est lui-meme la carte : il doit donc recevoir le style, qu'il
-    # soit imbrique ou non. Ses descendants suivent.
+    # A frame is itself the card: so it must get the style, whether nested
+    # or not. Its descendants follow.
     is_card = klass == "TLabelframe"
     if (inside_card or is_card) and klass in _TTK_DEFAULT_STYLE:
         try:

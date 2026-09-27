@@ -1,969 +1,950 @@
 # Shelly Screens
 
-Pilotage de l'alimentation des écrans et périphériques d'un PC par une ou
-plusieurs **Shelly Power Strip 4 Gen4**, depuis une icône dans la zone de
-notification de Windows. Des profils d'écrans décident quelles prises sont
-alimentées ; les fenêtres restées sur un écran qu'on vient de couper sont
-ramenées sur un écran allumé.
+Controls the power of a PC's screens and peripherals through one or more
+**Shelly Power Strip 4 Gen4**, from an icon in the Windows notification
+area. Screen profiles decide which outlets are powered; windows left on a
+screen that has just been switched off are brought back onto a screen that
+is on.
 
-## En un coup d'œil
+## At a glance
 
 | | |
 | --- | --- |
-| Appareils | **validé** : Shelly Power Strip 4 Gen4 (S4PL-00416EU, firmware 2.0.1-beta3) ; autres Shelly à sorties commandables non testés |
-| Découverte | nom mDNS `<device-id>.local`, puis adresse connue, puis balayage |
-| Protocole | JSON-RPC sur HTTP, authentification Digest SHA-256 optionnelle |
-| Dépendances | aucune — bibliothèque standard de Python 3.12+ |
+| Devices | **validated**: Shelly Power Strip 4 Gen4 (S4PL-00416EU, firmware 2.0.1-beta3); other Shelly devices with switchable outputs untested |
+| Discovery | mDNS name `<device-id>.local`, then known address, then scan |
+| Protocol | JSON-RPC over HTTP, optional SHA-256 Digest authentication |
+| Dependencies | none — Python 3.12+ standard library |
 
-## Démarrage rapide
+## Quick start
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-startup.ps1 -Desktop
 ```
 
-Cela pose deux raccourcis — un au démarrage de session, un sur le Bureau —
-qui visent directement `pythonw.exe` : **aucune console, pas même un
-scintillement au lancement**. Un seul processus, contrairement à un détour
-par `.cmd`, `wscript` ou l'association `.pyw`, qui en laissent un second
-tourner pour rien.
+This creates two shortcuts — one at session startup, one on the Desktop —
+that target `pythonw.exe` directly: **no console, not even a flicker at
+launch**. A single process, unlike a detour through `.cmd`, `wscript` or the
+`.pyw` association, which leave a second one running for nothing.
 
-Pour diagnostiquer, `run-console.cmd` ouvre une console et y affiche les
-journaux en direct.
+For troubleshooting, `run-console.cmd` opens a console and shows the logs
+live.
 
-L'icône apparaît dans la zone de notification : une case par prise, verte si
-alimentée, grise sinon, tout en rouge si plus rien ne répond. Au-delà de
-quatre prises les cases passent sur deux rangées.
+The icon appears in the notification area: one box per outlet, green when
+powered, grey otherwise, all red when nothing responds any more. Beyond four
+outlets the boxes wrap onto two rows.
 
-* **Clic droit** : menu des profils, état des prises, consommation.
-* **Clic gauche** : fenêtre de réglages.
+* **Right click**: profiles menu, outlet states, power consumption.
+* **Left click**: settings window.
 
-## Mise en route
+## Getting started
 
-### 1. Brancher
+### 1. Plug in
 
-Écrans, concentrateurs USB et unité centrale se répartissent sur les
-multiprises, **elles-mêmes branchées directement au mur**. Aucune ne doit se
-trouver derrière une multiprise maîtresse : elle serait coupée avec le reste,
-perdrait le réseau et mettrait une dizaine de secondes à revenir.
+Screens, USB hubs and the PC tower are spread across the power strips,
+**which are themselves plugged directly into the wall**. None of them should
+sit behind a master power strip: it would be switched off with everything
+else, lose the network and take ten seconds or so to come back.
 
-### 2. Déclarer les appareils
+### 2. Add the devices
 
-Onglet **Devices** → **Add device**. Le balayage du réseau prend une
-vingtaine de secondes : il ne part donc pas tout seul, c'est **Scan
-network** qui le lance. Saisir l'adresse directement est instantané.
+**Devices** tab → **Add device**. Scanning the network takes about twenty
+seconds, so it does not start on its own: **Scan network** starts it. Typing
+the address directly is instant.
 
-**Appareil neuf ou remis à zéro** : bouton **First setup of a new
-device...**, un assistant en cinq étapes.
+**New or factory-reset device**: the **First setup of a new device...**
+button opens a five-step wizard.
 
-1. **Le modèle** — pour l'instant, le Shelly Power Strip 4 Gen4.
-2. **Ouvrir son point d'accès** : boutons 1 et 4 ensemble, 5 secondes ; les
-   quatre prises clignotent en rouge. Pas 10 secondes : ce serait une remise
-   à zéro d'usine.
-3. **Y connecter le PC** : l'assistant liste les points d'accès
-   `ShellyPStripG4-…` visibles et s'y connecte lui-même (`netsh`, sans
-   droits d'administrateur) — ou l'on passe par le menu Wi-Fi de Windows,
-   il s'en aperçoit. *Suivant* ne s'active que lorsque l'appareil répond à
-   `192.168.33.1`, identité et firmware affichés.
-4. **Le Wi-Fi de la maison** : les réseaux 2,4 GHz vus par le PC — la seule
-   bande de l'appareil —, avec leur signal en dBm et sa qualité ; au-dessous
-   de **-60 dBm**, l'assistant le signale. SSID modifiable (réseau caché),
-   mot de passe masquable.
-5. **L'envoi** : `WiFi.SetConfig`, puis l'attente d'une vraie confirmation —
-   l'appareil doit annoncer une adresse (`got ip`) ; une configuration
-   acceptée ne prouve rien, un mot de passe faux l'est aussi. En cas
-   d'échec, le dernier état est affiché et *Retour* ramène au mot de passe.
-   Le PC quitte ensuite le point d'accès et retrouve son Wi-Fi d'avant ; le
-   scan se lance et **présélectionne le nouvel appareil**, reconnu à sa
-   MAC — ou, faute de le trouver, l'interroge à l'adresse annoncée.
+1. **The model** — for now, the Shelly Power Strip 4 Gen4.
+2. **Open its access point**: buttons 1 and 4 together, 5 seconds; all four
+   outlets blink red. Not 10 seconds: that would be a factory reset.
+3. **Connect the PC to it**: the wizard lists the visible
+   `ShellyPStripG4-…` access points and connects by itself (`netsh`, no
+   administrator rights) — or you go through the Windows Wi-Fi menu, and it
+   notices. *Next* only becomes active once the device answers at
+   `192.168.33.1`, with its identity and firmware shown.
+4. **The home Wi-Fi**: the 2.4 GHz networks the PC can see — the device's
+   only band —, with their signal in dBm and its quality; below
+   **-60 dBm**, the wizard flags it. Editable SSID (hidden network),
+   maskable password.
+5. **Sending**: `WiFi.SetConfig`, then waiting for real confirmation — the
+   device must report an address (`got ip`); an accepted configuration
+   proves nothing, since a wrong password is accepted too. On failure, the
+   last status is shown and *Back* returns to the password.
+   The PC then leaves the access point and gets its previous Wi-Fi back; the
+   scan starts and **preselects the new device**, recognised by its MAC — or,
+   failing that, queries it at the reported address.
 
-**On ne demande jamais à l'appareil de scanner les réseaux.** Il n'a qu'une
-radio : pour scanner, il quitte le canal de son point d'accès, et certains
-exemplaires le ferment purement et simplement — la mise en service s'arrête
-alors net. C'est pourquoi la liste des réseaux vient du PC : le signal est
-une indication, d'autant plus juste que le PC est près de l'endroit où
-restera l'appareil.
+**The device is never asked to scan for networks.** It has a single radio:
+to scan, it leaves its access point's channel, and some units shut the
+access point down altogether — setup then stops dead. That is why the
+network list comes from the PC: the signal is an indication, all the more
+accurate the closer the PC is to where the device will stay.
 
-Chaque appareil reçoit une **clé courte** (`strip`, `strip2`, `plug`), et
-c'est elle que les profils référencent — une prise se désigne par
-`strip2:1`. La clé se renomme à tout moment, les références suivent.
+Each device gets a **short key** (`strip`, `strip2`, `plug`), and that is
+what profiles refer to — an outlet is written `strip2:1`. The key can be
+renamed at any time; references follow.
 
-La colonne **Signal** donne la puissance de la liaison Wi-Fi de l'appareil,
-assortie de ce qu'elle vaut : *excellent* au-dessus de -60 dBm, *good*
-jusqu'à -70, *fair* jusqu'à -78, *weak* en dessous. Un nombre négatif en
-décibels ne parle qu'à qui le pratique ; le qualificatif se lit d'un coup
-d'œil. Une multiprise à -79 dBm tient au bord du décrochage sans que rien
-ne l'annonce, et son seuil de bascule interne est justement à -80.
-Le signal est relu une fois par minute, jamais plus : une liaison ne change
-pas d'un battement de cil, et chaque interrogation pèse sur l'appareil.
+The **Signal** column gives the strength of the device's Wi-Fi link, along
+with what it is worth: *excellent* above -60 dBm, *good* down to -70, *fair*
+down to -78, *weak* below. A negative number in decibels only means
+something to those used to it; the qualifier reads at a glance. A power
+strip at -79 dBm hangs on at the edge of dropping out with nothing to warn
+you, and its internal roaming threshold is precisely -80.
+The signal is re-read once a minute, never more: a link does not change in
+the blink of an eye, and every query puts load on the device.
 
-Deux colonnes distinguent **Reached via** et **IP address**. L'application
-joint de préférence l'appareil par son nom mDNS, plus stable que son bail
-DHCP, mais c'est l'adresse qu'on veut lire — pour ouvrir son interface web,
-ou pour constater qu'elle a changé. **Cliquer sur l'adresse ouvre
-l'interface web de l'appareil** dans le navigateur ; le curseur passe en
-main au survol. Le bouton *Open web UI* fait la même chose pour l'appareil
-sélectionné.
+Two columns separate **Reached via** and **IP address**. The app prefers to
+reach the device by its mDNS name, which is more stable than its DHCP lease,
+but the address is what you want to read — to open its web interface, or to
+notice that it changed. **Clicking the address opens the device's web
+interface** in the browser; the cursor turns into a hand on hover. The
+*Open web UI* button does the same for the selected device.
 
-### 3. Associer chaque prise à son écran
+### 3. Match each outlet to its screen
 
-Onglet **Outlets** → **Identify displays**. L'assistant coupe chaque prise à
-tour de rôle et observe quel écran Windows retire, puis la rallume. Les
-autres écrans restent allumés pendant ce temps : l'assistant ne peut pas se
-couper l'herbe sous le pied. Compter une douzaine de secondes par prise.
+**Outlets** tab → **Identify displays**. The wizard switches each outlet off
+in turn and watches which screen Windows removes, then switches it back on.
+The other screens stay on meanwhile: the wizard cannot pull the rug out from
+under itself. Allow about twelve seconds per outlet.
 
-Une prise sans écran (concentrateur USB, unité centrale) ressort simplement
-comme non identifiée, ce qui est normal.
+An outlet with no screen (USB hub, PC tower) simply comes out as not
+identified, which is normal.
 
-L'identification repose sur le chemin d'interface du moniteur, qui contient
-l'UID de la sortie graphique. Deux écrans du même modèle restent donc
-distincts, et l'association survit aux redémarrages.
+Identification relies on the monitor's interface path, which contains the
+UID of the graphics output. Two screens of the same model therefore remain
+distinct, and the match survives reboots.
 
-### 4. Dire ce qui est branché
+### 4. Say what is plugged in
 
-Colonne **Type**, dans l'éditeur sous la liste :
+**Type** column, in the editor below the list:
 
-| Type | Pour | Effet |
+| Type | For | Effect |
 | --- | --- | --- |
-| **Screen** | Un écran | Seul type entrant dans l'assistant d'identification |
-| **Accessory** | Concentrateur USB, enceintes | Reste pilotable par les profils, mais **hors périmètre écran** |
-| **Not set** | Pas encore renseigné | **Aucun automatisme n'y touche** |
+| **Screen** | A screen | The only type included in the identification wizard |
+| **Accessory** | USB hub, speakers | Still controllable by profiles, but **outside the screen scope** |
+| **Not set** | Not filled in yet | **No automation touches it** |
 
-**Déclarer le type de chaque écran est obligatoire.** L'assistant ne
-manœuvre que ce qui porte explicitement le type *Screen* ; tant qu'une
-prise reste *Not set*, il la laisse tranquille et le dit.
+**Declaring the type of each screen is mandatory.** The wizard only operates
+what explicitly carries the *Screen* type; as long as an outlet stays *Not
+set*, it leaves it alone and says so.
 
-C'est délibérément l'inverse d'un choix permissif : ce qu'on ignore, on n'y
-touche pas. Une prise oubliée est précisément celle dont on ne sait pas ce
-qu'elle alimente — c'est celle-là qu'il ne faut pas couper pour voir.
+This is deliberately the opposite of a permissive choice: what we don't
+know, we don't touch. A forgotten outlet is precisely the one whose load is
+unknown — and that is the one you must not switch off just to see.
 
-Un accessoire, lui, ne fera disparaître aucun écran : le tester ne serait
-que du temps perdu et une coupure pour rien.
+An accessory, for its part, will never make a screen disappear: testing it
+would only waste time and cause a pointless power cut.
 
-### 5. Distribuer les rôles
+### 5. Assign the roles
 
-Toujours dans **Outlets**, trois cases décident de ce qui ne doit jamais
-s'éteindre au mauvais moment :
+Still in **Outlets**, three checkboxes decide what must never switch off at
+the wrong moment:
 
-Le type dit *ce qui est au bout du fil* ; les rôles ci-dessous disent
-*comment traiter la prise*. Les deux sont indépendants.
+The type says *what is at the end of the cord*; the roles below say *how to
+treat the outlet*. The two are independent.
 
-| Rôle | Effet | À cocher sur |
+| Role | Effect | Tick it on |
 | --- | --- | --- |
-| **Boot screen** | Secours si le profil mémorisé est inexploitable | L'écran principal |
-| **Critical** | N'est jamais coupée, ni par un profil ni à l'arrêt | Le concentrateur USB du clavier |
-| **Powers the PC** | Idem, et sa consommation dit si le PC tourne | L'unité centrale |
-| **Follows the PC** | Coupée pendant la veille du PC | Les écrans ; un accessoire seulement si on le demande |
+| **Boot screen** | Fallback when the remembered profile is unusable | The main screen |
+| **Critical** | Never switched off, neither by a profile nor at shutdown | The keyboard's USB hub |
+| **Powers the PC** | Same, and its power draw tells whether the PC is running | The PC tower |
+| **Follows the PC** | Switched off while the PC sleeps | Screens; an accessory only if asked |
 
-La case *Follows the PC* est cochée d'office dès qu'une prise est déclarée
-*Screen* — c'est tout l'objet du montage. Les accessoires, eux, la gardent
-vide : couper un concentrateur USB ou des enceintes n'a rien d'évident, et
-l'avoir fait d'office a déjà surpris.
+The *Follows the PC* box is ticked automatically as soon as an outlet is
+declared *Screen* — that is the whole point of the setup. Accessories keep
+it empty: switching off a USB hub or speakers is anything but obvious, and
+doing it automatically has already caught people by surprise.
 
-**Pourquoi ces rôles existent.** Pendant le POST, le BIOS et l'écran de
-connexion, rien ne tourne sur le PC pour commander les prises. Un écran ne
-peut donc pas être allumé au démarrage : il doit déjà l'être. Même chose pour
-le clavier — sans son concentrateur USB alimenté, impossible d'entrer dans le
-BIOS ni de saisir son code PIN.
+**Why these roles exist.** During POST, the BIOS and the sign-in screen,
+nothing runs on the PC to control the outlets. A screen therefore cannot be
+switched on at boot: it must already be on. Same for the keyboard — without
+its USB hub powered, there is no way to enter the BIOS or type your PIN.
 
-L'onglet **Behaviour** récapitule en clair ce qui restera alimenté à l'arrêt.
+The **Behaviour** tab sums up in plain words what will stay powered at
+shutdown.
 
-### 6. Composer les profils
+### 6. Build the profiles
 
-Onglet **Profiles** : cocher les prises alimentées par chaque profil. Les
-prises protégées y apparaissent grisées et cochées, puisqu'elles ne se
-coupent jamais.
+**Profiles** tab: tick the outlets each profile powers. Protected outlets
+appear greyed out and ticked, since they are never switched off.
 
-L'**ordre** des profils se règle avec **▲ Move up / ▼ Move down**, ou en
-**glissant** un profil dans la liste. C'est celui du menu de l'icône et des
-touches **1** à **9** de la fenêtre du raccourci.
+The **order** of profiles is set with **▲ Move up / ▼ Move down**, or by
+**dragging** a profile in the list. It is the order of the icon menu and of
+keys **1** to **9** in the shortcut window.
 
-**All on** — *Tous en marche* en français — est un profil **intégré**,
-toujours en tête : dans les réglages, le menu de l'icône et la fenêtre du
-raccourci, où il répond à la touche **1**. Il allume **toutes les prises**,
-y compris celles ajoutées plus tard, puisqu'il est recalculé à chaque usage
-et jamais enregistré. Il ne se modifie, ne se renomme ni ne se supprime, et
-son nom est réservé, dans les deux langues. Une configuration antérieure qui
-portait un profil « All on » le voit remplacé s'il allumait déjà tous les
-écrans, et renommé « All on (custom) » sinon.
+**All on** — *Tous en marche* in French — is a **built-in** profile, always
+first: in the settings, the icon menu and the shortcut window, where it
+answers key **1**. It switches on **every outlet**, including ones added
+later, since it is recomputed on every use and never saved. It cannot be
+edited, renamed or deleted, and its name is reserved in both languages. An
+earlier configuration that had an "All on" profile sees it replaced if it
+already switched on every screen, and renamed "All on (custom)" otherwise.
 
-Un profil dit **quels écrans sont allumés**, pas ce qu'on y fait. Sur
-*All on* se succèdent CAO, trading, développement, comptabilité, chacun avec
-ses fenêtres ; l'application ne mémorise donc aucune disposition de fenêtres
-par profil — ce serait le rôle d'un profil d'activité, qu'elle ne gère pas.
-Elle se contente de ramener les fenêtres restées sur un écran coupé (voir
-*Les fenêtres perdues sont ramenées*).
+A profile says **which screens are on**, not what you do on them. *All on*
+hosts CAD, trading, development and accounting in turn, each with its own
+windows; the app therefore remembers no window layout per profile — that
+would be the job of an activity profile, which it does not handle. It simply
+brings back windows left on a switched-off screen (see *Lost windows are
+brought back*).
 
-Sous les cases, le cadre **Screens** dessine les écrans **disposés comme sur
-le bureau Windows**, chacun sous le nom de sa prise. Ceux que le profil
-allume sont pleins et cernés de vert ; ceux qu'il coupe ne sont plus qu'un
-contour en pointillé. **Un clic sur un écran** allume ou coupe sa prise dans
-le profil, exactement comme sa case.
+Below the checkboxes, the **Screens** frame draws the screens **arranged as
+on the Windows desktop**, each under its outlet's name. Those the profile
+switches on are filled and outlined in green; those it switches off are just
+a dotted outline. **Clicking a screen** switches its outlet on or off in the
+profile, exactly like its checkbox.
 
-Chaque écran est dessiné à sa **taille physique** : la **diagonale** que
-son **EDID** annonce — le bloc d'identification normalisé VESA que l'écran
-transmet par le câble —, dans les proportions de sa définition. Un 27″ 4K et
-un 27″ QHD ont la même taille sur le plan, comme sur le bureau. Sous le nom :
-diagonale, définition et échelle réglée dans Windows.
+Each screen is drawn at its **physical size**: the **diagonal** its **EDID**
+reports — the VESA-standard identification block the screen sends over the
+cable —, in the proportions of its resolution. A 27″ 4K and a 27″ QHD are the
+same size on the map, as on the desk. Under the name: diagonal, resolution
+and the scaling set in Windows.
 
-* L'EDID est lu dans le registre
+* The EDID is read from the registry
   (`HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\…\Device Parameters\EDID`),
-  sans droits d'administrateur, et il y reste quand l'écran est éteint.
-* Il porte la taille deux fois : en millimètres dans le premier descripteur
-  de timing, en centimètres dans l'en-tête — ou `0×0`, « non définie ». On
-  prend le plus précis des deux qui soit renseigné.
-* Seule la **diagonale** en est retenue : certains écrans remplissent largeur
-  et hauteur d'un gabarit qui n'a même pas leur format (609×355 mm pour un
-  16:9), la diagonale restant, elle, plausible.
-* **L'EDID peut mentir.** Les écrans portables à contrôleur générique
-  partagent souvent le même : deux UPerfect de tailles différentes annoncent
-  ici tous deux 27,8″. Le plan dessine ce qui est annoncé.
-* Un écran sans EDID exploitable garde sa **taille effective** — sa
-  définition divisée par l'échelle Windows —, convertie à 96 points par
-  pouce, la densité que Windows suppose à 100 %.
+  without administrator rights, and it stays there when the screen is off.
+* It carries the size twice: in millimetres in the first timing descriptor,
+  in centimetres in the header — or `0×0`, "undefined". The more precise of
+  the two that is filled in wins.
+* Only the **diagonal** is kept: some screens fill width and height from a
+  template that does not even match their aspect ratio (609×355 mm for a
+  16:9), while the diagonal remains plausible.
+* **The EDID can lie.** Portable screens with a generic controller often
+  share the same one: two UPerfect screens of different sizes both report
+  27.8″ here. The map draws what is reported.
+* A screen without a usable EDID keeps its **effective size** — its
+  resolution divided by the Windows scaling —, converted at 96 dots per
+  inch, the density Windows assumes at 100 %.
 
-Les coordonnées de Windows étant en pixels, elles ne se recollent plus une
-fois chaque écran ramené à sa taille réelle : le plan est reconstruit de
-proche en proche depuis l'écran principal, en suivant les bords communs.
+Since Windows coordinates are in pixels, they no longer fit together once
+each screen is brought back to its real size: the map is rebuilt step by
+step from the main screen, following shared edges.
 
-La position des écrans est celle que **Windows** définit. Mais Windows oublie
-un écran dès qu'on coupe sa prise, et peut alors décaler les autres — l'écran
-principal coupé, un autre prend sa place en 0,0. L'application **retient donc
-la disposition** dans `config.json` (section `screens`), et ne la met à jour
-que lorsque **tous les écrans associés à une prise sont allumés** : c'est la
-seule qui les situe tous les uns par rapport aux autres.
+Screen positions are the ones **Windows** defines. But Windows forgets a
+screen as soon as its outlet is switched off, and may then shift the others
+— with the main screen off, another one takes its place at 0,0. The app
+therefore **remembers the layout** in `config.json` (`screens` section), and
+only updates it when **every screen matched to an outlet is on**: that is the
+only combination that places them all relative to each other.
 
-Trois occasions l'établissent :
+Three occasions capture it:
 
-| Quand | Comment |
+| When | How |
 | --- | --- |
-| **À la demande** | Bouton **Capture layout...** sous le plan. Le relevé passe en **All on** : le plan s'efface, les prises éteintes s'allument, et chaque écran **apparaît sur le plan à mesure que Windows le détecte**. Une fois la disposition relevée, une boîte dit ce qui a été appris et propose **Keep 'All on'** — qui devient le profil en cours, sélectionné dans la liste pour voir le plan allumé ; fermer la boîte revient au même — ou **Back to '<profil>'**, qui réapplique le profil d'avant, fenêtres comprises. Depuis le menu de l'icône → *Screens* → *Capture screen layout*, sans fenêtre où poser la question, tout revient aussitôt en place. Un écran que Windows ne voit pas revenir fait échouer le relevé, qui le nomme : une disposition incomplète n'est jamais retenue. |
-| **Identify displays** | L'assistant allume tout pour ses tests : il relève la disposition au passage, avant de remettre les prises dans leur état. |
-| **En continu** | Au lancement, à chaque rafraîchissement et à chaque changement d'affichage signalé par Windows, dès que tout se trouve allumé — un profil comme *All on* suffit. Deux lectures successives doivent concorder. |
+| **On demand** | **Capture layout...** button under the map. The capture switches to **All on**: the map clears, the outlets that are off switch on, and each screen **appears on the map as Windows detects it**. Once the layout is captured, a dialog says what was learned and offers **Keep 'All on'** — which becomes the current profile, selected in the list so the map shows it lit; closing the dialog does the same — or **Back to '&lt;profile&gt;'**, which reapplies the previous profile, windows included. From the icon menu → *Screens* → *Capture screen layout*, with no window to ask the question in, everything goes straight back. A screen that Windows does not see come back makes the capture fail, naming it: an incomplete layout is never kept. |
+| **Identify displays** | The wizard switches everything on for its tests: it captures the layout along the way, before putting the outlets back as they were. |
+| **Continuously** | At launch, on every refresh and on every display change reported by Windows, as soon as everything is on — a profile such as *All on* is enough. Two successive readings must agree. |
 
-**Aucun relevé sans concordance.** Avant chacun, ce que disent les prises et
-ce que voit Windows doivent correspondre exactement ; sinon le relevé est
-refusé, et la raison s'affiche sous le plan :
+**No capture without agreement.** Before each one, what the outlets say and
+what Windows sees must match exactly; otherwise the capture is refused, and
+the reason is shown under the map:
 
-| Refus si… | Pourquoi |
+| Refused if… | Why |
 | --- | --- |
-| une prise de type *Screen* n'est liée à aucun écran | on ne saurait pas vérifier son écran |
-| l'appareil d'une prise d'écran ne répond pas | son état est inconnu |
-| **une prise d'écran est coupée** | Windows a retiré son écran et peut avoir décalé les autres — même s'il le voit encore, cas d'un écran alimenté par l'USB-C du PC |
-| **une prise d'écran allumée sans écran vu par Windows** | écran en veille, câble, écran remplacé |
-| **le compte ne tombe pas juste** : prises d'écran allumées ≠ écrans physiques détectés | résume tout le reste d'un coup d'œil |
-| un écran physique inconnu est branché | voir ci-dessous |
-| deux prises liées au même écran, ou deux écrans en miroir | la disposition serait ambiguë |
-| Windows n'a pas fini de disposer les écrans | deux lectures à 2 s d'écart diffèrent |
+| a *Screen* outlet is not linked to any screen | its screen could not be checked |
+| the device of a screen outlet does not respond | its state is unknown |
+| **a screen outlet is off** | Windows removed its screen and may have shifted the others — even if it still sees it, as with a screen powered from the PC's USB-C |
+| **a screen outlet is on but Windows sees no screen** | screen asleep, cable, screen replaced |
+| **the count does not add up**: screen outlets on ≠ physical screens detected | sums up everything else at a glance |
+| an unknown physical screen is connected | see below |
+| two outlets linked to the same screen, or two mirrored screens | the layout would be ambiguous |
+| Windows has not finished arranging the screens | two readings 2 s apart differ |
 
-Les écrans **virtuels et sans fil** (Parsec, Sunshine, spacedesk, Miracast)
-sont écartés avant de compter : la technologie de sortie que rapporte
-`QueryDisplayConfig` les désigne. Un dock USB (DisplayLink) compte, lui,
-comme un écran réel.
+**Virtual and wireless** screens (Parsec, Sunshine, spacedesk, Miracast) are
+set aside before counting: the output technology reported by
+`QueryDisplayConfig` identifies them. A USB dock (DisplayLink), on the other
+hand, counts as a real screen.
 
-**Un écran branché au mur ne se reconnaît à rien** — ni la technologie de
-sortie ni l'EDID ne disent d'où vient son courant. Seule l'épreuve de
-**Identify displays** le prouve : quand chaque prise d'écran a trouvé le
-sien, ceux qui sont restés allumés pendant toutes les coupures ne dépendent
-d'aucune. Ils sont retenus comme tels (`unswitched_screens` dans
-`config.json`), dessinés en gris *sur aucune prise*, et comptés à part. Tout
-autre écran physique non lié est **inconnu** et bloque le relevé jusqu'à un
-nouveau passage de l'assistant.
+**A screen plugged into the wall cannot be recognised by anything** —
+neither the output technology nor the EDID say where its power comes from.
+Only the **Identify displays** test proves it: once each screen outlet has
+found its screen, those that stayed on through every power cut depend on
+none. They are remembered as such (`unswitched_screens` in `config.json`),
+drawn in grey *on no outlet*, and counted separately. Any other unlinked
+physical screen is **unknown** and blocks the capture until the wizard is
+run again.
 
-Après avoir déplacé un écran ou changé son échelle dans les paramètres
-d'affichage de Windows, **Capture layout...** met le plan à jour sans
-attendre.
+After moving a screen or changing its scaling in the Windows display
+settings, **Capture layout...** updates the map right away.
 
-Pourquoi tout allumer : Windows garde **une disposition par combinaison
-d'écrans branchés**. Avec seulement le LG et un UPerfect, il peut placer ce
-dernier à gauche, alors qu'il est en haut quand les quatre sont là — le plan
-en direct le montre pendant le relevé. Seule la combinaison complète dit où
-est chaque écran.
+Why switch everything on: Windows keeps **one layout per combination of
+connected screens**. With only the LG and one UPerfect, it may place the
+latter on the left, whereas it sits on top when all four are there — the
+live map shows it during the capture. Only the full combination tells where
+each screen is.
 
-Le menu de l'icône → **Screens** donne la disposition actuelle en clair —
+The icon menu → **Screens** gives the current layout in plain words —
 *UPerfect 27 — left*, *UPerfect 24 — top, shifted right, above LG Ultra and
 Acer QHD*.
 
-## La prise de l'unité centrale n'est jamais coupée
+## The PC tower's outlet is never switched off
 
-Couper le PC en marche lui fait perdre le travail en cours. La prise portant
-le rôle **Powers the PC** est donc protégée par six verrous
-indépendants, et non par un seul.
+Switching off a running PC loses the work in progress. The outlet carrying
+the **Powers the PC** role is therefore protected by six independent locks,
+not just one.
 
-| Où | Ce qu'il fait |
+| Where | What it does |
 | --- | --- |
-| `device.py` | `set_switch(off)` sur une sortie protégée est refusé **avant tout envoi réseau** |
-| `controller.py` | `set_outlet` et `_switch_many` refusent et le consignent |
-| Assistant d'identification | ne manœuvre que les prises de type *Screen*, en écartant celles tirant plus de 80 W, et revalide avant chaque coupure |
-| Script `pc_sensing` | sur l'appareil, rétablit la sortie si l'ordre vient d'ailleurs |
-| `initial_state` de la sortie | posé à `on`, pour qu'un redémarrage de la multiprise la rende alimentée |
-| Bouton de la prise | détaché : un appui sur la multiprise ne commute plus la sortie |
+| `device.py` | `set_switch(off)` on a protected output is refused **before anything is sent over the network** |
+| `controller.py` | `set_outlet` and `_switch_many` refuse and log it |
+| Identification wizard | only operates *Screen* outlets, excludes those drawing more than 80 W, and re-checks before each power cut |
+| `pc_sensing` script | on the device, restores the output if the command came from elsewhere |
+| Output `initial_state` | set to `on`, so that a power strip reboot leaves it powered |
+| Outlet button | detached: pressing it on the power strip no longer toggles the output |
 
-**Pourquoi plusieurs et pas un.** Le premier défaut venait de là : la seule
-protection était la bonne construction de la liste des prises à couper, et
-`_switch_many` envoyait ensuite les ordres sans rien revérifier. Une liste
-mal construite suffisait. Le verrou est désormais au plus près de l'appel
-réseau, là où aucun chemin ne peut le contourner.
+**Why several and not one.** The first bug came from exactly that: the only
+protection was building the list of outlets to switch off correctly, and
+`_switch_many` then sent the commands without re-checking anything. A badly
+built list was enough. The lock now sits as close as possible to the network
+call, where no code path can get around it.
 
-**Le seuil de 80 W ne dépend d'aucun marquage.** Un moniteur, même grand,
-dépasse rarement 60 W ; une unité centrale en consomme plus de 100. Cette
-limite protège donc même si le rôle n'a pas été attribué, ou a été perdu.
+**The 80 W threshold does not depend on any marking.** A monitor, even a
+large one, rarely exceeds 60 W; a PC tower draws more than 100. This limit
+therefore protects even if the role was never assigned, or was lost.
 
-**Ce que le gardien embarqué peut et ne peut pas.** Le firmware n'offre
-aucun moyen de *refuser* une commande de coupure : on ne peut que la
-corriger après coup. Mesuré à environ **180 ms**, quand une alimentation
-ATX ne tient que 16 à 20 ms sans secteur. Le gardien rétablit le courant,
-**il n'empêche pas l'arrêt**. Il sert contre les ordres venus d'ailleurs —
-application mobile, cloud, autre outil — pas à rattraper un défaut du
-logiciel. La protection réelle est en amont.
+**What the on-device guard can and cannot do.** The firmware offers no way
+to *refuse* a switch-off command: it can only be corrected after the fact.
+Measured at about **180 ms**, while an ATX power supply only holds for 16 to
+20 ms without mains. The guard restores power, **it does not prevent the
+shutdown**. It is there against commands coming from elsewhere — mobile app,
+cloud, another tool — not to catch a software bug. The real protection is
+upstream.
 
-Déplacer le rôle sur une autre prise déplace le gardien avec lui et met à
-jour les verrous immédiatement, sans redémarrage.
+Moving the role to another outlet moves the guard with it and updates the
+locks immediately, without a restart.
 
-### Le cinquième verrou vit dans la multiprise
+### The fifth lock lives in the power strip
 
-Chaque sortie porte un réglage `initial_state` qui décide de son sort **au
-démarrage de l'appareil**, hors de portée du script comme de l'application.
-Livré sur `off`, il ouvre toutes les sorties au moindre redémarrage — mise à
-jour du firmware, micro-coupure, chien de garde — et la prise du PC avec.
+Each output has an `initial_state` setting that decides its fate **when the
+device boots**, out of reach of both the script and the app. Shipped as
+`off`, it opens every output at the slightest reboot — firmware update,
+brief power dip, watchdog — the PC's outlet included.
 
-C'est arrivé : un plantage du firmware a coupé l'unité centrale en pleine
-session, sans qu'aucune des protections logicielles ait eu son mot à dire.
-Elles refusent toutes des *commandes* ; celle-ci n'en était pas une.
+It has happened: a firmware crash switched off the PC tower mid-session,
+without any of the software protections getting a say. They all refuse
+*commands*; this was not one.
 
-L'application impose donc ce réglage à chaque connexion d'un appareil :
-`on` pour la prise du PC et les prises critiques, `restore_last` pour les
-autres. Un appareil neuf, réinitialisé ou revenu d'un changement de firmware
-reprend ainsi ses garanties sans que personne y pense.
+The app therefore enforces this setting every time it connects to a device:
+`on` for the PC's outlet and critical outlets, `restore_last` for the
+others. A new device, a reset one or one coming back from a firmware change
+thus regains its guarantees without anyone having to think about it.
 
-Les écrans sont en `restore_last` et non en `off` pour une raison précise :
-si leur multiprise redémarrait pendant que le PC tourne, `off` les laisserait
-éteints indéfiniment — le script ne réagit qu'aux changements d'état du PC,
-et celui-ci n'aurait pas bougé.
+Screens use `restore_last` rather than `off` for a specific reason: if their
+power strip rebooted while the PC is running, `off` would leave them off
+indefinitely — the script only reacts to changes in the PC's state, and that
+would not have moved.
 
-### Le sixième : le bouton de la prise
+### The sixth: the outlet button
 
-Chaque prise de la Power Strip a son bouton, qui la commute au moindre appui
-— sans passer par aucune des protections ci-dessus. Un coup de balai, un
-câble qu'on range, et le PC s'éteint net.
+Each outlet on the Power Strip has its own button, which toggles it at the
+slightest press — bypassing every protection above. A sweep of the broom, a
+cable being tidied, and the PC goes off instantly.
 
-L'application **détache** donc le bouton de la prise du PC (`in_mode:
-detached`) : il ne commande plus rien, la sortie ne se pilote que par le
-logiciel. Comme `initial_state`, ce réglage vit dans l'appareil et se perd à
-la réinitialisation ; il est reposé à chaque connexion. Il s'applique à
-chaud, sans redémarrage.
+The app therefore **detaches** the button of the PC's outlet (`in_mode:
+detached`): it no longer controls anything, and the output can only be
+driven by software. Like `initial_state`, this setting lives in the device
+and is lost on reset; it is reapplied on every connection. It takes effect
+live, without a restart.
 
-## Couper vraiment tout : la détection par la consommation
+## Really switching everything off: power-based detection
 
-Onglet **PC power**. Une fois l'unité centrale branchée sur une prise mesurée
-et marquée **Powers the PC**, la multiprise peut rallumer les écrans toute
-seule dès qu'elle voit le PC consommer. C'est ce qui autorise à tout couper à
-l'arrêt, écran de démarrage compris : pendant le POST aucun logiciel ne
-tourne sur le PC, mais la multiprise, elle, continue de mesurer.
+**PC power** tab. Once the PC tower is plugged into a metered outlet and
+marked **Powers the PC**, the power strip can switch the screens back on by
+itself as soon as it sees the PC drawing power. That is what makes it
+possible to switch everything off at shutdown, boot screen included: during
+POST no software runs on the PC, but the power strip keeps measuring.
 
-La logique vit donc dans un **script mJS embarqué**, pas dans l'application.
-Celle-ci ne fait que le générer, l'installer et lui déposer, dans le KVS de
-l'appareil, la liste des prises à rallumer au prochain démarrage.
+The logic therefore lives in an **on-device mJS script**, not in the app.
+The app only generates it, installs it, and leaves in the device's KVS the
+list of outlets to switch back on at the next boot.
 
-### Les quatre réglages
+### The four settings
 
-| Réglage | Défaut | Rôle |
+| Setting | Default | Role |
 | --- | --- | --- |
-| `PC seen as running above` | 25 W | Au-dessus, le PC est considéré actif |
-| `PC seen as off below` | 15 W | En dessous, il est considéré éteint |
-| `Confirm before switching on` | 3 s | Court : on veut voir le POST |
-| `Confirm before switching off` | 90 s | **Long**, voir ci-dessous |
+| `PC seen as running above` | 25 W | Above this, the PC is considered active |
+| `PC seen as off below` | 15 W | Below this, it is considered off |
+| `Confirm before switching on` | 3 s | Short: we want to see the POST |
+| `Confirm before switching off` | 90 s | **Long**, see below |
 
-Deux seuils et non un seul : entre les deux se trouve une zone morte où
-l'état courant se maintient. Sans elle, une consommation oscillant autour
-d'une valeur unique ferait claquer le relais en boucle — ils sont donnés pour
-environ 100 000 cycles.
+Two thresholds rather than one: between them lies a dead band where the
+current state holds. Without it, a power draw hovering around a single value
+would make the relay click in a loop — relays are rated for about 100,000
+cycles.
 
-Le délai de coupure est volontairement long. Lors d'un redémarrage de
-Windows, le PC passe sous le seuil pendant dix à quinze secondes ; couper les
-écrans à cet instant précis serait le pire moment. Quatre-vingt-dix secondes
-laissent passer un redémarrage sans broncher.
+The switch-off delay is deliberately long. When Windows restarts, the PC
+drops below the threshold for ten to fifteen seconds; switching the screens
+off at that exact moment would be the worst possible timing. Ninety seconds
+lets a restart go by without a flinch.
 
-### Calibrer sur des mesures et non au jugé
+### Calibrate from measurements, not guesswork
 
-**Start measuring** dépose un second script qui échantillonne la prise et
-résume ce qu'il voit — minimum, maximum, histogramme — dans le KVS. Utiliser
-le PC normalement : le laisser au repos, le mettre en veille, l'éteindre, le
-rallumer. **Read now** relit le relevé et propose les seuils.
+**Start measuring** installs a second script that samples the outlet and
+summarises what it sees — minimum, maximum, histogram — in the KVS. Use the
+PC normally: leave it idle, put it to sleep, shut it down, turn it back on.
+**Read now** reads the results back and suggests thresholds.
 
-La séparation des paliers se fait sur la plus grande discontinuité de
-l'histogramme. Un PC produit quatre paliers — éteint, en veille, au repos, en
-charge — et c'est le vide entre « éteint ou en veille » et « allumé » qui
-compte. L'assistant refuse de proposer des seuils s'il n'a vu qu'un seul
-palier, ou si l'écart est trop faible pour être fiable.
+The levels are separated at the largest gap in the histogram. A PC produces
+four levels — off, asleep, idle, under load — and what matters is the gap
+between "off or asleep" and "on". The wizard refuses to suggest thresholds
+if it has seen only one level, or if the gap is too small to be reliable.
 
-### Ce qu'il fait sans l'application
+### What it does without the app
 
-Une fois installé, le script vit sa vie sur la multiprise : il fonctionne
-PC éteint, application fermée, ou même désinstallée.
+Once installed, the script lives its own life on the power strip: it works
+with the PC off, the app closed, or even uninstalled.
 
-| Il voit | Il fait |
+| It sees | It does |
 | --- | --- |
-| La consommation du PC franchir le seuil haut | Rallume **les prises du dernier profil** |
-| Elle repasser sous le seuil bas | **Coupe tout**, écran de démarrage compris |
+| The PC's power draw cross the upper threshold | Switches on **the outlets of the last profile** |
+| It fall back below the lower threshold | **Switches everything off**, boot screen included |
 
-### L'écran de démarrage est un secours, pas un privilège
+### The boot screen is a fallback, not a privilege
 
-Quand le profil mémorisé est exploitable, cette prise s'allume — ou non —
-**avec les autres**, comme n'importe laquelle : si le profil ne la contient
-pas, elle reste éteinte.
+When the remembered profile is usable, this outlet switches on — or not —
+**along with the others**, like any other: if the profile does not include
+it, it stays off.
 
-Elle n'est rallumée d'office que lorsque le profil ne vaut rien, et alors
-seule : le PC consomme, donc il démarre, et mieux vaut un écran qu'un
-démarrage à l'aveugle. Quatre cas déclenchent ce secours, tous vérifiés sur
-l'appareil :
+It is only switched on automatically when the profile is worthless, and then
+on its own: the PC is drawing power, so it is booting, and one screen is
+better than booting blind. Four cases trigger this fallback, all verified on
+the device:
 
-| Contenu du KVS | Conséquence |
+| KVS content | Consequence |
 | --- | --- |
-| Liste valide contenant l'écran de démarrage | Il s'allume, comme les autres du profil |
-| Liste valide **sans** lui | **Il reste éteint** |
-| Liste vide | Secours : lui seul s'allume |
-| Texte illisible | Secours |
-| Index ne correspondant à aucune prise | Secours |
+| Valid list containing the boot screen | It switches on, like the others in the profile |
+| Valid list **without** it | **It stays off** |
+| Empty list | Fallback: it alone switches on |
+| Unreadable text | Fallback |
+| Index matching no outlet | Fallback |
 
-La forme du KVS est vérifiée **avant** d'être analysée : mJS n'a pas de
-`try`/`catch`, et un `JSON.parse` sur du texte invalide interromprait la
-fonction sans jamais atteindre le repli — le PC démarrerait alors sans
-image, précisément le cas que ce repli doit couvrir.
+The shape of the KVS value is checked **before** it is parsed: mJS has no
+`try`/`catch`, and a `JSON.parse` on invalid text would abort the function
+without ever reaching the fallback — the PC would then boot with no picture,
+precisely the case the fallback is meant to cover.
 
-Conséquence côté application : tant que la détection est active, l'écran de
-démarrage **n'est plus maintenu sous tension à l'arrêt**. Le script le
-rallumera si besoin, et le garder allumé contredirait le but recherché —
-tout couper. Si la détection est désactivée, il redevient la seule garantie
-de voir le POST, et reste donc alimenté.
+Consequence on the app side: while detection is active, the boot screen **is
+no longer kept powered at shutdown**. The script will switch it back on if
+needed, and keeping it on would defeat the purpose — switching everything
+off. If detection is disabled, it becomes the only guarantee of seeing the
+POST again, and therefore stays powered.
 
-Les prises à rallumer voyagent par le KVS de l'appareil : l'application y
-dépose la liste à chaque changement de profil. C'est le seul moment où elle
-peut le lui dire — après, elle n'est plus là.
+The outlets to switch back on travel through the device's KVS: the app
+writes the list there on every profile change. That is the only moment it
+can tell the device — afterwards, it is no longer around.
 
-Si aucun profil n'a jamais été appliqué, le KVS est vide et le script s'en
-tient à l'écran de démarrage. Pour éviter ce démarrage à un seul écran sans
-explication, l'application publie l'**état courant** au lancement quand elle
-ne trouve rien : ce qui est allumé maintenant est vraisemblablement ce qu'on
-veut retrouver.
+If no profile has ever been applied, the KVS is empty and the script sticks
+to the boot screen. To avoid that single-screen boot with no explanation,
+the app publishes the **current state** at launch when it finds nothing:
+what is on right now is most likely what you want to get back.
 
-### Ce que le script ne touche jamais
+### What the script never touches
 
-Les prises marquées **Critical** sont exclues du script. C'est là que doit se
-trouver le concentrateur USB portant le clavier : rallumé en même temps que
-les écrans, il ne serait pas énuméré assez tôt pour entrer dans le BIOS.
+Outlets marked **Critical** are excluded from the script. That is where the
+USB hub carrying the keyboard belongs: switched on at the same time as the
+screens, it would not be enumerated early enough to enter the BIOS.
 
-## Protéger l'appareil par un mot de passe
+## Protecting the device with a password
 
-Onglet **Devices** → **Password...**. La protection est **optionnelle** et se
-pose depuis l'application : saisie, confirmation, puis *Apply to device*.
-L'utilisateur est toujours `admin` — seul le mot de passe se choisit.
+**Devices** tab → **Password...**. Protection is **optional** and is set
+from the app: enter it, confirm it, then *Apply to device*. The user is
+always `admin` — only the password is chosen.
 
-Sans elle, n'importe quel appareil du réseau local peut commander les
-prises, exécuter un script sur la multiprise ou changer sa configuration
-Wi-Fi, sans rien avoir à fournir.
+Without it, any device on the local network can control the outlets, run a
+script on the power strip or change its Wi-Fi configuration, without having
+to provide anything.
 
-Trois actions :
+Three actions:
 
-| Bouton | Effet |
+| Button | Effect |
 | --- | --- |
-| *Apply to device* | Pose le mot de passe sur l'appareil et le mémorise |
-| *Remember only* | Mémorise un mot de passe déjà posé ailleurs, sans toucher à l'appareil |
-| *Remove password* | Retire la protection de l'appareil |
+| *Apply to device* | Sets the password on the device and remembers it |
+| *Remember only* | Remembers a password already set elsewhere, without touching the device |
+| *Remove password* | Removes the protection from the device |
 
-### Où le mot de passe est rangé
+### Where the password is stored
 
-Chiffré par **DPAPI**, le service de Windows prévu pour cela, et le chiffré
-est rangé dans `config.json`. La clé dérive de ton compte Windows : elle
-n'est ni dans le fichier, ni dans le code source. Un `config.json` recopié
-ailleurs, lu par un autre compte ou restauré sur une autre machine ne donne
-rien.
+Encrypted with **DPAPI**, the Windows service designed for this, and the
+ciphertext is stored in `config.json`. The key derives from your Windows
+account: it is neither in the file nor in the source code. A `config.json`
+copied elsewhere, read by another account or restored on another machine
+yields nothing.
 
-Ce n'est pas un coffre-fort : un programme lancé **sous ta session** peut
-demander à Windows de déchiffrer. Cela protège du fichier qui voyage, pas
-d'un logiciel malveillant déjà en place. Un chiffrement à clé embarquée dans
-le code n'aurait, lui, été que de l'obfuscation.
+It is not a vault: a program running **in your session** can ask Windows to
+decrypt it. This protects against the file travelling, not against malware
+already in place. Encryption with a key embedded in the code would only have
+been obfuscation.
 
-### Si le mot de passe est perdu
+### If the password is lost
 
-L'application le détecte : l'appareil passe en `auth failed` dans la liste,
-un bandeau apparaît dans l'onglet **Devices**, le menu de l'icône affiche
-*Password refused*, et une bulle prévient une fois. Le bouton **Recovery
-steps** rappelle la marche à suivre :
+The app detects it: the device shows `auth failed` in the list, a banner
+appears in the **Devices** tab, the icon menu shows *Password refused*, and
+a balloon warns you once. The **Recovery steps** button recalls the
+procedure:
 
-1. Débrancher la multiprise, puis la rebrancher.
-2. Dans les **60 premières secondes**, presser ensemble les boutons **1 et 4**.
-3. Les maintenir **10 secondes pleines**, puis relâcher.
+1. Unplug the power strip, then plug it back in.
+2. Within the **first 60 seconds**, press buttons **1 and 4** together.
+3. Hold them for **a full 10 seconds**, then release.
 
-Relâcher vers 5 secondes ne fait qu'une *réinitialisation réseau*, qui
-rallume le point d'accès Wi-Fi intégré — **ouvert** sur ce modèle. Tenir les
-10 secondes.
+Releasing around 5 seconds only performs a *network reset*, which turns the
+built-in Wi-Fi access point back on — **open** on this model. Hold for the
+full 10 seconds.
 
-Une réinitialisation d'usine efface tout : mot de passe, identifiants Wi-Fi,
-scripts et noms de prises.
+A factory reset erases everything: password, Wi-Fi credentials, scripts and
+outlet names.
 
-## Raccourci des profils
+## Profile shortcut
 
-**Ctrl+Win+Alt+P**, de n'importe où : une petite fenêtre s'ouvre au premier
-plan, au centre de l'écran principal, avec un bouton par profil. Un clic
-applique le profil, sans confirmation, et la fenêtre se ferme.
+**Ctrl+Win+Alt+P**, from anywhere: a small window opens in the foreground,
+centred on the main screen, with one button per profile. A click applies the
+profile, without confirmation, and the window closes.
 
-| Touche | Effet |
+| Key | Effect |
 | --- | --- |
-| ↑ ↓ (ou ← →) | déplace la sélection, en bouclant |
-| Entrée | applique le profil sélectionné — ou, si des écrans ont été basculés sur le plan, cette sélection |
-| 1 à 9 | applique directement l'un des neuf premiers profils |
-| Échap, ou le raccourci à nouveau | ferme sans rien changer |
+| ↑ ↓ (or ← →) | moves the selection, wrapping around |
+| Enter | applies the selected profile — or, if screens were toggled on the map, that selection |
+| 1 to 9 | directly applies one of the first nine profiles |
+| Esc, or the shortcut again | closes without changing anything |
 
-La sélection part du profil en cours, marqué d'une coche. Le survol à la
-souris déplace la même sélection : il n'y a jamais deux surbrillances. La
-fenêtre se ferme aussi d'elle-même dès qu'on clique ailleurs.
+The selection starts on the current profile, marked with a check mark.
+Hovering with the mouse moves that same selection: there are never two
+highlights. The window also closes by itself as soon as you click elsewhere.
 
-Sous les boutons, **le plan des écrans**, dessiné comme dans les réglages.
-À l'ouverture, il montre ce qui est allumé en ce moment ; **dès que la
-sélection bouge** — flèches, Début, Fin, survol —, il montre **ce que
-donnerait le profil sélectionné**. **Un clic sur un écran** part de ce qui
-est affiché et bascule son état prévu, **sans rien commuter** : on peut
-partir d'un profil et l'ajuster pour cette fois. C'est **Entrée** ou **Apply** qui met la
-sélection en œuvre, Échap l'abandonne ; changer de sélection abandonne les
-clics, et le plan montre toujours ce qui arrivera si l'on valide.
+Below the buttons, **the screen map**, drawn as in the settings. On opening,
+it shows what is on right now; **as soon as the selection moves** — arrows,
+Home, End, hover —, it shows **what the selected profile would give**.
+**Clicking a screen** starts from what is displayed and toggles its planned
+state, **without switching anything**: you can start from a profile and
+adjust it for this one time. **Enter** or **Apply** carries out the
+selection, Esc discards it; changing the selection discards the clicks, and
+the map always shows what will happen if you confirm.
 
-C'est toujours une **configuration ponctuelle, hors profils** — même si
-elle ressemble à l'un d'eux : les clics **ne modifient aucun profil**, et
-aucun ne devient « en cours ». Seuls les écrans basculés sont commutés, avec
-le même enchaînement qu'un profil (allumer d'abord, couper ensuite, ramener
-les fenêtres). Au réveil, les prises reviennent telles qu'elles étaient
-avant la veille.
+It is always a **one-off configuration, outside the profiles** — even if it
+looks like one of them: the clicks **modify no profile**, and none becomes
+"current". Only the toggled screens are switched, with the same sequence as
+a profile (switch on first, switch off next, bring windows back). On wake,
+the outlets return to how they were before sleep.
 
-Le raccourci se change dans **Behaviour** → **Profile shortcut** : cases
-Ctrl / Win / Alt / Shift et une touche (lettre, chiffre ou F1 à F12). Chaque
-retouche est vérifiée auprès de Windows : *disponible*, *déjà utilisé par un
-autre programme*, ou *actif*. **Apply** ne s'active que sur une combinaison
-libre, et une combinaison sans Ctrl, Alt ni Win est refusée — elle volerait
-la touche à tous les autres programmes. Si le raccourci est pris au
-démarrage, une bulle le signale.
+The shortcut is changed in **Behaviour** → **Profile shortcut**: Ctrl / Win
+/ Alt / Shift checkboxes and a key (letter, digit or F1 to F12). Every edit
+is checked with Windows: *available*, *already used by another program*, or
+*active*. **Apply** only becomes active on a free combination, and a
+combination without Ctrl, Alt or Win is refused — it would steal the key
+from every other program. If the shortcut is taken at startup, a balloon
+says so.
 
-Une limite : quelques raccourcis de Windows, comme Win+L, ne passent pas par
-le mécanisme de réservation. Leur test répond « disponible », mais Windows
-les intercepte avant l'application.
+One limitation: a few Windows shortcuts, such as Win+L, do not go through
+the registration mechanism. Their test answers "available", but Windows
+intercepts them before the app does.
 
-## Anneaux lumineux et boutons
+## LED rings and buttons
 
-Onglet **Devices** → **LEDs...**. Livrés à pleine luminosité, les anneaux des
-prises éclairent une pièce dans le noir. Le dialogue règle, sur l'appareil
-sélectionné ou d'un coup sur toutes les Power Strips :
+**Devices** tab → **LEDs...**. Shipped at full brightness, the outlets'
+rings light up a room in the dark. The dialog sets, on the selected device
+or on all Power Strips at once:
 
-| Réglage | Effet |
+| Setting | Effect |
 | --- | --- |
-| *Power* | la couleur suit la puissance consommée ; une luminosité |
-| *State* | une couleur allumée, une autre éteinte, chacune avec sa luminosité |
-| *Off* | anneaux éteints |
-| *Night mode* | atténue les anneaux entre deux heures — proposé à 5 % de 22:00 à 07:00 |
-| *Push buttons* | détache le bouton d'une prise, qui ne la commute plus |
+| *Power* | the colour follows the power drawn; one brightness |
+| *State* | one colour when on, another when off, each with its own brightness |
+| *Off* | rings off |
+| *Night mode* | dims the rings between two times — suggested at 5 % from 22:00 to 07:00 |
+| *Push buttons* | detaches an outlet's button, which no longer toggles it |
 
-Le firmware n'a **qu'un jeu de couleurs**, valable pour toutes les prises :
-il refuse toute couleur propre à une prise. Les heures du mode nuit suivent
-l'horloge de l'appareil.
+The firmware has **only one set of colours**, shared by all outlets: it
+refuses any per-outlet colour. Night mode times follow the device's clock.
 
-Les réglages s'appliquent à chaud. Si l'appareil réclame malgré tout un
-redémarrage — constaté une seule fois, à la toute première activation du
-mode nuit — le bouton *Restart to apply* s'en charge ; les relais étant
-bistables, aucune prise ne bascule.
+Settings apply live. If the device still asks for a restart — seen only
+once, the very first time night mode was enabled — the *Restart to apply*
+button takes care of it; since the relays are bistable, no outlet toggles.
 
-La case du bouton de la prise du PC est cochée et grisée : l'application
-l'impose (voir *Le sixième : le bouton de la prise*).
+The button checkbox for the PC's outlet is ticked and greyed out: the app
+enforces it (see *The sixth: the outlet button*).
 
-## Icône
+## Icon
 
-Le jeu d'icônes est dans `windows-icons/`, à la racine, tel que le
-générateur `icongen_windows.py` du projet `App web ico` le produit — le
-dossier est recopié sans être réorganisé, pour qu'une régénération se
-résume à un remplacement.
+The icon set is in `windows-icons/`, at the root, exactly as produced by the
+`icongen_windows.py` generator from the `App web ico` project — the folder
+is copied without being reorganised, so that regenerating it comes down to
+a replacement.
 
-Neuf tailles — 16, 20, 24, 32, 40, 48, 64, 96 et 256 — rassemblées dans
-`icon.ico`, en BMP jusqu'à 48 px et en PNG au-delà, toutes avec canal
-alpha. Les PNG à côté servent à la composition de l'icône de notification
-et à l'icône de fenêtre.
+Nine sizes — 16, 20, 24, 32, 40, 48, 64, 96 and 256 — bundled in
+`icon.ico`, as BMP up to 48 px and PNG above, all with an alpha channel.
+The PNGs alongside are used to compose the notification icon and the window
+icon.
 
-Dans la zone de notification, l'icône n'est pas figée : le visuel porte une
-**pastille d'état** en bas à droite — verte quand des écrans sont
-alimentés, grise quand tout est coupé, orange quand un appareil manque à
-l'appel ou refuse son mot de passe, rouge quand plus rien ne répond. Le
-décompte des prises et la puissance tiennent dans l'infobulle : à seize
-pixels de côté, une pastille se lit, un décompte non.
+In the notification area, the icon is not static: the image carries a
+**status dot** in the bottom right — green when screens are powered, grey
+when everything is off, orange when a device is missing or refuses its
+password, red when nothing responds any more. The outlet count and the
+power fit in the tooltip: at sixteen pixels square, a dot can be read, a
+count cannot.
 
-L'icône est composée à la volée, à partir de la taille exacte demandée
-plutôt que d'une seule image que Windows réduirait. Cela suppose de lire
-les pixels du PNG, ce que la bibliothèque standard ne fait pas :
-`win/images.py` contient un décodeur minimal, limité à ce dont
-l'application a besoin.
+The icon is composed on the fly, from the exact size requested rather than
+from a single image that Windows would shrink. That requires reading the
+PNG's pixels, which the standard library does not do: `win/images.py`
+contains a minimal decoder, limited to what the app needs.
 
-Pour changer l'icône, régénérer le jeu avec `icongen_windows.py` et
-remplacer le dossier `windows-icons/` par celui qu'il produit. Les
-contraintes Windows sont consignées dans
+To change the icon, regenerate the set with `icongen_windows.py` and replace
+the `windows-icons/` folder with the one it produces. The Windows
+constraints are documented in
 [docs/windows-icons.md](docs/windows-icons.md).
 
-## Langue
+## Language
 
-Onglet **Behaviour** → **Appearance** → **Language** : *Follow Windows*,
-*English* ou *Français*. Anglais par défaut, comme le reste de
-l'application.
+**Behaviour** tab → **Appearance** → **Language**: *Follow Windows*,
+*English* or *Français*. English by default, like the rest of the app.
 
-Changer de langue **reconstruit la fenêtre**. Les widgets Tk lisent leur
-texte une fois, à la construction ; les retraduire après coup demanderait
-de tenir un registre de chacun, et le moindre oubli laisserait un libellé
-dans l'ancienne langue. Une fenêtre à moitié traduite est pire que pas de
-traduction du tout : elle oblige à traduire mentalement à chaque coup
-d'œil.
+Changing the language **rebuilds the window**. Tk widgets read their text
+once, when they are built; re-translating them afterwards would require
+keeping a registry of every one of them, and the slightest omission would
+leave a label in the old language. A half-translated window is worse than no
+translation at all: it forces you to translate mentally at every glance.
 
-Le texte anglais sert de clé de traduction. Il reste donc lisible dans le
-code, et une entrée manquante retombe sur l'anglais plutôt que d'afficher
-un identifiant nu. Le catalogue est dans
-[shelly_screens/locale_fr.py](shelly_screens/locale_fr.py) ; il n'y a ni
-fichier à compiler, ni dépendance.
+The English text serves as the translation key. It therefore stays readable
+in the code, and a missing entry falls back to English rather than showing
+a bare identifier. The catalogue is in
+[shelly_screens/locale_fr.py](shelly_screens/locale_fr.py); there is no file
+to compile and no dependency.
 
-Les phrases à valeurs variables utilisent des champs nommés plutôt que des
-f-strings : une f-string serait évaluée avant la traduction, et la chaîne
-obtenue ne servirait plus de clé.
+Sentences with variable values use named fields rather than f-strings: an
+f-string would be evaluated before translation, and the resulting string
+would no longer work as a key.
 
-## Thèmes
+## Themes
 
-Onglet **Behaviour** → **Appearance** : *Follow Windows*, *Light* ou *Dark*.
-Le changement est immédiat, sans rouvrir la fenêtre, et en mode *Follow
-Windows* un basculement du thème de Windows est suivi dans les trois
-secondes.
+**Behaviour** tab → **Appearance**: *Follow Windows*, *Light* or *Dark*.
+The change is immediate, without reopening the window, and in *Follow
+Windows* mode a switch of the Windows theme is picked up within three
+seconds.
 
-La couleur d'accentuation est reprise de tes réglages Windows. Elle n'est
-pas utilisée telle quelle : sur fond sombre, le bleu par défaut ne laisserait
-que 2,3:1 de contraste à un texte blanc. Elle est donc éclaircie juste ce
-qu'il faut, sans toucher à sa teinte, et la couleur du texte posé dessus est
-choisie par calcul de contraste WCAG. En mode clair l'accent est conservé tel
-quel, puisqu'il ressort déjà.
+The accent colour is taken from your Windows settings. It is not used as
+is: on a dark background, the default blue would leave only 2.3:1 contrast
+for white text. It is therefore lightened just as much as needed, without
+touching its hue, and the colour of the text on top of it is chosen by WCAG
+contrast calculation. In light mode the accent is kept as is, since it
+already stands out.
 
-L'interface utilise le thème ttk `clam` dans les trois cas. Le thème natif
-`vista` est plus joli en clair, mais il dessine ses widgets avec des images
-du système : ses fonds ne se colorent pas et le mode sombre y resterait
-blanc par endroits. La barre de titre, elle, n'appartient pas à Tk — elle
-bascule via `DwmSetWindowAttribute`.
+The interface uses the ttk `clam` theme in all three cases. The native
+`vista` theme looks nicer in light mode, but it draws its widgets with
+system images: their backgrounds cannot be coloured and dark mode would stay
+white in places. The title bar, for its part, does not belong to Tk — it
+switches via `DwmSetWindowAttribute`.
 
-## Ce que fait l'application toute seule
+## What the app does on its own
 
-* **Mise en veille et arrêt de Windows** — coupe toutes les prises sauf
-  l'écran de démarrage, les prises critiques et celle du PC. La coupure est
-  synchrone et sans temporisation : Windows n'accorde que quelques instants
-  avant de suspendre le processus.
-* **Réveil** — attend trois secondes que le réseau revienne, puis réapplique
-  le dernier profil.
-* **Changement de profil** — **allume** les écrans manquants, attend que
-  Windows les voie, **puis seulement** coupe le reste, et ramène les
-  fenêtres restées sur un écran coupé.
+* **Windows sleep and shutdown** — switches off every outlet except the boot
+  screen, critical outlets and the PC's. The switch-off is synchronous and
+  without delay: Windows only grants a few moments before suspending the
+  process.
+* **Wake** — waits three seconds for the network to come back, then
+  reapplies the last profile.
+* **Profile change** — **switches on** the missing screens, waits for
+  Windows to see them, **and only then** switches off the rest, and brings
+  back windows left on a switched-off screen.
 
-Allumer avant de couper évite de se retrouver, ne serait-ce qu'un instant,
-sans aucun écran, et laisse aux dalles leurs quelques secondes
-d'initialisation.
+Switching on before switching off avoids ending up, even for an instant,
+with no screen at all, and gives the panels their few seconds of
+initialisation.
 
-### Les fenêtres perdues sont ramenées
+### Lost windows are brought back
 
-À la fin d'un changement de profil, toute fenêtre restée hors des écrans
-allumés est ramenée sur **l'écran allumé le plus proche** — option
-*Behaviour* → *Windows*, active par défaut.
+At the end of a profile change, any window left outside the screens that are
+on is moved to **the nearest screen that is on** — option *Behaviour* →
+*Windows*, enabled by default.
 
-* **Écran allumé** veut dire listé par Windows **et** dont la prise n'est pas
-  coupée par le profil. Un moniteur alimenté par l'USB-C du PC reste listé
-  une fois sa prise coupée : une fenêtre posée dessus est perdue, même si
-  Windows ne le voit pas ainsi.
-* **Perdue** veut dire que sa barre de titre ne peut être attrapée sur aucun
-  écran allumé. Une fenêtre à cheval sur deux écrans, encore saisissable,
-  n'est pas touchée.
-* La fenêtre garde sa taille — réduite seulement si elle ne tient pas — et
-  se pose au plus près de sa place d'origine, sans passer au premier plan.
-  Réduite, elle le reste et reviendra au bon endroit ; agrandie, elle est
-  agrandie de nouveau sur son nouvel écran.
-* Seules les fenêtres qui se trouvaient sur un écran réel sont concernées.
-  Certains programmes garent volontairement des fenêtres très loin du
-  bureau : les faire surgir serait une nuisance.
+* **Screen that is on** means listed by Windows **and** whose outlet is not
+  switched off by the profile. A monitor powered from the PC's USB-C stays
+  listed once its outlet is off: a window sitting on it is lost, even though
+  Windows does not see it that way.
+* **Lost** means its title bar cannot be grabbed on any screen that is on. A
+  window straddling two screens, still grabbable, is left alone.
+* The window keeps its size — shrunk only if it does not fit — and is placed
+  as close as possible to where it was, without coming to the foreground.
+  Minimised, it stays minimised and will come back in the right place;
+  maximised, it is maximised again on its new screen.
+* Only windows that were on a real screen are affected. Some programs
+  deliberately park windows far away from the desktop: making them pop up
+  would be a nuisance.
 
-Le journal nomme chaque fenêtre ramenée.
+The log names every window brought back.
 
-Un appareil injoignable n'empêche pas les autres de répondre : ses prises
-sont laissées telles quelles et signalées dans le menu.
+An unreachable device does not stop the others from responding: its outlets
+are left as they are and flagged in the menu.
 
-## Organisation du code
+## Code layout
 
 ```
-main.py                      point d'entrée
-windows-icons/               jeu d'icônes, produit par icongen_windows.py
-install-startup.ps1          raccourcis de lancement sans console
-run-console.cmd              lancement de diagnostic, avec console
-config.json                  configuration (généré au premier lancement)
-shelly-screens.log           journal (généré, rotatif)
+main.py                      entry point
+windows-icons/               icon set, produced by icongen_windows.py
+install-startup.ps1          console-free launch shortcuts
+run-console.cmd              diagnostic launch, with a console
+config.json                  configuration (generated on first launch)
+shelly-screens.log           log (generated, rotating)
 shelly_screens/
-  device.py                  client JSON-RPC Shelly Gen2+
-  device_services.py         services optionnels des appareils (Matter, Cloud...)
-  device_leds.py             anneaux lumineux et boutons des Power Strips
-  discovery.py               localisation : adresse connue, mDNS, balayage
-  config.py                  modèle de configuration, migration, persistance
-  controller.py              enchaînement appareils / prises / écrans / fenêtres
-  sensing.py                 installation et suivi des scripts embarqués
-  power_history.py           historique de consommation (SQLite)
-  screen_layout.py           concordance prises / écrans avant un relevé
-  product.py                 auteur, liens, appareils validés (onglet About)
-  wifi_setup.py              première mise en service : point d'accès, Wi-Fi
-  app.py                     icône, menu, événements système
-  scripts/                   pc_sensing.js, pc_probe.js (exécutés sur l'appareil)
+  device.py                  Shelly Gen2+ JSON-RPC client
+  device_services.py         optional device services (Matter, Cloud...)
+  device_leds.py             Power Strip LED rings and buttons
+  discovery.py               location: known address, mDNS, scan
+  config.py                  configuration model, migration, persistence
+  controller.py              orchestration of devices / outlets / screens / windows
+  sensing.py                 installing and monitoring the on-device scripts
+  power_history.py           power consumption history (SQLite)
+  screen_layout.py           outlet / screen agreement before a capture
+  product.py                 author, links, validated devices (About tab)
+  wifi_setup.py              first setup: access point, Wi-Fi
+  app.py                     icon, menu, system events
+  scripts/                   pc_sensing.js, pc_probe.js (run on the device)
   win/
-    api.py                   ctypes communs, conscience du DPI
-    monitors.py              énumération des écrans, clé stable
-    wlan.py                  carte Wi-Fi du PC (netsh) : lister, rejoindre, quitter
-    layout.py                fenêtres restées sur un écran coupé
-    icon.py                  génération de l'icône
-    shell.py                 fenêtre cachée, zone de notification, messages
-    hotkey.py                raccourcis globaux : lecture, test de disponibilité
-  ui/settings.py             fenêtre de réglages (tkinter)
-  ui/history_window.py       fenêtre d'historique de consommation
-  ui/profile_picker.py       fenêtre de choix des profils (raccourci global)
-  ui/screen_map.py           plan des écrans de l'onglet Profiles
-  ui/first_setup.py          assistant de première mise en service
+    api.py                   shared ctypes, DPI awareness
+    monitors.py              screen enumeration, stable key
+    wlan.py                  the PC's Wi-Fi adapter (netsh): list, join, leave
+    layout.py                windows left on a switched-off screen
+    icon.py                  icon generation
+    shell.py                 hidden window, notification area, messages
+    hotkey.py                global shortcuts: reading, availability test
+  ui/settings.py             settings window (tkinter)
+  ui/history_window.py       power consumption history window
+  ui/profile_picker.py       profile picker window (global shortcut)
+  ui/screen_map.py           screen map in the Profiles tab
+  ui/first_setup.py          first setup wizard
 ```
 
-## Points techniques
+## Technical notes
 
-**Références de prise.** Une prise se désigne par `<clé appareil>:<sortie>`,
-par exemple `strip2:1`. La clé est stable même si l'adresse IP change, et le
-renommage d'une clé se propage aux prises et aux profils.
+**Outlet references.** An outlet is written `<device key>:<output>`, for
+example `strip2:1`. The key is stable even if the IP address changes, and
+renaming a key propagates to outlets and profiles.
 
-**Conscience du DPI.** Le processus passe en Per-Monitor V2 dès l'import de
-`win.api`. Sans cela, Windows virtualise les coordonnées des fenêtres sur les
-écrans mis à l'échelle et les positions relevées sont fausses.
+**DPI awareness.** The process switches to Per-Monitor V2 as soon as
+`win.api` is imported. Without it, Windows virtualises window coordinates on
+scaled screens and the recorded positions are wrong.
 
-**Identification des écrans.** `\.\DISPLAY1` n'est qu'un rang d'énumération
-qui change dès qu'un écran s'allume ou s'éteint ; le modèle ne distingue pas
-deux écrans identiques. On utilise le chemin d'interface renvoyé par
-`EnumDisplayDevices` avec `EDD_GET_DEVICE_INTERFACE_NAME`, réduit à
-`<matériel>#UID<sortie>`.
+**Screen identification.** `\.\DISPLAY1` is only an enumeration rank that
+changes as soon as a screen turns on or off; the model cannot tell two
+identical screens apart. We use the interface path returned by
+`EnumDisplayDevices` with `EDD_GET_DEVICE_INTERFACE_NAME`, reduced to
+`<hardware>#UID<output>`.
 
-**Authentification.** Digest SHA-256, utilisateur `admin` imposé. Le calcul
-est celui du RFC 7616, avec `ha2` dérivé de la méthode et de l'URI. La
-documentation de Shelly décrit pour d'autres firmwares un `ha2` constant
-calculé sur `dummy_method:dummy_uri` ; **ce firmware-ci le refuse** —
-vérifié sur l'appareil, seul le calcul standard passe. La différence
-compte : un `ha2` constant rendrait la réponse indépendante de la requête,
-donc rejouable pour déclencher une autre commande.
+**Authentication.** SHA-256 Digest, with the user forced to `admin`. The
+computation is the RFC 7616 one, with `ha2` derived from the method and the
+URI. Shelly's documentation describes, for other firmwares, a constant `ha2`
+computed over `dummy_method:dummy_uri`; **this firmware rejects it** —
+verified on the device, only the standard computation works. The difference
+matters: a constant `ha2` would make the response independent of the
+request, and therefore replayable to trigger another command.
 
-**Adresses IP.** La résolution essaie d'abord le **nom mDNS**
-`<device-id>.local`, puis l'adresse mémorisée, puis un balayage des
-sous-réseaux locaux, en vérifiant à chaque fois l'adresse MAC.
+**IP addresses.** Resolution first tries the **mDNS name**
+`<device-id>.local`, then the remembered address, then a scan of the local
+subnets, checking the MAC address every time.
 
-Le nom passe en premier même quand l'adresse répond encore : un bail DHCP se
-renouvelle sans prévenir, et l'adresse retenue finit gravée ailleurs — dans le
-script embarqué, qui ne se corrige pas tout seul. Le nom, lui, suit
-l'appareil : il survit à un changement de sous-réseau, de firmware, et même à
-une réinitialisation d'usine, puisqu'il dérive du modèle et de l'adresse MAC.
+The name comes first even when the address still answers: a DHCP lease
+renews without warning, and the remembered address ends up hard-coded
+elsewhere — in the on-device script, which does not fix itself. The name, on
+the other hand, follows the device: it survives a subnet change, a firmware
+change, and even a factory reset, since it derives from the model and the
+MAC address.
 
-Une première résolution mDNS interroge le réseau en multicast et demande
-jusqu'à trois secondes, là où une adresse connue répond en quelques
-millisecondes ; elle dispose donc d'un délai propre, plus généreux.
+A first mDNS resolution queries the network over multicast and takes up to
+three seconds, whereas a known address answers in a few milliseconds; it
+therefore gets its own, more generous timeout.
 
-Les requêtes visent explicitement l'**IPv4** : ces appareils annoncent aussi
-une adresse lien-local `fe80::`, sur laquelle la connexion échoue faute
-d'identifiant de portée.
+Requests explicitly target **IPv4**: these devices also advertise a
+link-local `fe80::` address, on which the connection fails for lack of a
+scope identifier.
 
-**Reconnexions bridées.** Une lecture qui échoue ne déclenche plus une
-résolution complète : l'appareil est laissé tranquille 15 s, puis 30, puis 60,
-et le compteur repart à zéro dès qu'il répond. Une même résolution ne se
-retente pas plus d'une fois par demi-minute. L'ancien comportement faisait
-l'inverse — il accablait de requêtes un appareil déjà en difficulté, ce qui a
-précédé deux réinitialisations par chien de garde.
+**Throttled reconnections.** A failed read no longer triggers a full
+resolution: the device is left alone for 15 s, then 30, then 60, and the
+counter resets as soon as it responds. The same resolution is not retried
+more than once every half-minute. The old behaviour did the opposite — it
+flooded an already struggling device with requests, which preceded two
+watchdog resets.
 
-**Format de configuration.** La version 2 remplace l'appareil unique de la
-version 1 par une liste. Une configuration en version 1 est migrée à la
-volée, sans intervention.
+**Configuration format.** Version 2 replaces version 1's single device with
+a list. A version 1 configuration is migrated on the fly, with no
+intervention.
 
-## Historique de consommation
+## Power consumption history
 
-Menu de l'icône → **Consumption history...**, ou onglet **PC power** →
-**Open history...**. Une fenêtre à part, pour relire une journée, une semaine
-ou un mois de consommation, **prise par prise** : un sélecteur *Outlet* en
-haut à gauche passe de l'une à l'autre. La prise du PC s'ouvre d'abord, puis
-la fenêtre retient le dernier choix.
+Icon menu → **Consumption history...**, or **PC power** tab → **Open
+history...**. A separate window, to review a day, a week or a month of power
+consumption, **outlet by outlet**: an *Outlet* selector at the top left
+switches from one to another. The PC's outlet opens first, then the window
+remembers the last choice.
 
-### Ce qui est enregistré
+### What is recorded
 
-**Toutes les prises configurées** sont suivies, chacune sous son nom, dans
-une seule base. Rien n'est interrogé en plus : l'historique se nourrit des
-relevés que l'application fait déjà toutes les cinq secondes. Il ne retient
-que ce qui apprend quelque chose — une variation d'au moins 3 % ou 1 W, et un
-point d'ancrage par minute. Les points d'un même relevé s'écrivent en une
-seule transaction. Compter environ 1 à 4 Mo par prise et par mois.
+**Every configured outlet** is tracked, each under its name, in a single
+database. Nothing extra is queried: the history feeds on the readings the
+app already takes every five seconds. It only keeps what tells something
+new — a change of at least 3 % or 1 W, plus one anchor point per minute. The
+points from a single reading are written in one transaction. Allow roughly
+1 to 4 MB per outlet per month.
 
-Une prise dont l'appareil ne répond pas laisse un trou, pas un zéro : on
-n'invente pas une mesure qu'on n'a pas faite.
+An outlet whose device does not respond leaves a gap, not a zero: we do not
+invent a measurement we did not take.
 
-**Seule la prise du PC est suivie pendant la veille.** Les autres ne le sont
-qu'en direct, tant que l'application tourne : pendant la veille, les écrans
-sont coupés et seuls quelques concentrateurs USB consomment, ce qui ne vaut
-pas d'user la mémoire flash des multiprises à le noter.
+**Only the PC's outlet is tracked during sleep.** The others are only
+recorded live, while the app is running: during sleep, the screens are off
+and only a few USB hubs draw power, which is not worth wearing out the power
+strips' flash memory to log.
 
-Pendant la veille ou l'arrêt, l'application ne tourne plus, mais le releveur
-embarqué dans la multiprise continue de mesurer. Au lancement et à chaque
-réveil, ses relevés comblent le trou. Il date désormais son dernier relevé,
-ce qui situe une veille à la seconde près plutôt qu'au quart d'heure.
+During sleep or shutdown, the app is no longer running, but the on-device
+power logger in the power strip keeps measuring. At launch and on every
+wake, its readings fill the gap. It now timestamps its last reading, which
+locates a sleep period to the second rather than to the quarter hour.
 
-La récupération attend que la multiprise du PC réponde, et se retente tant
-qu'elle échoue : au réveil, le réseau revient souvent en plusieurs temps.
-Chaque relevé du releveur est gardé s'il tombe dans un trou des relevés
-directs — aucun dans les trois minutes qui le précèdent — quelle que soit
-sa date : les premiers relevés pris après le réveil ne masquent donc pas la
-nuit qui les précède.
+Retrieval waits for the PC's power strip to respond, and keeps retrying as
+long as it fails: on wake, the network often comes back in several stages.
+Each logger reading is kept if it falls in a gap in the live readings —
+none in the three minutes before it — whatever its date: the first readings
+taken after wake therefore do not hide the night before them.
 
-Les mesures sont dans une base **SQLite**, format normalisé et inclus
-dans Python : `history/power_history.sqlite3`, à côté de la configuration.
-Leur profondeur se règle dans **PC power** → *Keep history for*, de 1 à
-365 jours ; au-delà, les points les plus anciens sont élagués.
+The measurements are stored in a **SQLite** database, a standard format
+included with Python: `history/power_history.sqlite3`, next to the
+configuration. How far back it goes is set in **PC power** → *Keep history
+for*, from 1 to 365 days; beyond that, the oldest points are pruned.
 
-La base se lit sans l'application — *DB Browser for SQLite*, Excel,
-Grafana ou n'importe quel langage — et se décrit elle-même :
+The database can be read without the app — *DB Browser for SQLite*, Excel,
+Grafana or any language — and describes itself:
 
-| Objet | Contenu |
+| Object | Content |
 | --- | --- |
-| `sample` | Les points : prise, instant Unix UTC, watts, provenance |
-| `outlet` | Les prises, désignées par l'**adresse MAC** et le numéro de sortie |
-| `info` | Ce que contient chaque colonne, en clair |
-| `sample_readable` | Les mêmes points avec l'heure locale en texte |
+| `sample` | The points: outlet, Unix UTC timestamp, watts, source |
+| `outlet` | The outlets, identified by **MAC address** and output number |
+| `info` | What each column contains, in plain words |
+| `sample_readable` | The same points with local time as text |
 
-Une prise y est désignée par la MAC de la multiprise, pas par la clé de
-l'appareil, qui change au gré des renommages. Son **nom** (`outlet.label`)
-suit, lui, les renommages de la prise : c'est ce qu'on lit en ouvrant la base
-sans l'application. Une prise retirée de la configuration reste consultable,
-marquée *(removed)*, jusqu'à ce que l'élagage emporte ses points. La version
-du schéma est dans
-`PRAGMA user_version`. Le journal WAL permet à la fenêtre de lire pendant
-que l'application écrit, et protège la base d'une coupure de courant.
+An outlet is identified there by the power strip's MAC, not by the device
+key, which changes with renames. Its **name** (`outlet.label`), on the other
+hand, follows the outlet's renames: that is what you read when opening the
+database without the app. An outlet removed from the configuration can still
+be viewed, marked *(removed)*, until pruning takes its points away. The
+schema version is in
+`PRAGMA user_version`. The WAL journal lets the window read while the app
+writes, and protects the database from a power cut.
 
-Un premier format, binaire et maison, a précédé SQLite. Il est repris
-automatiquement au lancement, et chaque fichier migré est conservé, renommé
-en `.bin.migrated`, tant qu'on n'a pas vérifié la base.
+A first, home-made binary format preceded SQLite. It is imported
+automatically at launch, and each migrated file is kept, renamed to
+`.bin.migrated`, until the database has been checked.
 
-### Naviguer
+### Navigating
 
-| Geste | Effet |
+| Gesture | Effect |
 | --- | --- |
-| Molette | Zoom autour du pointeur |
-| Glisser | Défilement dans le temps |
-| ◀ ▶, flèches du clavier | Recul ou avance d'une demi-fenêtre |
-| 1 h … 30 j | Durée affichée |
-| **Live**, double-clic, `Fin` | Retour au présent, qui suit alors les nouvelles mesures |
-| Survol | Heure et puissance exactes, et leur provenance |
+| Mouse wheel | Zoom around the pointer |
+| Drag | Scroll through time |
+| ◀ ▶, arrow keys | Move back or forward by half a window |
+| 1 h … 30 d | Displayed duration |
+| **Live**, double-click, `End` | Back to the present, which then follows new measurements |
+| Hover | Exact time and power, and their source |
 
-Sous le graphique : minimum, moyenne pondérée par la durée, maximum et
-**énergie consommée** sur la période visible, avec la part effectivement
-mesurée. Un pic de dix secondes ne pèse pas comme une heure de veille.
+Below the chart: minimum, time-weighted average, maximum and **energy
+consumed** over the visible period, with the share actually measured. A
+ten-second spike does not weigh as much as an hour of sleep.
 
-Une période sans aucune mesure reste un **trou** : relier ses deux bords
-ferait croire à une consommation qu'on n'a pas vue.
+A period with no measurement at all stays a **gap**: joining its two edges
+would suggest a power draw that was never observed.
 
-### Exporter
+### Exporting
 
-Menu **Export** de la fenêtre. L'export porte sur la **période affichée** :
-ce qu'on voit est ce qu'on exporte. Deux variantes :
+The window's **Export** menu. The export covers the **displayed period**:
+what you see is what you export. Two variants:
 
-| Variante | Séparateurs | Pour |
+| Variant | Separators | For |
 | --- | --- | --- |
-| **CSV standard** | virgule, point décimal, heure ISO 8601 | tout outil — la norme RFC 4180 |
-| **CSV pour Excel** | ceux des réglages régionaux de Windows | un double-clic dans Excel |
+| **CSV, standard** | comma, decimal point, ISO 8601 time | any tool — the RFC 4180 standard |
+| **CSV for Excel** | those from the Windows regional settings | a double-click in Excel |
 
-Excel en français attend des points-virgules et des virgules décimales ; un
-CSV standard s'y entasse dans la première colonne. La seconde variante lit
-les séparateurs dans les réglages de Windows pour que l'ouverture marche.
+French-locale Excel expects semicolons and decimal commas; a standard CSV
+gets crammed into the first column there. The second variant reads the
+separators from the Windows settings so that opening it works.
 
-Chaque ligne porte `duration_s`, le temps pendant lequel la valeur a tenu.
-L'énergie en watt-heures s'en déduit d'une seule formule —
-`SOMMEPROD(watts; duration_s) / 3600` —, sans reconstituer la chronologie.
+Each row carries `duration_s`, the time during which the value held. Energy
+in watt-hours follows from a single formula —
+`SUMPRODUCT(watts, duration_s) / 3600` —, without rebuilding the timeline.
 
-### Log ou linéaire
+### Log or linear
 
-L'échelle logarithmique est recadrée sur ce qui est visible. Elle s'impose
-dès que la veille et l'activité partagent l'écran : 2 W et 200 W y restent
-lisibles ensemble. Sur une plage d'activité seule, l'échelle linéaire rend
-les écarts proportionnels — la lecture la plus honnête d'une consommation,
-puisque l'énergie, elle, est linéaire. Les deux sont à un clic.
+The logarithmic scale is fitted to what is visible. It is the right choice
+as soon as sleep and activity share the screen: 2 W and 200 W both stay
+readable. On a period of activity alone, the linear scale makes differences
+proportional — the most honest reading of a power draw, since energy itself
+is linear. Both are one click away.
 
-### Limites
+### Limitations
 
-Le releveur embarqué garde **84 relevés**. Une veille est plate, un point
-par quart d'heure suffit : cela couvre environ 21 heures. Un arrêt plus
-long — un week-end — ne conserve que ses dernières 21 heures.
+The on-device power logger keeps **84 readings**. Sleep is flat, one point
+per quarter hour is enough: that covers about 21 hours. A longer shutdown —
+a weekend — only keeps its last 21 hours.
 
-Seule la prise du PC bénéficie de ce releveur. D'autres prises pourront
-être suivies plus tard, mais uniquement quand l'application tourne.
+Only the PC's outlet benefits from this logger. Other outlets could be
+tracked later, but only while the app is running.
 
 ## Version
 
-Deux nombres, et rien de plus. Le numéro est dans
-[shelly_screens/__init__.py](shelly_screens/__init__.py), affiché dans le
-titre de la fenêtre de réglages et sur la première ligne du journal.
+Two numbers, and nothing more. The number is in
+[shelly_screens/__init__.py](shelly_screens/__init__.py), shown in the
+settings window title and on the first line of the log.
 
-La **majeure** change quand la configuration existante ne suffit plus telle
-quelle : un format de fichier qui évolue, un réglage dont le sens change, un
-script embarqué incompatible avec l'ancien. Autrement dit, quand une mise à
-jour demande de vérifier quelque chose plutôt que de simplement redémarrer.
+The **major** changes when the existing configuration is no longer enough as
+is: a file format that evolves, a setting whose meaning changes, an
+on-device script incompatible with the old one. In other words, when an
+update requires checking something rather than simply restarting.
 
-La **mineure** change à chaque itération — correction, ajout, mesure de
-robustesse — même pour un détail. Son rôle n'est pas de résumer l'ampleur du
-travail mais de répondre à une seule question, posée un jour de panne :
-*quelle version tourne devant moi ?* Un journal qui ne dit pas de quel code
-il parle fait perdre plus de temps qu'il n'en fait gagner.
+The **minor** changes on every iteration — fix, addition, robustness
+measure — even for a detail. Its role is not to summarise the extent of the
+work but to answer a single question, asked on a day something breaks:
+*which version is running in front of me?* A log that does not say which
+code it is about wastes more time than it saves.
 
-## Dépannage
+## Troubleshooting
 
-| Symptôme | Piste |
+| Symptom | What to check |
 | --- | --- |
-| Icône rouge | Aucun appareil joignable. `Devices` → `Reconnect`, ou vérifier l'alimentation des multiprises. |
-| Un appareil « offline » | Les autres continuent de fonctionner. Ses prises apparaissent avec un état `-` et ne sont pas manœuvrées. |
-| Une prise reste « not identified » | Normal pour un concentrateur USB ou l'unité centrale. Pour un écran : relancer l'assistant, l'écran mettait peut-être plus de douze secondes à se déconnecter. |
-| Une fenêtre reste sur un écran éteint | Vérifier *Behaviour* → *Windows*, et que la prise de cet écran lui est associée (**Identify displays**) : sans cela, un écran alimenté par l'USB-C du PC reste compté comme allumé. |
-| Changement de profil très lent | Un écran attendu ne revient pas : l'attente va jusqu'au délai maximal (20 s par défaut, réglable dans `Behaviour`). |
-| Rien au démarrage du PC | Vérifier qu'une prise porte le rôle **Boot screen**, et que le concentrateur USB du clavier est **Critical**. |
-| Une veille ne coupe plus rien | La voie de mesure du firmware peut se figer : l'application le détecte et le signale dans le menu de l'icône, avec un bouton pour redémarrer la multiprise. Un redémarrage est sans danger — relais bistables, et `initial_state` ramène la prise du PC sous tension. |
-| Les écrans se coupent alors que le PC tourne | Seuil de coupure trop haut. Relancer une mesure, ou le baisser dans `PC power`. |
-| Rien ne se rallume au démarrage du PC | Vérifier dans `PC power` que le script est `running`, et qu'une prise porte le rôle **Boot screen**. |
-| Le clavier ne répond pas dans le BIOS | Son concentrateur USB doit être marqué **Critical**, pas seulement piloté par le script. |
-| Une console s'ouvre au lancement | Le raccourci doit viser `pythonw.exe`, pas `python.exe`. Le réinstaller avec `install-startup.ps1`. |
-| Aucune trace de ce que fait l'application | Menu de l'icône → **Open log file**, ou ouvrir `shelly-screens.log`. |
-| Un appareil en `auth failed` | Il répond mais refuse le mot de passe. `Devices` → `Password...`, ou réinitialisation par les boutons si perdu. |
-| Fenêtre claire alors que Windows est sombre | Le mode doit être sur *Follow Windows* dans `Behaviour` → `Appearance`. Le réglage lu est `AppsUseLightTheme` dans le registre. |
+| Red icon | No device reachable. `Devices` → `Reconnect`, or check the power strips' power supply. |
+| A device "offline" | The others keep working. Its outlets show a `-` state and are not operated. |
+| An outlet stays "not identified" | Normal for a USB hub or the PC tower. For a screen: run the wizard again, the screen may have taken more than twelve seconds to disconnect. |
+| A window stays on a switched-off screen | Check *Behaviour* → *Windows*, and that this screen's outlet is matched to it (**Identify displays**): otherwise, a screen powered from the PC's USB-C is still counted as on. |
+| Very slow profile change | An expected screen does not come back: the wait runs to the maximum delay (20 s by default, adjustable in `Behaviour`). |
+| Nothing at PC boot | Check that an outlet carries the **Boot screen** role, and that the keyboard's USB hub is **Critical**. |
+| Sleep no longer switches anything off | The firmware's metering path can freeze: the app detects it and flags it in the icon menu, with a button to restart the power strip. A restart is harmless — bistable relays, and `initial_state` brings the PC's outlet back on. |
+| Screens switch off while the PC is running | Switch-off threshold too high. Run a new measurement, or lower it in `PC power`. |
+| Nothing switches back on at PC boot | Check in `PC power` that the script is `running`, and that an outlet carries the **Boot screen** role. |
+| The keyboard does not respond in the BIOS | Its USB hub must be marked **Critical**, not just driven by the script. |
+| A console opens at launch | The shortcut must target `pythonw.exe`, not `python.exe`. Reinstall it with `install-startup.ps1`. |
+| No trace of what the app is doing | Icon menu → **Open log file**, or open `shelly-screens.log`. |
+| A device in `auth failed` | It responds but refuses the password. `Devices` → `Password...`, or a button reset if lost. |
+| Light window while Windows is dark | The mode must be set to *Follow Windows* in `Behaviour` → `Appearance`. The setting read is `AppsUseLightTheme` in the registry. |
 
-## Une seule instance
+## Single instance
 
-Un second lancement ne démarre pas : il demande à l'instance en place
-d'ouvrir ses réglages, puis se retire. C'est le comportement attendu d'un
-programme à icône, dont la fenêtre est souvent fermée.
+A second launch does not start: it asks the running instance to open its
+settings, then exits. That is the expected behaviour of a tray-icon program,
+whose window is often closed.
 
-Ce n'est pas un confort mais une **nécessité**. Deux instances gardent
-chacune sa configuration en mémoire et l'écrivent entière à chaque
-enregistrement : la dernière à écrire efface le travail de l'autre. Une
-calibration fraîchement relevée a ainsi disparu, remplacée par une copie
-plus ancienne.
+This is not a convenience but a **necessity**. Two instances each keep their
+configuration in memory and write it out in full on every save: the last
+one to write erases the other's work. A freshly measured calibration once
+disappeared this way, replaced by an older copy.
 
-Le verrou est un mutex nommé de Windows. Il appartient au processus et
-disparaît avec lui, même tué brutalement — un fichier verrou, lui,
-survivrait et bloquerait tout lancement ultérieur.
+The lock is a Windows named mutex. It belongs to the process and disappears
+with it, even if it is killed abruptly — a lock file, by contrast, would
+survive and block every later launch.
 
-## Journaux
+## Logs
 
-Tout est écrit dans `shelly-screens.log`, à côté de la configuration, avec
-rotation à 512 Ko sur trois fichiers. Le menu de l'icône propose **Open log
-file** pour l'ouvrir directement.
+Everything is written to `shelly-screens.log`, next to the configuration,
+rotating at 512 KB over three files. The icon menu offers **Open log file**
+to open it directly.
 
-C'est indispensable et non accessoire. Sans console, `sys.stdout` vaut
-`None` et `print` ne lève aucune erreur : il n'écrit simplement nulle part.
-Un programme qui se contenterait de `print` tournerait donc parfaitement
-muet, sans le moindre moyen de savoir ce qu'il fait. Les exceptions non
-rattrapées, y compris dans les threads, sont également déroutées vers ce
-fichier.
+This is essential, not optional. Without a console, `sys.stdout` is `None`
+and `print` raises no error: it simply writes nowhere. A program that relied
+only on `print` would therefore run perfectly silent, with no way at all of
+knowing what it is doing. Uncaught exceptions, including in threads, are
+also redirected to this file.
 
-`run-console.cmd` ajoute l'affichage à l'écran, en plus du fichier.
+`run-console.cmd` adds on-screen output on top of the file.
 
-Chaque ligne est écrite **jusqu'au disque** (`fsync`), et pas seulement
-remise au système. Sans cela, les dernières lignes se perdent quand la
-machine s'arrête brutalement — précisément celles qui expliqueraient
-pourquoi.
+Each line is written **all the way to disk** (`fsync`), not just handed to
+the system. Without it, the last lines are lost when the machine stops
+abruptly — precisely the ones that would explain why.

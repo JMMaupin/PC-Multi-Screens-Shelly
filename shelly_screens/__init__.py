@@ -1,19 +1,17 @@
-"""Pilotage de l'alimentation des ecrans par une ou plusieurs Shelly.
+"""Screen power control through one or more Shelly devices.
 
-Le numero de version suit deux nombres et rien de plus.
+The version number is two numbers and nothing more.
 
-La **majeure** change quand la configuration existante ne suffit plus telle
-quelle -- un format de fichier qui evolue, un reglage dont le sens change,
-un script embarque incompatible avec l'ancien. Autrement dit : quand une
-mise a jour demande de verifier quelque chose plutot que de se contenter de
-redemarrer.
+The **major** changes when the existing configuration is no longer enough
+as is -- a file format that evolves, a setting whose meaning changes, an
+on-device script incompatible with the old one. In other words: when an
+update requires checking something rather than just restarting.
 
-La **mineure** change a chaque iteration : correction, ajout, mesure de
-robustesse. Elle s'incremente meme pour un detail, parce que son role n'est
-pas de resumer l'ampleur du travail mais de repondre a une seule question,
-posee un jour de panne : *quelle version tourne devant moi ?* Un journal qui
-ne dit pas de quel code il parle fait perdre plus de temps qu'il n'en fait
-gagner.
+The **minor** changes on every iteration: fix, addition, robustness
+measure. It is incremented even for a detail, because its role is not to
+summarise the extent of the work but to answer a single question, asked on
+a day something breaks: *which version is running in front of me?* A log
+that does not say which code it is about wastes more time than it saves.
 """
 
 __version__ = "1.15"

@@ -1,12 +1,12 @@
-"""Courbe de consommation, pour placer les seuils a l'oeil.
+"""Power consumption chart, to place the thresholds by eye.
 
-Choisir un seuil sur deux nombres est un pari ; le choisir sur la courbe
-montre tout de suite si la marge est confortable ou si l'on frole un
-palier. Les deux seuils sont donc des lignes que l'on attrape a la souris.
+Picking a threshold from two numbers is a gamble; picking it on the chart
+shows right away whether the margin is comfortable or whether it brushes
+against a plateau. The two thresholds are therefore lines you grab with the mouse.
 
-L'axe des puissances est logarithmique. Une echelle lineaire ecraserait
-contre zero tout ce qui compte : la veille et l'arret se jouent entre un
-demi-watt et cinq watts, quand la marche depasse la centaine.
+The power axis is logarithmic. A linear scale would crush everything that
+matters against zero: sleep and off play out between half a watt and five
+watts, while running goes above a hundred.
 """
 
 from __future__ import annotations
@@ -22,20 +22,20 @@ from ..i18n import t
 if TYPE_CHECKING:
     from .settings import SettingsWindow
 
-# Marges autour du trace, en pixels.
+# Margins around the plot, in pixels.
 LEFT = 62
 RIGHT = 18
 TOP = 16
 BOTTOM = 34
-# Bornes de l'echelle verticale, en watts.
+# Bounds of the vertical scale, in watts.
 MIN_W = 0.1
 MAX_W = sensing.PROBE_SERIES_MAX_W
-# Distance a laquelle une ligne de seuil se laisse attraper.
+# Distance within which a threshold line can be grabbed.
 GRAB_PX = 7
 
 
 def _ago(age_s: float) -> str:
-    """Age lisible : des heures au-dela de quatre-vingt-dix minutes."""
+    """Readable age: hours beyond ninety minutes."""
     minutes = age_s / 60.0
     if minutes < 90:
         return t("-{min} min", min=f"{minutes:.0f}")
@@ -43,7 +43,7 @@ def _ago(age_s: float) -> str:
 
 
 class PowerChartDialog:
-    """Fenetre de trace, avec seuils reglables a la souris."""
+    """Chart window, with thresholds adjustable by mouse."""
 
     def __init__(self, parent: tk.Tk, owner: "SettingsWindow") -> None:
         self.owner = owner
@@ -102,10 +102,10 @@ class PowerChartDialog:
 
         self.reload()
 
-    # ------------------------------------------------------------- donnees
+    # ---------------------------------------------------------------- data
 
     def reload(self) -> None:
-        """Relit la courbe sur l'appareil, sans figer l'interface."""
+        """Re-read the series from the device, without freezing the UI."""
         self.status.set(t("Reading the measurement..."))
 
         def work():
@@ -122,7 +122,7 @@ class PowerChartDialog:
 
         _run_off_thread(self.window, work, done)
 
-    # --------------------------------------------------------------- trace
+    # ---------------------------------------------------------------- plot
 
     def _plot_area(self) -> tuple[int, int, int, int]:
         width = max(self.canvas.winfo_width(), 200)
@@ -130,7 +130,7 @@ class PowerChartDialog:
         return LEFT, TOP, width - RIGHT, height - BOTTOM
 
     def _y_of(self, watts: float) -> float:
-        """Ordonnee d'une puissance, sur une echelle logarithmique."""
+        """Y coordinate of a power value, on a logarithmic scale."""
         _x0, y0, _x1, y1 = self._plot_area()
         value = max(MIN_W, min(MAX_W, watts))
         span = math.log(MAX_W / MIN_W)
@@ -138,14 +138,14 @@ class PowerChartDialog:
         return y1 - ratio * (y1 - y0)
 
     def _watts_of(self, y: float) -> float:
-        """Puissance correspondant a une ordonnee."""
+        """Power value matching a y coordinate."""
         _x0, y0, _x1, y1 = self._plot_area()
         ratio = (y1 - y) / max(1.0, (y1 - y0))
         ratio = max(0.0, min(1.0, ratio))
         return MIN_W * math.exp(ratio * math.log(MAX_W / MIN_W))
 
     def draw(self) -> None:
-        """Retrace tout : grille, courbe, seuils."""
+        """Redraw everything: grid, curve, thresholds."""
         canvas = self.canvas
         palette = self.palette
         canvas.delete("all")
@@ -157,8 +157,8 @@ class PowerChartDialog:
             x0, y0, x1, y1, outline=palette.border, fill=palette.bg
         )
 
-        # Graduations choisies pour l'echelle logarithmique : elles se
-        # resserrent la ou la lecture compte, sous une dizaine de watts.
+        # Gridlines chosen for the logarithmic scale: they get denser
+        # where reading matters, below ten watts or so.
         for watts in (0.5, 1, 2, 5, 10, 20, 50, 100, 200, 400):
             y = self._y_of(watts)
             if not (y0 <= y <= y1):
@@ -177,16 +177,16 @@ class PowerChartDialog:
             self._draw_thresholds()
             return
 
-        # Axe du temps : de gauche (le plus ancien) a droite (maintenant).
-        # Les ticks ne sont pas regulierement espaces -- ils marquent les
-        # changements -- donc l'abscisse suit l'age reel, pas le rang.
+        # Time axis: from left (oldest) to right (now).
+        # Ticks are not evenly spaced -- they mark changes -- so the
+        # x coordinate follows the real age, not the index.
         oldest = max(tick.age_s for tick in self.series)
 
-        # Un seul tick, ou plusieurs au meme instant : la puissance n'a pas
-        # bouge depuis le debut de la mesure. Rapporte a un axe de largeur
-        # nulle, tout se tasserait sur le bord droit et la fenetre
-        # paraitrait vide -- alors que la mesure fonctionne et dit
-        # precisement que rien ne varie. On l'ecrit en toutes lettres.
+        # A single tick, or several at the same instant: the power has not
+        # moved since the measurement started. Mapped onto a zero-width
+        # axis, everything would pile up on the right edge and the window
+        # would look empty -- while the measurement works and says
+        # precisely that nothing varies. So it is spelled out.
         if oldest <= 0:
             watts = self.series[-1].watts
             y = self._y_of(watts)
@@ -213,18 +213,18 @@ class PowerChartDialog:
 
         for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
             age = span * fraction
-            # Centres sur leur graduation, les libelles des deux bords
-            # debordaient du cadre : « maintenant » s'y trouvait coupe en
-            # « maintena ». On les accroche vers l'interieur.
+            # Centered on their tick mark, the labels at both edges spilled
+            # out of the frame: the "now" label got truncated (the French
+            # "maintenant" showed as "maintena"). They are anchored inward.
             anchor = "e" if fraction == 0.0 else ("w" if fraction == 1.0 else "center")
             canvas.create_text(
                 x_of(age), y1 + 12, fill=palette.text_muted, font=("", 8),
                 text=t("now") if age < 60 else _ago(age), anchor=anchor,
             )
 
-        # Trace en escalier : entre deux ticks la puissance n'a pas bouge,
-        # c'est tout le sens d'un enregistrement par evenement. Une ligne
-        # oblique laisserait croire a une transition progressive.
+        # Step plot: between two ticks the power has not moved, which is
+        # the whole point of event-based logging. A sloped line would
+        # suggest a gradual transition.
         points: list[float] = []
         previous_y = None
         for tick in self.series:
@@ -262,15 +262,15 @@ class PowerChartDialog:
         )
 
     def _draw_thresholds(self) -> None:
-        """Les deux lignes reglables, et la zone morte entre elles."""
+        """The two adjustable lines, and the dead band between them."""
         canvas = self.canvas
         palette = self.palette
         x0, _y0, x1, _y1 = self._plot_area()
         y_on = self._y_of(self.on_w)
         y_off = self._y_of(self.off_w)
 
-        # La zone morte est le coeur du reglage : l'etat courant s'y
-        # maintient, et c'est elle qui empeche le relais de claquer.
+        # The dead band is the heart of the setting: the current state holds
+        # within it, and it is what keeps the relay from chattering.
         canvas.create_rectangle(
             x0 + 1, min(y_on, y_off), x1 - 1, max(y_on, y_off),
             fill=palette.surface_alt, outline="", stipple="gray25", tags="band",
@@ -288,10 +288,10 @@ class PowerChartDialog:
                 tags=name,
             )
 
-    # ------------------------------------------------------------ souris
+    # ------------------------------------------------------------- mouse
 
     def _nearest(self, y: float) -> str | None:
-        """Nom de la ligne sous le curseur, s'il y en a une."""
+        """Name of the line under the cursor, if there is one."""
         if abs(y - self._y_of(self.on_w)) <= GRAB_PX:
             return "on"
         if abs(y - self._y_of(self.off_w)) <= GRAB_PX:
@@ -308,8 +308,8 @@ class PowerChartDialog:
         if self.dragging is None:
             return
         watts = round(self._watts_of(event.y), 1)
-        # Les deux seuils ne se croisent pas : sans ecart, la zone morte
-        # disparaitrait et le relais se remettrait a claquer.
+        # The two thresholds never cross: without a gap, the dead band
+        # would vanish and the relay would start chattering again.
         if self.dragging == "on":
             self.on_w = max(watts, self.off_w + 1.0)
         else:

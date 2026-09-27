@@ -1,28 +1,27 @@
 <#
 .SYNOPSIS
-    Lance Shelly Screens a l'ouverture de session, sans console.
+    Launches Shelly Screens at sign-in, without a console.
 
 .DESCRIPTION
-    Depose un raccourci dans le dossier Demarrage de l'utilisateur. Ce dossier
-    ne demande aucun droit administrateur, contrairement a une tache planifiee,
-    et suffit ici : l'application n'a pas besoin de tourner avant l'ouverture
-    de session.
+    Places a shortcut in the user's Startup folder. This folder requires no
+    administrator rights, unlike a scheduled task, and is enough here: the
+    app does not need to run before sign-in.
 
-    Le raccourci vise directement pythonw.exe. Passer par un .cmd ferait
-    scintiller une console, et un detour par wscript ajouterait un processus
-    pour rien.
+    The shortcut targets pythonw.exe directly. Going through a .cmd would
+    make a console flicker, and a detour through wscript would add a process
+    for nothing.
 
-    L'ecran de demarrage, lui, ne depend pas de ce raccourci : il reste
-    alimente en permanence -- ou rallume par la multiprise elle-meme si la
-    detection de consommation est en service -- justement parce que rien ne
-    tourne pendant le POST et l'ecran de connexion.
+    The boot screen, for its part, does not depend on this shortcut: it stays
+    powered at all times -- or is switched back on by the power strip itself
+    if power-based detection is enabled -- precisely because nothing runs
+    during POST and the sign-in screen.
 
 .PARAMETER Desktop
-    Pose en plus un raccourci sur le Bureau, pour lancer l'application a la
-    main sans console.
+    Also places a shortcut on the Desktop, to launch the app by hand without
+    a console.
 
 .PARAMETER Remove
-    Retire les raccourcis au lieu de les installer.
+    Removes the shortcuts instead of installing them.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File install-startup.ps1
@@ -45,22 +44,22 @@ if ($Remove) {
     foreach ($path in @($shortcut, $desktopLink)) {
         if (Test-Path $path) {
             Remove-Item $path -Force
-            Write-Host "Supprime : $path" -ForegroundColor Green
+            Write-Host "Removed: $path" -ForegroundColor Green
             $removed = $true
         }
     }
-    if (-not $removed) { Write-Host "Aucun raccourci a supprimer." }
+    if (-not $removed) { Write-Host "No shortcut to remove." }
     exit 0
 }
 
 if (-not (Test-Path $entryPoint)) {
-    Write-Error "Point d'entree introuvable : $entryPoint"
+    Write-Error "Entry point not found: $entryPoint"
     exit 1
 }
 
 $pythonw = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
 if (-not $pythonw) {
-    Write-Error "pythonw.exe est introuvable dans le PATH : impossible de demarrer sans console."
+    Write-Error "pythonw.exe not found in PATH: cannot start without a console."
     exit 1
 }
 
@@ -71,7 +70,7 @@ function New-Launcher([string]$Path) {
     $link.TargetPath = $pythonw
     $link.Arguments = '"' + $entryPoint + '"'
     $link.WorkingDirectory = $projectDir
-    $link.WindowStyle = 7      # reduit : aucune fenetre ne s'affiche
+    $link.WindowStyle = 7      # minimized: no window is shown
     $link.Description = "Shelly Screens - monitor power profiles"
     if (Test-Path $iconFile) { $link.IconLocation = "$iconFile,0" }
     $link.Save()
@@ -80,11 +79,11 @@ function New-Launcher([string]$Path) {
 New-Launcher $shortcut
 if ($Desktop) {
     New-Launcher $desktopLink
-    Write-Host "Raccourci Bureau : $desktopLink" -ForegroundColor Green
+    Write-Host "Desktop shortcut: $desktopLink" -ForegroundColor Green
 }
 
-Write-Host "Raccourci cree : $shortcut" -ForegroundColor Green
-Write-Host "Cible          : $pythonw"
-Write-Host "Shelly Screens demarrera sans console a la prochaine ouverture de session."
-Write-Host "Journaux       : $(Join-Path $projectDir 'shelly-screens.log')"
-Write-Host "Pour le retirer : powershell -ExecutionPolicy Bypass -File install-startup.ps1 -Remove"
+Write-Host "Shortcut created: $shortcut" -ForegroundColor Green
+Write-Host "Target          : $pythonw"
+Write-Host "Shelly Screens will start without a console at the next sign-in."
+Write-Host "Logs            : $(Join-Path $projectDir 'shelly-screens.log')"
+Write-Host "To remove it    : powershell -ExecutionPolicy Bypass -File install-startup.ps1 -Remove"

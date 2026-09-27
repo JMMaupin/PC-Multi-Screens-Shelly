@@ -1,17 +1,17 @@
-"""Premiere mise en service d'un Shelly : lui donner le Wi-Fi de la maison.
+"""First setup of a Shelly: give it the home Wi-Fi.
 
-Un Shelly neuf -- ou remis a zero -- ouvre son propre point d'acces, sans
-mot de passe, et se joint alors a une adresse fixe. On y lit son identite,
-et on lui envoie le SSID et le mot de passe choisis. Puis on attend qu'il
-annonce avoir obtenu une adresse : l'acceptation de la configuration ne
-prouve pas qu'il se connectera -- un mot de passe faux est accepte sans
-broncher.
+A new Shelly -- or one reset to factory settings -- opens its own access
+point, with no password, and can then be reached at a fixed address. We
+read its identity there, and send it the chosen SSID and password. Then we
+wait for it to announce it has obtained an address: accepting the
+configuration doesn't prove it will connect -- a wrong password is
+accepted without a murmur.
 
-On ne lui demande jamais de scanner les reseaux. Il n'a qu'une radio : pour
-scanner, il quitte le canal de son point d'acces, et certains exemplaires
-le ferment purement et simplement -- le PC perd alors l'appareil au milieu
-de la mise en service, sans recours. La liste des reseaux vient donc du
-scan du PC, pose a cote : une indication du signal, pas sa mesure exacte.
+We never ask it to scan for networks. It has only one radio: to scan, it
+leaves its access point's channel, and some units simply close it -- the
+PC then loses the device in the middle of the setup, with no way back.
+The list of networks therefore comes from the PC's own scan, sitting next
+to it: an indication of the signal, not an exact measurement.
 """
 
 from __future__ import annotations
@@ -24,38 +24,38 @@ from . import discovery
 from .device import ShellyDevice
 from .i18n import t
 
-AP_HOST = "192.168.33.1"  # adresse de l'appareil sur son propre point d'acces
-# Silence du point d'acces au-dela duquel on le tient pour ferme.
+AP_HOST = "192.168.33.1"  # device address on its own access point
+# Access point silence beyond which we consider it closed.
 AP_GONE_S = 20.0
 
-# Au-dessus : excellent ; c'est ce qu'on recommande pour une multiprise qui
-# pilote des ecrans -- a -79 dBm, l'une d'elles tenait au bord du decrochage.
+# Above this: excellent; it is what we recommend for a power strip driving
+# screens -- at -79 dBm, one of them was on the verge of dropping out.
 RECOMMENDED_RSSI = -60
 
-# Canaux de la bande 2,4 GHz : la seule que captent ces appareils.
+# Channels of the 2.4 GHz band: the only one these devices can receive.
 MAX_24GHZ_CHANNEL = 14
 
 
 def percent_to_dbm(percent: int) -> int:
-    """Signal Windows en pourcentage vers des dBm, a la maniere de Windows.
+    """Windows signal percentage to dBm, the way Windows does it.
 
-    Windows etale lineairement -100 dBm (0 %) a -50 dBm (100 %) : la
-    conversion inverse est exacte a l'arrondi pres.
+    Windows maps -100 dBm (0 %) to -50 dBm (100 %) linearly: the reverse
+    conversion is exact up to rounding.
     """
     return round(percent / 2 - 100)
 
 
 def signal_level(rssi: int) -> str:
-    """Le signal en trois niveaux, pour sa couleur : vert, orange, rouge."""
+    """The signal in three levels, for its colour: green, orange, red."""
     if rssi >= RECOMMENDED_RSSI:
         return "excellent"
     if rssi >= -70:
         return "good"
-    return "bad"  # moyen ou faible : a eviter l'un comme l'autre
+    return "bad"  # fair or weak: both to be avoided
 
 
 def signal_quality(rssi: int) -> str:
-    """Ce que vaut un signal, en un mot."""
+    """How good a signal is, in one word."""
     if rssi >= RECOMMENDED_RSSI:
         return t("excellent")
     if rssi >= -70:
@@ -67,11 +67,11 @@ def signal_quality(rssi: int) -> str:
 
 @dataclass(frozen=True)
 class SetupModel:
-    """Un modele que l'assistant sait mettre en service."""
+    """A model the assistant knows how to set up."""
 
     name: str
-    ap_prefix: str  # debut du nom du point d'acces ; la MAC suit
-    ap_steps: str  # comment ouvrir le point d'acces, en anglais (traduit)
+    ap_prefix: str  # start of the access point name; the MAC follows
+    ap_steps: str  # how to open the access point, in English (translated)
 
 
 MODELS = (
@@ -90,11 +90,11 @@ MODELS = (
 
 @dataclass(frozen=True)
 class Network:
-    """Un reseau que voit le PC, candidat pour l'appareil."""
+    """A network the PC can see, a candidate for the device."""
 
     ssid: str
-    rssi: int | None  # dBm en 2,4 GHz ; None si le PC ne l'a vu qu'en 5 GHz
-    channel: int  # 0 si Windows ne l'a pas dit
+    rssi: int | None  # dBm on 2.4 GHz; None if the PC only saw it on 5 GHz
+    channel: int  # 0 if Windows didn't say
 
     @property
     def seen_on_24ghz(self) -> bool:
@@ -102,14 +102,14 @@ class Network:
 
 
 def candidate_networks() -> list[Network]:
-    """Les reseaux proposables, les mieux captes en 2,4 GHz d'abord.
+    """The networks that can be offered, best received on 2.4 GHz first.
 
-    La bande se juge borne par borne : c'est la meilleure borne 2,4 GHz
-    d'un reseau qui compte. Un reseau que le PC n'a vu qu'en 5 GHz reste
-    propose, en fin de liste : une box double bande emet souvent le meme
-    nom sur les deux, et l'appareil dira s'il le trouve. Les points d'acces
-    des Shelly sont ecartes -- on ne donne pas a un appareil le reseau d'un
-    autre appareil.
+    The band is judged access point by access point: what counts is a
+    network's best 2.4 GHz access point. A network the PC only saw on 5 GHz
+    is still offered, at the end of the list: a dual-band router often
+    broadcasts the same name on both, and the device will tell whether it
+    finds it. Shelly access points are left out -- we don't give a device
+    another device's network.
     """
     from .win import wlan
 
@@ -132,27 +132,27 @@ def candidate_networks() -> list[Network]:
 
 @dataclass(frozen=True)
 class JoinResult:
-    """Issue de la connexion de l'appareil au Wi-Fi choisi."""
+    """Outcome of the device connecting to the chosen Wi-Fi."""
 
     ok: bool
-    status: str  # dernier etat annonce : connecting, connected, got ip...
+    status: str  # last reported state: connecting, connected, got ip...
     ip: str = ""
     rssi: int | None = None
 
 
 class AccessPoint:
-    """L'appareil, joint sur son propre point d'acces."""
+    """The device, reached on its own access point."""
 
     def __init__(self) -> None:
-        # Un appareil neuf n'a pas de mot de passe.
+        # A new device has no password.
         self.device = ShellyDevice(AP_HOST, timeout=5.0)
 
     def identify(self) -> discovery.DeviceIdentity | None:
-        """Son identite, ou None si on ne le joint pas (encore)."""
+        """Its identity, or None if it can't be reached (yet)."""
         return discovery.probe(AP_HOST, timeout=2.0)
 
     def send(self, ssid: str, password: str) -> dict:
-        """Lui envoie le Wi-Fi a rejoindre ; rend sa reponse."""
+        """Sends it the Wi-Fi to join; returns its reply."""
         return self.device.call("WiFi.SetConfig", {"config": {"sta": {
             "ssid": ssid, "pass": password, "enable": True,
         }}})
@@ -164,24 +164,24 @@ class AccessPoint:
         rejoin_ap: Callable[[], None] | None = None,
         on_ap_gone: Callable[[], None] | None = None,
     ) -> JoinResult:
-        """Attend qu'il annonce une adresse sur le Wi-Fi choisi.
+        """Waits for it to announce an address on the chosen Wi-Fi.
 
-        L'appareil n'a qu'une radio : en rejoignant le reseau, il quitte le
-        canal de son point d'acces et le coupe un instant. Le PC le perd, et
-        Windows ne s'y reconnecte pas de lui-meme. Deux temoins, menes de
-        front :
+        The device has only one radio: when joining the network, it leaves
+        its access point's channel and shuts it down for a moment. The PC
+        loses it, and Windows doesn't reconnect to it on its own. Two
+        witnesses, watched side by side:
 
-        * le point d'acces, tant qu'il existe : `rejoin_ap` y ramene la
-          carte Wi-Fi du PC a chaque silence. C'est le temoin le plus sur --
-          il dit l'etat exact, « connecting » compris quand le mot de passe
-          est faux ;
-        * le reseau de la maison, ou l'appareil doit apparaitre sous son
-          nom mDNS -- verifie a sa MAC. C'est le seul qui reste quand
-          l'appareil finit par fermer son point d'acces.
+        * the access point, as long as it exists: `rejoin_ap` brings the
+          PC's Wi-Fi adapter back to it after every silence. It is the most
+          reliable witness -- it gives the exact state, including
+          "connecting" when the password is wrong;
+        * the home network, where the device should appear under its mDNS
+          name -- checked against its MAC. It is the only one left when the
+          device ends up closing its access point.
 
-        `on_ap_gone` est appele une fois, apres vingt secondes sans point
-        d'acces : un PC en Wi-Fi seul doit alors retrouver son reseau pour
-        voir l'appareil. Plus tot, on se priverait du premier temoin.
+        `on_ap_gone` is called once, after twenty seconds without an access
+        point: a Wi-Fi-only PC must then get back onto its network to see
+        the device. Any earlier, and we would lose the first witness.
         """
         deadline = time.monotonic() + timeout
         status = "unknown"
@@ -195,7 +195,7 @@ class AccessPoint:
                 status = str(reply.get("status", status))
                 if status == "got ip" and reply.get("sta_ip"):
                     return JoinResult(True, status, str(reply["sta_ip"]), reply.get("rssi"))
-            except Exception:  # noqa: BLE001 - point d'acces deplace ou coupe
+            except Exception:  # noqa: BLE001 - access point moved or shut down
                 now = time.monotonic()
                 if silent_since is None:
                     silent_since = now
@@ -214,7 +214,7 @@ class AccessPoint:
 
     @staticmethod
     def _find_on_network(host: str, mac: str) -> JoinResult | None:
-        """L'appareil, joint sur le reseau de la maison -- et bien lui, a sa MAC."""
+        """The device, reached on the home network -- and really it, by its MAC."""
         found = discovery.probe(host, timeout=3.0)
         if found is None or found.mac.upper() != mac.upper():
             return None
@@ -223,5 +223,5 @@ class AccessPoint:
             return JoinResult(True, str(reply.get("status", "got ip")),
                               str(reply.get("sta_ip") or discovery.address_of(host)),
                               reply.get("rssi"))
-        except Exception:  # noqa: BLE001 - il repond a /shelly : c'est deja la preuve
+        except Exception:  # noqa: BLE001 - it answers /shelly: that is proof enough
             return JoinResult(True, "got ip", discovery.address_of(host))

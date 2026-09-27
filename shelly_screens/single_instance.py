@@ -1,18 +1,17 @@
-"""Une seule instance a la fois.
+"""Only one instance at a time.
 
-Deux instances se disputent le meme fichier de configuration : chacune
-garde la sienne en memoire et l'ecrit entiere a chaque enregistrement, si
-bien que la derniere a ecrire efface le travail de l'autre. C'est ainsi
-qu'une calibration fraichement relevee a disparu, remplacee par une copie
-plus ancienne.
+Two instances fight over the same configuration file: each keeps its own
+copy in memory and writes it out whole on every save, so whichever writes
+last wipes out the other's work. That is how a freshly measured
+calibration vanished, replaced by an older copy.
 
-Le verrou est un mutex nomme de Windows : il appartient au processus et
-disparait avec lui, meme si celui-ci est tue. Un fichier verrou, lui,
-resterait apres un arret brutal et bloquerait tout lancement ulterieur.
+The lock is a Windows named mutex: it belongs to the process and goes away
+with it, even if the process is killed. A lock file, on the other hand,
+would survive a hard stop and block every later launch.
 
-Relancer l'application n'affiche pas un refus : la fenetre de reglages de
-l'instance en place s'ouvre. C'est ce qu'on attend d'un programme a icone,
-dont la fenetre principale est souvent fermee.
+Relaunching the application doesn't show a refusal: the running
+instance's settings window opens. That is what one expects from a tray
+program, whose main window is often closed.
 """
 
 from __future__ import annotations
@@ -23,8 +22,8 @@ from ctypes import wintypes
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
-# `Local\` limite la portee a la session Windows ouverte : deux comptes
-# connectes en parallele gardent chacun leur instance.
+# `Local\` limits the scope to the current Windows session: two accounts
+# logged in side by side each keep their own instance.
 MUTEX_NAME = r"Local\ShellyScreens.SingleInstance"
 ERROR_ALREADY_EXISTS = 183
 
@@ -44,11 +43,11 @@ _handle: wintypes.HANDLE | None = None
 
 
 def acquire() -> bool:
-    """Prend le verrou. Faux si une autre instance le detient deja."""
+    """Takes the lock. False if another instance already holds it."""
     global _handle
     handle = kernel32.CreateMutexW(None, True, MUTEX_NAME)
     if not handle:
-        # Sans verrou possible, mieux vaut laisser demarrer que bloquer.
+        # If no lock can be taken, better to let it start than to block.
         return True
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         kernel32.CloseHandle(handle)
@@ -58,7 +57,7 @@ def acquire() -> bool:
 
 
 def release() -> None:
-    """Rend le verrou. Windows le ferait de toute facon a la sortie."""
+    """Releases the lock. Windows would do it on exit anyway."""
     global _handle
     if _handle:
         kernel32.CloseHandle(_handle)
@@ -66,7 +65,7 @@ def release() -> None:
 
 
 def wake_existing(window_class: str, message: int) -> bool:
-    """Demande a l'instance en place de se montrer."""
+    """Asks the running instance to show itself."""
     hwnd = user32.FindWindowW(window_class, None)
     if not hwnd:
         return False

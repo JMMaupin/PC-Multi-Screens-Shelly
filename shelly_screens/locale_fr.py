@@ -1,16 +1,16 @@
-"""Catalogue francais.
+"""French catalog.
 
-La cle est le texte anglais, tel qu'il apparait dans le code. Une entree
-manquante retombe donc sur l'anglais plutot que sur un identifiant nu.
+The key is the English text, as it appears in the code. A missing entry
+therefore falls back to English rather than to a bare identifier.
 
-Les champs entre accolades sont nommes et doivent se retrouver a
-l'identique dans la traduction ; l'ordre, lui, est libre.
+Fields in braces are named and must appear unchanged in the translation;
+their order, however, is free.
 """
 
 from __future__ import annotations
 
 CATALOG: dict[str, str] = {
-    # --- onglets et titres
+    # --- tabs and titles
     "Shelly Screens": "Shelly Screens",
     "Shelly Screens - Settings": "Shelly Screens - Reglages",
     "Devices": "Appareils",
@@ -18,7 +18,7 @@ CATALOG: dict[str, str] = {
     "Profiles": "Profils",
     "PC power": "Alimentation PC",
     "Behaviour": "Comportement",
-    # --- colonnes
+    # --- columns
     "Key / name": "Cle / nom",
     "Model": "Modele",
     "Reached via": "Joint par",
@@ -35,11 +35,11 @@ CATALOG: dict[str, str] = {
     "Device ID": "Identifiant",
     "Name": "Nom",
     "Confirm": "Confirmation",
-    # --- types de prise
+    # --- outlet types
     "Not set": "Non defini",
     "Screen": "Ecran",
     "Accessory": "Accessoire",
-    # --- boutons
+    # --- buttons
     "Add device...": "Ajouter un appareil...",
     "Rename key...": "Renommer la cle...",
     "Set label...": "Definir le libelle...",
@@ -71,7 +71,7 @@ CATALOG: dict[str, str] = {
     "Lost password?": "Mot de passe perdu ?",
     "Recovery steps": "Marche a suivre",
     "Search again": "Rechercher a nouveau",
-    # --- cadres
+    # --- frames
     "Selected outlet": "Prise selectionnee",
     "Powered outlets": "Prises alimentees",
     "Sleep and shutdown": "Veille et arret",
@@ -81,7 +81,7 @@ CATALOG: dict[str, str] = {
     "Thresholds and delays": "Seuils et delais",
     "On-device script": "Script embarque",
     "Power strip": "Multiprise",
-    # --- cases a cocher
+    # --- checkboxes
     "Critical - never switched off": "Critique - jamais coupee",
     'After a profile change, bring windows left outside every lit screen back onto the nearest one': "Apres un changement de profil, ramener sur l'ecran allume le plus proche les fenetres restees hors de tout ecran",
     'Profile shortcut': 'Raccourci des profils',
@@ -254,7 +254,7 @@ CATALOG: dict[str, str] = {
         "Reappliquer le dernier profil au reveil",
     "Re-apply the last profile when this application starts":
         "Reappliquer le dernier profil au lancement",
-    # --- reglages
+    # --- settings
     "Delay between outlet commands (ms)":
         "Delai entre deux commandes de prise (ms)",
     "Max wait for displays to appear (s)":
@@ -268,7 +268,7 @@ CATALOG: dict[str, str] = {
     "Dark": "Sombre",
     "English": "Anglais",
     "Language": "Langue",
-    # --- invites
+    # --- prompts
     "Profile name:": "Nom du profil :",
     "New name:": "Nouveau nom :",
     "New profile": "Nouveau profil",
@@ -283,7 +283,7 @@ CATALOG: dict[str, str] = {
     "Add a Shelly device": "Ajouter un appareil Shelly",
     "Factory reset": "Retour aux reglages d'usine",
     "Identifying displays": "Identification des ecrans",
-    # --- menu de l'icone
+    # --- tray icon menu
     "Settings...": "Reglages...",
     "Refresh": "Rafraichir",
     "Open log file": "Ouvrir le journal",
@@ -316,7 +316,7 @@ CATALOG: dict[str, str] = {
     "All on": "Tous en marche",
     "▲ Move up": "▲ Monter",
     "About": "A propos",
-    # --- premiere mise en service
+    # --- first setup
     "First setup of a new device": "Premiere mise en service d'un appareil",
     "First setup of a new device...": "Premiere mise en service...",
     "1. Which device?": "1. Quel appareil ?",
@@ -389,6 +389,7 @@ CATALOG: dict[str, str] = {
     "(coming soon)": "(bientot disponible)",
     "Enter or Apply to switch the screens, Esc to cancel":
         "Entree ou Appliquer pour commuter les ecrans, Echap pour annuler",
+    "At least one screen must stay on": "Au moins un ecran doit rester allume",
     "▼ Move down": "▼ Descendre",
     "Profile order saved": "Ordre des profils enregistre",
     "built-in, every outlet on": "integre, toutes les prises allumees",
@@ -435,7 +436,7 @@ CATALOG: dict[str, str] = {
     "Fix password...": "Corriger le mot de passe...",
     "No device configured": "Aucun appareil configure",
     "No device reachable": "Aucun appareil joignable",
-    # --- messages courts
+    # --- short messages
     "No Shelly device is reachable.": "Aucun appareil Shelly n'est joignable.",
     "No outlet yet - add a device first.":
         "Aucune prise pour l'instant - ajouter d'abord un appareil.",
@@ -465,7 +466,7 @@ CATALOG: dict[str, str] = {
     "Accepted by the device.": "Accepte par l'appareil.",
     "Unavailable until the PC outlet is set.":
         "Indisponible tant que la prise du PC n'est pas designee.",
-    # --- textes d'aide
+    # --- help texts
     "Shelly devices driving the outlets. Two power strips give eight "
     "outlets; a single plug can be added later for the PC itself. "
     "The short key is what profiles refer to, so keep it readable. "
@@ -487,7 +488,7 @@ CATALOG: dict[str, str] = {
         "Lancer la mesure, puis utiliser le PC normalement : le laisser au "
         "repos, le mettre en veille, l'eteindre, le rallumer. La multiprise "
         "releve les paliers toute seule pendant que le PC est eteint.",
-    # --- textes d'aide longs, cles relues depuis le code
+    # --- long help texts, keys read back from the code
     'Every display outlet must be set to « Screen »: the wizard only touches what has been declared, and leaves anything still « Not set » alone. Accessories - USB hubs, speakers - stay switchable by profiles but are left out of the display wizard: cutting them makes no screen disappear. A USB hub carrying your keyboard should also be marked critical: without it you could not enter the BIOS or type your PIN at the next boot.':
         "Chaque prise portant un ecran doit etre reglee sur « Ecran » : l'assistant ne manoeuvre que ce qui a ete declare, et laisse tranquille tout ce qui reste « Non defini ». Les accessoires -- concentrateurs USB, enceintes -- restent pilotables par les profils mais sortent du perimetre de l'assistant : les couper ne fera disparaitre aucun ecran. Un concentrateur USB portant le clavier doit en outre etre marque critique : sans lui, impossible d'entrer dans le BIOS ni de saisir son code au prochain demarrage.",
     'Name each outlet and give it a role. Run the wizard once the screens are plugged in: it switches each outlet off in turn and watches which display Windows drops.':
@@ -500,7 +501,7 @@ CATALOG: dict[str, str] = {
         "Deux seuils et non un seul : entre les deux se trouve une zone morte ou l'etat courant se maintient, de sorte qu'une consommation fluctuante ne fasse pas claquer le relais. Le delai de coupure est long a dessein : lors d'un redemarrage de Windows, le PC passe sous le seuil pendant dix a quinze secondes, et couper les ecrans a cet instant serait le pire moment.",
     'With the PC plugged into a measured outlet, the power strip can switch the screens on by itself when it sees the PC draw current. That is what allows everything to be switched off at shutdown: no software runs on the PC during POST, but the strip keeps measuring.':
         "Avec le PC branche sur une prise mesuree, la multiprise peut allumer les ecrans d'elle-meme des qu'elle voit le PC consommer. C'est ce qui permet de tout couper a l'arret : aucun logiciel ne tourne sur le PC pendant le POST, mais la multiprise, elle, continue de mesurer.",
-    # --- valeurs affichees dans les tableaux
+    # --- values shown in the tables
     "not identified": "non identifie",
     "{key} (not connected)": "{key} (non connecte)",
     "critical": "critique",
@@ -513,7 +514,7 @@ CATALOG: dict[str, str] = {
     "online": "en ligne",
     "offline": "hors ligne",
     "auth failed": "mot de passe refuse",
-    # --- phrases construites, champs nommes
+    # --- composed sentences, named fields
     "No outlet is marked as powering the PC. Set that role in the Outlets tab first - nothing here can work without it.":
         "Aucune prise n'est designee comme alimentant le PC. Attribuer d'abord "
         "ce role dans l'onglet Prises : rien ici ne peut fonctionner sans lui.",
@@ -527,7 +528,7 @@ CATALOG: dict[str, str] = {
     "not installed": "non installe",
     "running": "en service",
     "installed but stopped": "installe mais arrete",
-    # --- apparence et resume d'arret
+    # --- appearance and shutdown summary
     "Stays powered through sleep and shutdown: {outlets}":
         "Reste alimente en veille et a l'arret : {outlets}",
     "Nothing stays powered through shutdown yet. Mark the outlet of your main screen as boot screen, and any USB hub carrying your keyboard as critical.":
@@ -542,9 +543,9 @@ CATALOG: dict[str, str] = {
         "reglages Windows.",
     "dark": "sombre",
     "PC": "PC",
-    "Script {state}": "Script {state}",  # identique, mais present pour que l'audit soit complet
+    "Script {state}": "Script {state}",  # identical, but present so the audit is complete
     "light": "clair",
-    # --- suivi du releve
+    # --- measurement progress
     "Measurement running": "Mesure en cours",
     "Measurement stopped": "Mesure arretee",
     "Measurement running - no sample recorded yet.":
@@ -558,7 +559,7 @@ CATALOG: dict[str, str] = {
     "Only one power level was seen. Let the PC run, sleep and shut down at least once before reading the measurement.":
         "Un seul palier observe. Laisser le PC tourner, se mettre en veille "
         "et s'eteindre au moins une fois avant de relire la mesure.",
-    # --- courbe de consommation
+    # --- consumption chart
     "Show curve...": "Voir la courbe...",
     "Power over time": "Puissance dans le temps",
     "Apply these thresholds": "Appliquer ces seuils",

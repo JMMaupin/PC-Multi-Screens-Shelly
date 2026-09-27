@@ -1,37 +1,37 @@
-// Pilotage des ecrans par la consommation du PC.
+// Driving the screens from the PC's power draw.
 //
-// Ce script tourne sur la Shelly qui alimente l'unite centrale. Il est la
-// piece qui permet de tout couper a l'arret : le PC eteint, plus aucun
-// logiciel ne peut commander les prises, mais la multiprise, elle,
-// continue de mesurer. Des qu'elle voit le PC consommer, elle rallume les
-// ecrans -- a temps pour le POST et l'ecran de connexion.
+// This script runs on the Shelly that powers the PC. It is the piece that
+// makes it possible to cut everything at shutdown: once the PC is off, no
+// software can command the outlets any more, but the power strip keeps
+// measuring. As soon as it sees the PC drawing power, it switches the
+// screens back on -- in time for the POST and the login screen.
 //
-// Il protege aussi la sortie du PC : si elle est coupee, d'ou que vienne
-// l'ordre, elle est aussitot retablie. Cette surveillance tenait dans un
-// second script, mais l'appareil n'en execute que trois a la fois, et le
-// troisieme emplacement doit rester libre pour le releveur de paliers.
+// It also protects the PC's outlet: if it is switched off, wherever the
+// order comes from, it is restored at once. This watch used to live in a
+// second script, but the device only runs three at a time, and the third
+// slot must stay free for the power-level logger.
 //
-// La configuration est injectee par l'application ; ne pas l'editer ici.
+// The configuration is injected by the application; do not edit it here.
 // --- CONFIG ---
 
-// Deux seuils, et non un seul : une consommation qui oscillerait autour
-// d'une valeur unique ferait claquer le relais en boucle. Entre les deux
-// seuils se trouve une zone morte ou l'etat courant se maintient.
+// Two thresholds, not one: a power draw hovering around a single value
+// would make the relay chatter endlessly. Between the two thresholds lies
+// a dead band where the current state holds.
 //
-// Les delais sont volontairement asymetriques. Quelques secondes suffisent
-// pour allumer, mais la coupure attend beaucoup plus : lors d'un
-// redemarrage de Windows, le PC passe sous le seuil pendant dix a quinze
-// secondes, et couper l'ecran a cet instant precis serait le pire moment.
+// The delays are deliberately asymmetric. A few seconds are enough to
+// switch on, but switching off waits much longer: during a Windows
+// restart, the PC drops below the threshold for ten to fifteen seconds,
+// and cutting the screen at that exact moment would be the worst timing.
 
-let active = null; // null tant qu'on ne sait pas, puis true / false
+let active = null; // null while unknown, then true / false
 let above = 0;
 let below = 0;
 let restored = 0;
 
-// Les commandes partent une par une : le firmware limite le nombre
-// d'appels simultanes, et sept prises lancees d'un coup le saturent --
-// les premieres passent, les suivantes sont perdues sans un mot.
-// La file se lit avec un index plutot qu'avec splice, absent de mJS.
+// Commands go out one at a time: the firmware limits the number of
+// concurrent calls, and seven outlets fired at once saturate it --
+// the first ones go through, the rest are silently lost.
+// The queue is read with an index rather than with splice, which mJS lacks.
 let queue = [];
 let head = 0;
 let sending = false;
@@ -45,8 +45,8 @@ function enqueue(index, on, attempt) {
 }
 
 function retryLater(job) {
-  // Une commande perdue est reprise, mais pas indefiniment : au-dela, on
-  // laisse une trace plutot que de tourner en rond.
+  // A lost command is retried, but not forever: past the limit, leave a
+  // trace rather than going round in circles.
   if (job.a + 1 >= CFG.tries) {
     print("pc_sensing: outlet " + JSON.stringify(job.i) + " gave up after "
       + JSON.stringify(CFG.tries) + " attempts");
@@ -75,13 +75,13 @@ function pump() {
   if (outlet.h === null) {
     Shelly.call("Switch.Set", { id: outlet.i, on: job.on });
   } else {
-    // Une prise portee par une autre multiprise : on passe par son API, et
-    // l'on verifie que l'ordre a bien ete recu. Sans ce controle, une
-    // commande perdue ne se voit nulle part -- c'est ainsi que des ecrans
-    // restaient eteints au reveil.
-    // Les identifiants precedent l'hote quand la multiprise distante
-    // demande un mot de passe. C'est la seule forme qu'accepte le client
-    // HTTP du firmware.
+    // An outlet on another power strip: go through its API, and check
+    // that the order was actually received. Without this check, a lost
+    // command shows up nowhere -- that is how screens stayed dark on
+    // resume.
+    // The credentials go before the host when the remote power strip
+    // requires a password. It is the only form the firmware's HTTP
+    // client accepts.
     let prefix = "";
     if (outlet.u !== undefined && outlet.u !== null && outlet.u !== "") {
       prefix = outlet.u + "@";
@@ -108,8 +108,8 @@ function switchAll(on) {
 }
 
 function fallbackToBootScreen(reason) {
-  // Dernier recours : le PC consomme, donc il demarre, et l'on ne sait pas
-  // quoi allumer. Un ecran vaut mieux qu'un demarrage a l'aveugle.
+  // Last resort: the PC draws power, so it is booting, and we do not know
+  // what to switch on. One screen is better than booting blind.
   print("pc_sensing: " + reason + ", falling back to the boot screen");
   if (CFG.boot >= 0) {
     enqueue(CFG.boot, true, 0);
@@ -118,22 +118,22 @@ function fallbackToBootScreen(reason) {
 
 function onPcOn() {
   print("PC active - restoring screens");
-  // L'ecran de demarrage n'est pas allume d'office : quand le profil
-  // memorise est exploitable, il fait partie des prises comme une autre et
-  // s'allume -- ou non -- avec elles. Il ne ressort que si ce profil
-  // manque ou ne vaut rien, pour que le PC ne demarre jamais sans image.
+  // The boot screen is not switched on by default: when the stored
+  // profile is usable, it is an outlet like any other and switches on
+  // -- or not -- along with them. It only comes into play if that profile
+  // is missing or worthless, so that the PC never boots without a picture.
   Shelly.call("KVS.Get", { key: CFG.key }, function (res, err) {
     if (err !== 0 || res === null || typeof res.value !== "string") {
       fallbackToBootScreen("no stored profile");
       return;
     }
-    // Le KVS ne contient qu'une liste d'index dans CFG.outlets, par
-    // exemple "[0,2,3]" : sa valeur est limitee a 255 caracteres.
+    // The KVS only holds a list of indexes into CFG.outlets, for
+    // example "[0,2,3]": its value is limited to 255 characters.
     //
-    // La forme est verifiee AVANT l'analyse : mJS n'a pas de try/catch, et
-    // un JSON.parse sur du texte invalide interromprait cette fonction
-    // sans jamais atteindre le repli -- le PC demarrerait alors sans image,
-    // precisement le cas que le repli doit couvrir.
+    // The shape is checked BEFORE parsing: mJS has no try/catch, and a
+    // JSON.parse on invalid text would abort this function without ever
+    // reaching the fallback -- the PC would then boot without a picture,
+    // precisely the case the fallback must cover.
     let raw = res.value;
     if (raw.length < 2 || raw.slice(0, 1) !== "[" || raw.slice(-1) !== "]") {
       fallbackToBootScreen("stored profile is not a list");
@@ -148,9 +148,9 @@ function onPcOn() {
     let applied = 0;
     for (let i = 0; i < wanted.length; i++) {
       let index = wanted[i];
-      // Un index hors table vient d'une configuration qui a change depuis
-      // la derniere publication : on l'ignore plutot que de commander une
-      // prise au hasard.
+      // An out-of-range index comes from a configuration that changed
+      // since the last publication: ignore it rather than command a
+      // random outlet.
       if (typeof index === "number" && index >= 0 && index < CFG.outlets.length) {
         enqueue(index, true, 0);
         applied = applied + 1;
@@ -181,12 +181,12 @@ function tick() {
       below = below + 1;
       above = 0;
     }
-    // Entre les deux seuils, aucun compteur n'avance : l'etat tient.
+    // Between the two thresholds, neither counter moves: the state holds.
 
     if (active === null) {
-      // Premiere mesure : demarrage du script, ou redemarrage de la
-      // multiprise apres une coupure secteur. On aligne les prises sur ce
-      // qu'on observe, sans attendre les delais -- dans les deux sens.
+      // First reading: the script is starting, or the power strip is
+      // rebooting after a mains outage. Align the outlets with what is
+      // observed, without waiting for the delays -- in both directions.
       if (watts >= CFG.onW) {
         active = true;
         onPcOn();
@@ -209,11 +209,11 @@ function tick() {
   });
 }
 
-// Gardien de la sortie du PC : elle est retablie des qu'elle est coupee,
-// d'ou que vienne l'ordre. Sa portee a une limite qu'il faut connaitre --
-// le firmware n'offre aucun moyen de REFUSER une coupure, seulement de la
-// corriger, et les quelque 180 ms de reaction arrivent bien apres qu'une
-// alimentation ATX a lache. Il remet le courant, il n'empeche pas l'arret.
+// Guardian of the PC's outlet: it is restored as soon as it is switched off,
+// wherever the order comes from. Its reach has a limit worth knowing --
+// the firmware offers no way to REFUSE a switch-off, only to correct it,
+// and the roughly 180 ms reaction comes well after an ATX power supply
+// has dropped out. It restores power; it does not prevent the shutdown.
 Shelly.addStatusHandler(function (event) {
   if (event.component !== "switch:" + JSON.stringify(CFG.pc)) {
     return;

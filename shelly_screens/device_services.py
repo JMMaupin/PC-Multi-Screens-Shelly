@@ -1,17 +1,17 @@
-"""Services optionnels d'un appareil Shelly, et ce qu'ils coutent.
+"""Optional services of a Shelly device, and what they cost.
 
-Un Shelly sort d'usine avec une demi-douzaine de services actifs, pensés
-pour couvrir tous les usages imaginables. Aucun n'est necessaire ici :
-l'application pilote les prises par l'API locale, et rien d'autre.
+A Shelly leaves the factory with half a dozen services enabled, designed
+to cover every conceivable use. None of them is needed here: the app
+drives the outlets through the local API, and nothing else.
 
-Chacun garde pourtant sa pile reseau vivante et sa part de memoire. Sur la
-multiprise qui porte les scripts, la mesure a ete nette -- desactiver
-Matter et le Cloud a fait remonter la memoire libre minimale de 88 Ko a
-156 Ko, apres deux redemarrages provoques par le chien de garde du
-firmware. Ce qui ne sert pas peut donc nuire.
+Yet each one keeps its network stack alive and takes its share of memory.
+On the power strip that runs the scripts, the measurement was clear --
+disabling Matter and the Cloud raised the minimum free memory from 88 KB to
+156 KB, after two restarts triggered by the firmware watchdog. What serves
+no purpose can therefore do harm.
 
-Ce module ne decide rien : il decrit, lit et ecrit. Le choix reste a
-l'utilisateur, qui seul sait ce qu'il branchera demain.
+This module decides nothing: it describes, reads and writes. The choice is
+left to the user, who alone knows what they will plug in tomorrow.
 """
 
 from __future__ import annotations
@@ -22,14 +22,14 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Service:
-    """Un service optionnel, et de quoi le presenter honnetement."""
+    """An optional service, and what it takes to present it honestly."""
 
-    key: str  # nom du composant dans l'API Shelly
-    label: str  # intitule affiche
-    purpose: str  # a quoi il sert, en general
-    verdict: str  # pourquoi il ne sert pas ici
-    # Certains services refusent d'etre coupes sur certains firmwares.
-    # On le constate a la relecture plutot que de le supposer.
+    key: str  # component name in the Shelly API
+    label: str  # displayed title
+    purpose: str  # what it is for, in general
+    verdict: str  # why it is not needed here
+    # Some services refuse to be turned off on some firmwares. We find
+    # out by reading back rather than assuming it.
 
 
 SERVICES: tuple[Service, ...] = (
@@ -109,11 +109,11 @@ SERVICES: tuple[Service, ...] = (
 
 
 def read_states(device) -> dict[str, bool | None]:
-    """Etat de chaque service, `None` quand l'appareil n'en sait rien.
+    """State of each service, `None` when the device knows nothing of it.
 
-    Un composant absent de la configuration n'existe pas sur ce modele, ou
-    ne se laisse pas regler : on le distingue d'un service simplement
-    eteint, pour ne pas proposer un interrupteur qui ne commande rien.
+    A component missing from the configuration does not exist on this
+    model, or cannot be configured: we tell it apart from a service that is
+    merely off, so as not to offer a switch that controls nothing.
     """
     config: dict[str, Any] = device.call("Shelly.GetConfig") or {}
     states: dict[str, bool | None] = {}
@@ -127,11 +127,11 @@ def read_states(device) -> dict[str, bool | None]:
 
 
 def set_state(device, key: str, enabled: bool) -> bool:
-    """Active ou coupe un service ; dit si un redemarrage est necessaire.
+    """Enable or disable a service; tell whether a restart is needed.
 
-    Le nom de la methode se deduit du composant : `matter` devient
-    `Matter.SetConfig`, `ble` devient `BLE.SetConfig`. Les majuscules ne
-    suivent pas une regle unique, d'ou cette table.
+    The method name is derived from the component: `matter` becomes
+    `Matter.SetConfig`, `ble` becomes `BLE.SetConfig`. Capitalisation does
+    not follow a single rule, hence this table.
     """
     methods = {
         "matter": "Matter.SetConfig",
@@ -150,16 +150,16 @@ def set_state(device, key: str, enabled: bool) -> bool:
 
 
 def restart_required(device) -> bool:
-    """Vrai si des reglages attendent un redemarrage pour prendre effet."""
+    """True if some settings are waiting for a restart to take effect."""
     status = device.call("Sys.GetStatus") or {}
     return bool(status.get("restart_required", False))
 
 
 def memory(device) -> tuple[int, int, int]:
-    """Memoire libre, minimum atteint et taille totale, en octets.
+    """Free memory, lowest point reached and total size, in bytes.
 
-    Le minimum est le chiffre parlant : c'est lui qui dit si l'appareil a
-    frole la panne seche, et c'est lui qui remonte quand on allege.
+    The minimum is the telling figure: it shows whether the device came
+    close to running dry, and it is what goes up when the load is lightened.
     """
     status = device.call("Sys.GetStatus") or {}
     return (

@@ -1,25 +1,25 @@
-// Releve des paliers de consommation de l'unite centrale.
+// Logger of the PC's power levels.
 //
-// L'application ne peut pas mesurer ce que consomme le PC eteint : elle
-// s'eteint avec lui. Ce script, lui, tourne sur la multiprise. Il en tient
-// deux traces complementaires :
+// The application cannot measure what the PC draws while off: it shuts down
+// with it. This script, on the other hand, runs on the power strip. It keeps
+// two complementary records:
 //
-//   * un histogramme, qui dit combien de temps a ete passe a chaque
-//     niveau -- c'est lui qui separe les paliers et fonde les seuils ;
-//   * une suite de ticks horodates, qui montre quand la consommation a
-//     change et permet de placer les seuils a l'oeil.
+//   * a histogram, telling how long was spent at each level -- this is what
+//     separates the levels and what the thresholds are based on;
+//   * a series of timestamped ticks, showing when the power draw changed
+//     and making it possible to place the thresholds by eye.
 //
-// Les ticks ne sont ecrits que lorsque la puissance bouge vraiment. Un PC
-// au repos, ou en veille toute une nuit, ne produit alors qu'un point :
-// la ou un echantillonnage regulier aurait sature la memoire de mesures
-// identiques, on garde des journees entieres dans la meme place. C'est le
-// principe des ticks boursiers -- on enregistre l'evenement, pas l'horloge.
+// Ticks are only written when the power really moves. A PC idling, or
+// asleep for a whole night, then produces a single point: where regular
+// sampling would have filled the memory with identical readings, whole
+// days fit in the same space. This is how stock-market ticks work -- record
+// the event, not the clock.
 //
-// Chaque tick tient en trois caracteres : le niveau de puissance, puis le
-// temps ecoule depuis le tick precedent sur deux caracteres. Le tout doit
-// entrer dans une valeur du KVS, limitee a 255 caracteres.
+// Each tick fits in three characters: the power level, then the time
+// elapsed since the previous tick on two characters. The whole thing must
+// fit in one KVS value, limited to 255 characters.
 //
-// La configuration est injectee par l'application ; ne pas l'editer ici.
+// The configuration is injected by the application; do not edit it here.
 // --- CONFIG ---
 
 let ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
@@ -30,13 +30,13 @@ let lowest = -1;
 let highest = 0;
 let sinceWrite = 0;
 
-// Suite de ticks, et etat du dernier enregistre.
+// Tick series, and the state of the last one recorded.
 let ticks = "";
 let lastLevel = -1;
 let sinceTick = 0;
-// Instant du dernier tick, en temps Unix. Les ticks n'encodent que des
-// ecarts entre eux : sans ce repere, l'application saurait ce qui s'est
-// passe pendant une veille, mais pas quand, a un quart d'heure pres.
+// Time of the last tick, as Unix time. Ticks only encode the gaps between
+// them: without this anchor, the application would know what happened
+// during a sleep, but not when, to within a quarter of an hour.
 let lastTickTime = 0;
 
 function bucketOf(watts) {
@@ -48,20 +48,20 @@ function bucketOf(watts) {
   return EDGES.length;
 }
 
-// Echelle logarithmique : la precision se concentre sous quinze watts, la
-// ou se jouent la veille et l'arret, et se relache au-dela de cent, ou
-// quelques watts d'ecart ne changent rien au choix d'un seuil.
-// mJS n'offre pas log1p ; Math.log(1 + w) fait le meme office.
+// Logarithmic scale: precision is concentrated below fifteen watts, where
+// sleep and shutdown play out, and relaxes above a hundred, where a few
+// watts' difference changes nothing in the choice of a threshold.
+// mJS has no log1p; Math.log(1 + w) does the same job.
 function levelOf(watts) {
   if (watts <= 0) {
     return 0;
   }
   let ratio = Math.log(1 + watts) / Math.log(1 + CFG.maxW);
   let level = Math.round(ratio * 63);
-  // L'encadrement est exige franchement plutot que borne par deux tests :
-  // un NaN echappe a `level < 0` comme a `level > 63`, et ressortirait
-  // tel quel. Il ne donnerait alors aucun caractere, et le tick ampute
-  // decalerait toute la suite.
+  // The range is required outright rather than clamped by two tests:
+  // a NaN slips past both `level < 0` and `level > 63`, and would come
+  // out as is. It would then yield no character, and the truncated tick
+  // would shift the whole series.
   if (!(level >= 0 && level <= 63)) { return 0; }
   return level;
 }
@@ -71,27 +71,27 @@ function charOf(value) {
 }
 
 function recordTick(level, elapsed) {
-  // Le temps ecoule tient sur deux caracteres, soit 4095 intervalles au
-  // plus. Au-dela, on plafonne : un ecart aussi long ne se produit que si
-  // la puissance n'a pas bouge, et sa valeur exacte n'apprend rien.
+  // The elapsed time fits in two characters, i.e. 4095 intervals at
+  // most. Beyond that, it is capped: such a long gap only happens when
+  // the power has not moved, and its exact value teaches nothing.
   if (elapsed > 4095) {
     elapsed = 4095;
   }
   let encoded = charOf(level)
     + charOf(Math.floor(elapsed / 64))
     + charOf(elapsed % 64);
-  // Trois caracteres, jamais deux : un encodage incomplet decalerait
-  // tous les ticks suivants, et la courbe entiere deviendrait illisible.
+  // Three characters, never two: an incomplete encoding would shift
+  // every following tick, and the whole curve would become unreadable.
   if (encoded.length !== 3) {
     return;
   }
-  // File glissante : les ticks les plus anciens cedent la place.
+  // Sliding queue: the oldest ticks make room.
   if (ticks.length + 3 > CFG.maxChars) {
     ticks = ticks.slice(ticks.length + 3 - CFG.maxChars);
   }
   ticks = ticks + encoded;
-  // L'horloge de l'appareil est synchronisee par SNTP ; tant qu'elle ne
-  // l'est pas, unixtime vaut null et l'on garde le repere precedent.
+  // The device clock is synchronised by SNTP; until it is, unixtime is
+  // null and the previous anchor is kept.
   let sys = Shelly.getComponentStatus("sys");
   if (sys !== null && typeof sys.unixtime === "number") {
     lastTickTime = sys.unixtime;
@@ -113,8 +113,8 @@ function tick() {
       return;
     }
     let watts = res.apower;
-    // Juste apres un demarrage, la multiprise n'a pas encore de mesure :
-    // `apower` vaut null, et tout calcul en tire un NaN. On attend.
+    // Right after a boot, the power strip has no reading yet: `apower`
+    // is null, and any computation on it yields NaN. Wait.
     if (typeof watts !== "number") {
       return;
     }
@@ -134,10 +134,10 @@ function tick() {
     let slot = bucketOf(watts);
     counts[slot] = counts[slot] + 1;
 
-    // Un tick est retenu quand la puissance s'ecarte nettement du dernier
-    // niveau enregistre -- les petites fluctuations d'un PC en marche ne
-    // disent rien d'utile -- ou quand trop de temps a passe sans rien
-    // noter, pour que la courbe garde un point d'ancrage.
+    // A tick is kept when the power moves clearly away from the last
+    // recorded level -- the small fluctuations of a running PC say
+    // nothing useful -- or when too much time has passed without
+    // recording anything, so that the curve keeps an anchor point.
     let level = levelOf(watts);
     let gap = level - lastLevel;
     if (gap < 0) { gap = -gap; }
@@ -148,25 +148,25 @@ function tick() {
       changed = true;
     }
 
-    // On ecrit sur un palier inedit ou un nouveau tick, sinon a intervalle
-    // regulier : de quoi suivre la mesure sans user la flash.
+    // Write on a new level or a new tick, otherwise at regular
+    // intervals: enough to follow the measurement without wearing the flash.
     if (changed || sinceWrite >= CFG.writeEvery) {
       store();
     }
   });
 }
 
-// Au demarrage, on reprend la suite deja ecrite dans le KVS.
+// On startup, pick up the series already written to the KVS.
 //
-// La memoire vive ne survit ni a une coupure ni a un plantage de la
-// multiprise, et sans cette relecture le releveur repartait d'une courbe
-// vide qu'il ecrivait aussitot par-dessus l'ancienne. L'historique
-// disparaissait donc au moment precis ou l'on cherchait a comprendre ce
-// qui venait de se passer. Le chronometrage du trou n'est pas connu, mais
-// mieux vaut une courbe amputee d'un redemarrage qu'aucune courbe.
+// RAM survives neither a power cut nor a crash of the power strip, and
+// without this re-read the logger restarted from an empty curve that it
+// immediately wrote over the old one. The history therefore vanished at
+// the very moment one was trying to understand what had just happened.
+// The duration of the gap is unknown, but a curve missing one restart is
+// better than no curve at all.
 //
-// Le minuteur ne part qu'une fois la relecture faite : demarre avant, le
-// premier releve ecraserait la suite qu'on essaie de recuperer.
+// The timer only starts once the re-read is done: started earlier, the
+// first reading would overwrite the series being recovered.
 function start() {
   print("pc_probe started on switch " + JSON.stringify(CFG.pc)
     + " with " + JSON.stringify(ticks.length / 3) + " tick(s) restored");
@@ -177,8 +177,8 @@ function start() {
 Shelly.call("KVS.Get", { key: CFG.seriesKey }, function (res, err) {
   if (err === 0 && res !== null && typeof res.value === "string") {
     let kept = res.value;
-    // Une suite valide est faite de groupes de trois caracteres. Un reste
-    // partiel est ecarte par la tete : le garder decalerait tout le trace.
+    // A valid series is made of groups of three characters. A partial
+    // remainder is dropped from the head: keeping it would shift the whole plot.
     let extra = kept.length % 3;
     if (extra !== 0) {
       kept = kept.slice(extra);

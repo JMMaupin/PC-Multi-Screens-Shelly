@@ -1,20 +1,21 @@
-"""Anneaux lumineux et boutons des prises d'une Power Strip.
+"""Light rings and buttons on a Power Strip's outlets.
 
-Chaque prise porte un anneau RGB et un bouton, regles par un seul composant
-du firmware, `POWERSTRIP_UI`. Livres a pleine luminosite, les anneaux
-eclairent une piece dans le noir ; le bouton, lui, commute la prise au
-moindre appui -- y compris celle du PC.
+Each outlet carries an RGB ring and a button, both set by a single firmware
+component, `POWERSTRIP_UI`. Shipped at full brightness, the rings light up
+a room in the dark; the button, for its part, toggles the outlet at the
+slightest press -- including the PC's.
 
-Deux constats faits sur l'appareil guident ce module :
+Two findings made on the device shape this module:
 
-- `POWERSTRIP_UI.SetConfig` accepte une configuration partielle : on
-  n'envoie que ce qui change, le reste demeure ;
-- les reglages s'appliquent a chaud. Seule la toute premiere activation
-  du mode nuit a reclame un redemarrage (`restart_required`) ; on suit donc
-  ce que l'appareil annonce plutot que de le supposer. Un redemarrage ne
-  fait basculer aucune sortie : les relais sont bistables.
+- `POWERSTRIP_UI.SetConfig` accepts a partial configuration: we only send
+  what changes, the rest stays as is;
+- settings apply live. Only the very first activation of night mode asked
+  for a restart (`restart_required`); so we follow what the device reports
+  rather than assuming it. A restart does not flip any output: the relays
+  are bistable.
 
-Comme `device_services`, ce module decrit, lit et ecrit, sans rien decider.
+Like `device_services`, this module describes, reads and writes, without
+deciding anything.
 """
 
 from __future__ import annotations
@@ -26,20 +27,20 @@ from typing import Any
 from .device import ShellyError
 
 COMPONENT = "POWERSTRIP_UI"
-MODE_POWER = "power"  # la couleur suit la puissance consommee
-MODE_SWITCH = "switch"  # une couleur allumee, une autre eteinte
+MODE_POWER = "power"  # the colour follows the power drawn
+MODE_SWITCH = "switch"  # one colour when on, another when off
 MODE_OFF = "off"
 MODES = (MODE_POWER, MODE_SWITCH, MODE_OFF)
-BUTTON_MOMENTARY = "momentary"  # l'appui commute la prise
-BUTTON_DETACHED = "detached"  # l'appui ne commande plus rien
+BUTTON_MOMENTARY = "momentary"  # a press toggles the outlet
+BUTTON_DETACHED = "detached"  # a press no longer controls anything
 
-# Reglage de nuit propose par defaut : assez pour reperer une prise, pas
-# assez pour eclairer la piece.
+# Night setting offered by default: enough to spot an outlet, not enough to
+# light up the room.
 NIGHT_BRIGHTNESS = 5
 NIGHT_START = "22:00"
 NIGHT_END = "07:00"
 
-# Seule cle de couleurs acceptee : elle vaut pour toutes les prises.
+# The only colour key accepted: it applies to every outlet.
 COLOURS_KEY = "switch:0"
 
 _CLOCK = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -47,15 +48,15 @@ _CLOCK = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 @dataclass(frozen=True)
 class LedSettings:
-    """Reglage des anneaux, identique pour toutes les prises d'un appareil.
+    """Ring settings, identical for every outlet of a device.
 
-    Le firmware n'a qu'un jeu de couleurs, range sous `switch:0` et valable
-    pour toutes les prises : il refuse toute autre cle (erreur -103). Les
-    couleurs sont en pourcentages (0-100 par canal), comme il les attend.
+    The firmware has only one set of colours, stored under `switch:0` and
+    valid for every outlet: it rejects any other key (error -103). Colours
+    are percentages (0-100 per channel), as it expects them.
     """
 
     mode: str
-    brightness: int  # mode puissance
+    brightness: int  # power mode
     on_rgb: tuple[int, int, int]
     on_brightness: int
     off_rgb: tuple[int, int, int]
@@ -67,15 +68,15 @@ class LedSettings:
 
 
 def valid_clock(value: str) -> bool:
-    """Vrai pour une heure « HH:MM » que l'appareil acceptera."""
+    """True for an "HH:MM" time that the device will accept."""
     return bool(_CLOCK.match(value))
 
 
 def read(device) -> tuple[LedSettings, dict[int, str]] | None:
-    """Reglage des anneaux et mode de chaque bouton, `None` hors Power Strip.
+    """Ring settings and each button's mode, `None` if not a Power Strip.
 
-    Un autre modele de Shelly ignore la methode : on le distingue d'une
-    panne, pour que l'interface dise « non disponible » plutot qu'une erreur.
+    Another Shelly model ignores the method: we tell that apart from a
+    failure, so the interface says "not available" rather than an error.
     """
     try:
         config: dict[str, Any] = device.call(f"{COMPONENT}.GetConfig") or {}
@@ -104,8 +105,8 @@ def read(device) -> tuple[LedSettings, dict[int, str]] | None:
         off_rgb=rgb("off", (100, 0, 0)),
         off_brightness=level((first.get("off") or {}).get("brightness", 100)),
         night_enabled=bool(night.get("enable", False)),
-        # Mode nuit jamais regle : l'appareil annonce 100 %, ce qui ne
-        # vaut pas proposition. On suggere plutot le reglage par defaut.
+        # Night mode never set: the device reports 100 %, which is no
+        # suggestion at all. We offer the default setting instead.
         night_brightness=(
             level(night.get("brightness", NIGHT_BRIGHTNESS))
             if night.get("enable") or night.get("active_between")
@@ -123,7 +124,7 @@ def read(device) -> tuple[LedSettings, dict[int, str]] | None:
 
 
 def apply(device, settings: LedSettings) -> bool:
-    """Envoie le reglage des anneaux ; dit si un redemarrage est necessaire."""
+    """Send the ring settings; tell whether a restart is needed."""
     if settings.mode not in MODES:
         raise ValueError(f"Unknown LED mode '{settings.mode}'")
     for clock in (settings.night_start, settings.night_end):
@@ -150,7 +151,7 @@ def apply(device, settings: LedSettings) -> bool:
 
 
 def set_button(device, switch_id: int, detached: bool) -> None:
-    """Detache ou rattache le bouton d'une prise. Effet immediat."""
+    """Detach or reattach an outlet's button. Takes effect immediately."""
     mode = BUTTON_DETACHED if detached else BUTTON_MOMENTARY
     device.call(
         f"{COMPONENT}.SetConfig",

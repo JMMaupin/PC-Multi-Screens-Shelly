@@ -1,14 +1,14 @@
-"""Stockage du mot de passe de l'appareil.
+"""Storage of the device password.
 
-Un mot de passe en clair dans un fichier de configuration est lisible par
-tout ce qui tourne sous la session -- et le fichier se retrouve vite dans
-une sauvegarde ou une copie de dossier. On le chiffre donc avec DPAPI, le
-service de Windows prevu pour cela : la cle derive du compte utilisateur,
-et le chiffre n'est dechiffrable que par ce compte, sur cette machine.
+A plaintext password in a configuration file is readable by anything
+running in the session -- and the file quickly ends up in a backup or a
+folder copy. So it is encrypted with DPAPI, the Windows service designed
+for this: the key is derived from the user account, and the ciphertext can
+only be decrypted by that account, on this machine.
 
-Ce n'est pas un coffre-fort : un programme lance sous la meme session peut
-demander a Windows de dechiffrer. Cela protege du fichier recopie ailleurs
-ou lu par un autre compte, pas d'un logiciel malveillant deja en place.
+This is not a vault: a program running in the same session can ask
+Windows to decrypt. It protects against the file being copied elsewhere
+or read by another account, not against malware already in place.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from ctypes import wintypes
 crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
-# Entropie propre a l'application : un chiffre produit ici ne se dechiffre
-# pas depuis un autre programme, meme sous le meme compte.
+# Application-specific entropy: a ciphertext produced here can't be
+# decrypted from another program, even under the same account.
 ENTROPY = b"shelly-screens/v1"
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
 PREFIX = "dpapi:"
@@ -48,7 +48,7 @@ kernel32.LocalFree.argtypes = [ctypes.c_void_p]
 
 
 class _Blob:
-    """Garde le tampon en vie aussi longtemps que la structure qui le vise."""
+    """Keeps the buffer alive as long as the structure pointing to it."""
 
     def __init__(self, data: bytes) -> None:
         self._buffer = ctypes.create_string_buffer(data, len(data))
@@ -64,7 +64,7 @@ def _read(blob: DATA_BLOB) -> bytes:
 
 
 def protect(secret: str) -> str:
-    """Chiffre un secret ; renvoie une chaine stockable telle quelle."""
+    """Encrypts a secret; returns a string that can be stored as is."""
     if not secret:
         return ""
     source = _Blob(secret.encode("utf-8"))
@@ -80,11 +80,11 @@ def protect(secret: str) -> str:
 
 
 def unprotect(stored: str) -> str:
-    """Dechiffre une valeur produite par `protect`.
+    """Decrypts a value produced by `protect`.
 
-    Une valeur sans prefixe est rendue telle quelle : c'est un mot de passe
-    ecrit a la main dans le fichier, ou l'heritage d'une version anterieure
-    qui les stockait en clair.
+    A value without the prefix is returned as is: it is a password written
+    by hand into the file, or a leftover from an earlier version that
+    stored them in plaintext.
     """
     if not stored:
         return ""
@@ -102,7 +102,7 @@ def unprotect(stored: str) -> str:
         None, None, CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out),
     )
     if not ok:
-        # Chiffre produit par un autre compte ou une autre machine.
+        # Ciphertext produced by another account or another machine.
         return ""
     return _read(out).decode("utf-8", errors="replace")
 

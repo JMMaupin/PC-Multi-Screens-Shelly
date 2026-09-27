@@ -1,21 +1,21 @@
-"""Plan des ecrans, disposes comme Windows les place sur le bureau.
+"""Screen map, with screens arranged the way Windows places them on the desktop.
 
-Un profil se lit mieux sur un dessin que dans une liste de cases : on voit
-d'un coup d'oeil quels ecrans restent allumes, et ou. Chaque ecran porte le
-nom de la prise qui l'alimente ; un clic sur un ecran allume ou coupe sa
-prise dans le profil, comme la case correspondante.
+A profile reads better as a drawing than as a list of checkboxes: you see
+at a glance which screens stay on, and where. Each screen bears the name of
+the outlet that powers it; clicking a screen switches its outlet on or off
+in the profile, like the matching checkbox.
 
-Chaque ecran est dessine a sa taille physique : la diagonale que son EDID
-annonce, dans les proportions de sa definition. Un 27 pouces 4K et un
-27 pouces QHD ont la meme taille sur le plan, comme sur le bureau. Un ecran
-dont l'EDID ne dit rien garde sa taille effective -- sa definition divisee
-par l'echelle reglee dans Windows --, convertie a 96 points par pouce, la
-densite que Windows suppose a 100 %.
+Each screen is drawn at its physical size: the diagonal its EDID reports,
+in the proportions of its resolution. A 27-inch 4K and a 27-inch QHD have
+the same size on the map, as on the desk. A screen whose EDID says nothing
+keeps its effective size -- its resolution divided by the scale set in
+Windows --, converted at 96 dots per inch, the density Windows assumes at
+100 %.
 
-Les coordonnees du bureau, elles, sont en pixels : une fois chaque ecran
-ramene a sa taille reelle, elles ne se recollent plus. Le plan est donc
-reconstruit de proche en proche, a partir de l'ecran principal, en suivant
-les bords que les ecrans partagent.
+Desktop coordinates, however, are in pixels: once each screen is brought
+back to its real size, they no longer fit together. The map is therefore
+rebuilt step by step, starting from the primary screen, following the
+edges the screens share.
 """
 
 from __future__ import annotations
@@ -31,36 +31,36 @@ from .theme import Palette
 if TYPE_CHECKING:
     from ..config import AppConfig
 
-STATE_ON = "on"  # alimente par le profil
-STATE_OFF = "off"  # coupe par le profil
-STATE_FIXED = "fixed"  # prise protegee : toujours alimente
-STATE_UNMANAGED = "unmanaged"  # aucune prise associee
-STATE_GHOST = "ghost"  # coupe, mais Windows garde l'ecran sur le bureau
+STATE_ON = "on"  # powered by the profile
+STATE_OFF = "off"  # switched off by the profile
+STATE_FIXED = "fixed"  # protected outlet: always powered
+STATE_UNMANAGED = "unmanaged"  # no associated outlet
+STATE_GHOST = "ghost"  # switched off, but Windows keeps the screen on the desktop
 
 MARGIN_PX = 14
-GAP_PX = 3  # espace entre deux ecrans jointifs, pour les distinguer
-EDGE_TOLERANCE_PX = 16  # deux bords plus proches sont jointifs
-REFERENCE_MM_PER_PX = 25.4 / 96  # un pixel a 100 %, selon Windows
+GAP_PX = 3  # space between two adjacent screens, to tell them apart
+EDGE_TOLERANCE_PX = 16  # two edges closer than this are adjacent
+REFERENCE_MM_PER_PX = 25.4 / 96  # one pixel at 100 %, according to Windows
 
 Box = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
 class ScreenTile:
-    """Un ecran a dessiner."""
+    """A screen to draw."""
 
-    rect: tuple[int, int, int, int]  # coordonnees du bureau
+    rect: tuple[int, int, int, int]  # desktop coordinates
     title: str
     detail: str
     state: str
-    ref: str | None = None  # prise a basculer d'un clic, s'il y en a une
-    scale: float = 1.0  # echelle reglee dans Windows
+    ref: str | None = None  # outlet toggled by a click, if there is one
+    scale: float = 1.0  # scale set in Windows
     primary: bool = False
-    diagonal: float = 0.0  # pouces, selon l'EDID ; 0 si inconnue
+    diagonal: float = 0.0  # inches, according to the EDID; 0 if unknown
 
 
 def mm_per_pixel(tile: ScreenTile) -> float:
-    """Taille reelle d'un pixel de cet ecran, en millimetres."""
+    """Real size of one pixel of this screen, in millimeters."""
     width = tile.rect[2] - tile.rect[0]
     height = tile.rect[3] - tile.rect[1]
     if tile.diagonal > 0 and width > 0 and height > 0:
@@ -69,13 +69,13 @@ def mm_per_pixel(tile: ScreenTile) -> float:
 
 
 def physical_layout(tiles: list[ScreenTile]) -> list[Box]:
-    """Place chaque ecran a sa taille reelle, en millimetres, sans rompre les contacts.
+    """Place each screen at its real size, in millimeters, without breaking contacts.
 
-    On part de l'ecran principal et l'on pose ses voisins un a un : un
-    ecran colle a droite d'un autre commence la ou celui-ci finit, et son
-    decalage le long du bord commun se convertit dans les pixels de l'ecran
-    deja pose. Un ecran qui ne touche aucun autre -- Windows ne le permet
-    pas, mais une configuration editee a la main si -- garde sa place.
+    Start from the primary screen and lay its neighbors one by one: a
+    screen stuck to the right of another starts where that one ends, and
+    its offset along the shared edge is converted using the pixels of the
+    screen already placed. A screen that touches no other -- Windows does
+    not allow it, but a hand-edited configuration does -- keeps its place.
     """
     tol = EDGE_TOLERANCE_PX
     factors = [mm_per_pixel(tile) for tile in tiles]
@@ -103,7 +103,7 @@ def physical_layout(tiles: list[ScreenTile]) -> list[Box]:
                 continue
             b = tile.rect
             width, height = size(other)
-            # Decalages le long du bord commun, dans les pixels de l'ecran pose.
+            # Offsets along the shared edge, in the placed screen's pixels.
             shift_y = ay0 + (b[1] - a[1]) * a_factor
             shift_x = ax0 + (b[0] - a[0]) * a_factor
             if abs(b[0] - a[2]) <= tol and overlap(a[1], a[3], b[1], b[3]):
@@ -127,7 +127,7 @@ def physical_layout(tiles: list[ScreenTile]) -> list[Box]:
 
 
 class ScreenMap:
-    """Le plan, dessine sur un Canvas."""
+    """The map, drawn on a Canvas."""
 
     def __init__(
         self,
@@ -138,8 +138,8 @@ class ScreenMap:
         compact: bool = False,
         height: int = 150,
     ) -> None:
-        # `compact` : le nom seul, sans la ligne de details -- pour un plan
-        # reduit, ou elle ne tiendrait pas.
+        # `compact`: the name only, without the detail line -- for a small
+        # map, where it would not fit.
         self._compact = compact
         self._palette = palette
         self._on_toggle = on_toggle
@@ -152,18 +152,18 @@ class ScreenMap:
         self.canvas.bind("<Motion>", self._on_motion)
 
     def show(self, tiles: list[ScreenTile], empty_text: str | None = None) -> None:
-        """Dessine ces ecrans ; `empty_text` remplace le message du plan vide."""
+        """Draw these screens; `empty_text` replaces the empty-map message."""
         self._tiles = tiles
         self._showing_empty = empty_text
         self.draw()
 
-    # ------------------------------------------------------------ trace
+    # ------------------------------------------------------------ drawing
 
     def draw(self) -> None:
         canvas = self.canvas
         palette = self._palette()
         canvas.delete("all")
-        # Le plan est pose dans un cadre, dont le fond est celui des cartes.
+        # The map sits in a frame, whose background is the card background.
         canvas.configure(background=palette.surface)
         self._hits = []
         width = max(canvas.winfo_width(), 100)
@@ -185,7 +185,7 @@ class ScreenMap:
             (width - 2 * MARGIN_PX) / max(1, right - left),
             (height - 2 * MARGIN_PX) / max(1, bottom - top),
         )
-        # Le plan est centre dans la zone.
+        # The map is centered in the area.
         origin_x = (width - (right - left) * scale) / 2
         origin_y = (height - (bottom - top) * scale) / 2
 
@@ -202,8 +202,8 @@ class ScreenMap:
         canvas = self.canvas
         x0, y0, x1, y1 = box
         lit = tile.state in (STATE_ON, STATE_FIXED)
-        # Un ecran allume est plein et cerne de vert ; un ecran coupe n'est
-        # plus qu'un contour en pointille, sur le fond du plan.
+        # A screen that is on is filled and outlined in green; a switched-off
+        # screen is just a dashed outline, on the map background.
         if lit:
             fill, outline, width, dash = palette.surface_alt, palette.on, 3, ()
             title_colour, detail_colour = palette.text, palette.text_muted
@@ -211,7 +211,7 @@ class ScreenMap:
             fill, outline, width, dash = palette.surface, palette.off, 1, (4, 3)
             title_colour = detail_colour = palette.text_muted
         elif tile.state == STATE_GHOST:
-            # Coupe, mais toujours sur le bureau : il faut que ca se voie.
+            # Switched off, but still on the desktop: it must be visible.
             fill, outline, width, dash = palette.surface, palette.warn, 2, (4, 3)
             title_colour, detail_colour = palette.text_muted, palette.warn
         else:
@@ -238,7 +238,7 @@ class ScreenMap:
             font=("", 8), width=wrap, justify="center",
         )
 
-    # ------------------------------------------------------------ souris
+    # ------------------------------------------------------------ mouse
 
     def _ref_at(self, x: float, y: float) -> str | None:
         for (x0, y0, x1, y1), ref in self._hits:
@@ -260,8 +260,8 @@ def describe(
     state: str, width: int, height: int, primary: bool, scale: float = 1.0,
     diagonal: float = 0.0,
 ) -> str:
-    """La ligne sous le nom : diagonale, definition, echelle, role, etat."""
-    # Espace insecable : « 100 % » ne doit pas se couper en fin de ligne.
+    """The line under the name: diagonal, resolution, scale, role, state."""
+    # Non-breaking space: "100 %" must not be split at the end of a line.
     parts = [f"{width}x{height}", f"{round(scale * 100)}\u00a0%"]
     if diagonal > 0:
         parts.insert(0, f'{diagonal:.1f}"')
@@ -284,12 +284,12 @@ def build_tiles(
     editable: bool,
     ghosts: tuple[str, ...] | list[str] = (),
 ) -> list[ScreenTile]:
-    """Les ecrans memorises, prets a dessiner.
+    """The remembered screens, ready to draw.
 
-    `lit(ref)` dit si la prise d'un ecran est allumee -- None : a montrer
-    allume, faute de savoir. `editable` rend les ecrans cliquables. Commun
-    au plan des reglages et a celui de la fenetre du raccourci : meme
-    dessin, memes regles.
+    `lit(ref)` tells whether a screen's outlet is on -- None: show it as
+    on, for lack of knowing. `editable` makes the screens clickable. Shared
+    by the settings map and the shortcut window's map: same drawing, same
+    rules.
     """
     by_key = {o.monitor_key: o for o in config.outlets if o.monitor_key}
     tiles = []

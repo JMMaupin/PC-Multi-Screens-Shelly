@@ -1,8 +1,7 @@
-"""Ce que l'application dit d'elle-meme : auteur, liens, appareils valides.
+"""What the app says about itself: author, links, validated devices.
 
-Rassemble en un seul endroit ce que montrent l'onglet About et, plus tard,
-l'executable et sa page de publication : une information ecrite deux fois
-finit toujours par diverger.
+Gathers in one place what the About tab shows and, later, the executable
+and its release page: information written twice always ends up diverging.
 """
 
 from __future__ import annotations
@@ -13,25 +12,25 @@ from urllib.parse import quote_plus
 AUTHOR = "JMMaupin"
 
 REPOSITORY_URL = "https://github.com/JMMaupin/PC-Multi-Screens-Shelly"
-# La page des versions publiees, ou se trouvera l'executable.
+# The published releases page, where the executable will be.
 RELEASES_URL = f"{REPOSITORY_URL}/releases"
 
 
 @dataclass(frozen=True)
 class ValidatedDevice:
-    """Un appareil sur lequel l'application a ete eprouvee.
+    """A device the app has been tested on.
 
-    Le firmware compte autant que le modele : c'est sur cette version que
-    le comportement a ete verifie, et une autre peut le changer.
+    The firmware matters as much as the model: this is the version on which
+    the behaviour was verified, and another one may change it.
     """
 
     name: str
-    model: str  # code du modele, tel que l'appareil l'annonce
+    model: str  # model code, as the device reports it
     firmware: str
 
     @property
     def search_url(self) -> str:
-        """Une recherche du produit : aucune page de fabricant n'est perenne."""
+        """A search for the product: no manufacturer page lasts forever."""
         return f"https://www.google.com/search?q={quote_plus(self.name)}"
 
 

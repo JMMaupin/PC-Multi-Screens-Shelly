@@ -1,15 +1,15 @@
-"""Les fenetres restees sur un ecran qu'on vient de couper.
+"""Windows left behind on a screen that was just switched off.
 
-Quand un ecran perd son alimentation, Windows le retire du bureau et rapatrie
-en principe ses fenetres -- mais pas toujours, et pas toutes : un moniteur
-alimente par l'USB-C du PC reste enumere une fois sa prise coupee. On ramene
-donc sur l'ecran allume le plus proche toute fenetre qu'on ne peut plus
-attraper.
+When a screen loses power, Windows removes it from the desktop and is
+supposed to bring its windows back -- but not always, and not all of them:
+a monitor powered through the PC's USB-C stays enumerated once its outlet
+is off. So any window that can no longer be grabbed is brought back to the
+nearest screen that is on.
 
-C'est tout. L'application ne memorise pas de disposition de fenetres : un
-profil dit quels ecrans sont allumes, pas ce qu'on y fait, et sur un meme
-profil se succedent des activites qui ont chacune la leur. La position des
-ecrans, elle, est celle que Windows definit, lue a chaque fois.
+That's all. The application doesn't remember any window layout: a profile
+says which screens are on, not what is done on them, and a single profile
+hosts successive activities that each have their own. The position of the
+screens is the one Windows defines, read every time.
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_ASYNCWINDOWPOS = 0x4000
 
-# Une fenetre compte comme visible si l'on peut en attraper la barre de
-# titre : une bande de cette hauteur en haut de la fenetre, dont au moins
-# cette largeur tombe sur un ecran utilisable.
+# A window counts as visible if its title bar can be grabbed: a strip of
+# this height at the top of the window, at least this much of whose width
+# falls on a usable screen.
 TITLE_STRIP_PX = 32
 MIN_GRAB_PX = 80
 
@@ -110,12 +110,12 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 
 @dataclass
 class WindowEntry:
-    """Une fenetre et sa place sur le bureau, dans l'instant."""
+    """A window and its place on the desktop, at this moment."""
 
     hwnd: int
     title: str
-    executable: str  # chemin complet, en minuscules
-    show_cmd: int  # normal / minimisee / maximisee
+    executable: str  # full path, lowercase
+    show_cmd: int  # normal / minimised / maximised
     normal_rect: tuple[int, int, int, int]
 
     @property
@@ -134,7 +134,7 @@ def _text_of(hwnd: int, getter, size: int = 512) -> str:
 
 
 def _executable_of(hwnd: int) -> str:
-    """Chemin de l'executable proprietaire de la fenetre, en minuscules."""
+    """Path of the executable that owns the window, lowercase."""
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     if not pid.value:
@@ -153,7 +153,7 @@ def _executable_of(hwnd: int) -> str:
 
 
 def _is_cloaked(hwnd: int) -> bool:
-    """Vrai pour les fenetres masquees par le gestionnaire de bureau (UWP en veille)."""
+    """True for windows cloaked by the desktop window manager (suspended UWP)."""
     cloaked = ctypes.c_int(0)
     result = dwmapi.DwmGetWindowAttribute(
         wintypes.HWND(hwnd),
@@ -165,28 +165,28 @@ def _is_cloaked(hwnd: int) -> bool:
 
 
 def is_manageable(hwnd: int) -> bool:
-    """Vrai si la fenetre est une vraie fenetre d'application deplacable."""
+    """True if the window is a real, movable application window."""
     if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd):
         return False
     if user32.GetAncestor(hwnd, GA_ROOT) != hwnd:
-        return False  # fenetre fille
+        return False  # child window
     if user32.GetWindow(hwnd, GW_OWNER):
-        return False  # boite de dialogue rattachee a une autre fenetre
+        return False  # dialog box owned by another window
     style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
     if style & WS_CHILD:
         return False
     ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
     if ex_style & WS_EX_TOOLWINDOW:
-        return False  # palette d'outils, pas une fenetre de premier plan
+        return False  # tool palette, not a top-level window
     if not _text_of(hwnd, user32.GetWindowTextW):
-        return False  # sans titre, rien a replacer d'utile
+        return False  # no title, nothing useful to reposition
     if _is_cloaked(hwnd):
         return False
     return True
 
 
 def capture() -> list[WindowEntry]:
-    """Releve la position de toutes les fenetres d'application visibles."""
+    """Record the position of every visible application window."""
     entries: list[WindowEntry] = []
 
     def callback(hwnd, _param) -> int:
@@ -211,18 +211,18 @@ def capture() -> list[WindowEntry]:
     return entries
 
 
-# ------------------------------------------------------------ fenetres perdues
+# ------------------------------------------------------------ lost windows
 
 
 def _overlap(a: Rect, b: Rect) -> tuple[int, int]:
-    """Largeur et hauteur communes a deux rectangles (0 s'ils sont disjoints)."""
+    """Width and height shared by two rectangles (0 if they are disjoint)."""
     width = min(a[2], b[2]) - max(a[0], b[0])
     height = min(a[3], b[3]) - max(a[1], b[1])
     return max(0, width), max(0, height)
 
 
 def _grabbable(rect: Rect, areas: list[Rect]) -> bool:
-    """Vrai si la barre de titre tombe, pour une part utile, sur une zone."""
+    """True if a useful part of the title bar falls on one of the areas."""
     strip = (rect[0], rect[1], rect[2], rect[1] + TITLE_STRIP_PX)
     needed = min(MIN_GRAB_PX, max(1, rect[2] - rect[0]))
     for area in areas:
@@ -233,16 +233,16 @@ def _grabbable(rect: Rect, areas: list[Rect]) -> bool:
 
 
 def _distance(point: tuple[int, int], area: Rect) -> float:
-    """Distance d'un point a un rectangle, nulle s'il est dedans."""
+    """Distance from a point to a rectangle, zero if it is inside."""
     dx = max(area[0] - point[0], 0, point[0] - area[2])
     dy = max(area[1] - point[1], 0, point[1] - area[3])
     return (dx * dx + dy * dy) ** 0.5
 
 
 def _fit(rect: Rect, area: Rect) -> Rect:
-    """Le rectangle ramene dans la zone, au plus pres de sa place.
+    """The rectangle brought into the area, as close as possible to its place.
 
-    La taille est gardee, reduite seulement si elle ne tient pas.
+    The size is kept, reduced only if it doesn't fit.
     """
     width = min(rect[2] - rect[0], area[2] - area[0])
     height = min(rect[3] - rect[1], area[3] - area[1])
@@ -258,18 +258,19 @@ def _shift(rect: Rect, dx: int, dy: int) -> Rect:
 def rescue_offscreen(
     usable: list[Rect], known: list[Rect], offset: tuple[int, int]
 ) -> list[WindowEntry]:
-    """Ramene sur l'ecran utilisable le plus proche les fenetres hors de tous.
+    """Bring windows that are off every screen back to the nearest usable one.
 
-    `usable` : zones de travail des ecrans ou l'on peut poser une fenetre.
-    `known` : ecrans reels, avant et apres le changement. Seule une fenetre
-    qui en chevauchait un est ramenee : certains programmes garent des
-    fenetres a -32000 a dessein, et les faire surgir serait une nuisance.
-    `offset` : decalage des coordonnees « espace de travail » de
-    `WINDOWPLACEMENT` vers celles de l'ecran -- non nul quand la barre des
-    taches de l'ecran principal est en haut ou a gauche.
+    `usable`: work areas of the screens where a window can be placed.
+    `known`: real screens, before and after the change. Only a window that
+    overlapped one of them is brought back: some programs park windows at
+    -32000 on purpose, and making them pop up would be a nuisance.
+    `offset`: shift from the "workspace" coordinates of `WINDOWPLACEMENT`
+    to screen coordinates -- non-zero when the primary screen's taskbar is
+    at the top or on the left.
 
-    Une fenetre reduite le reste, et reviendra au bon endroit quand on la
-    rouvrira ; une fenetre agrandie l'est de nouveau, sur son nouvel ecran.
+    A minimised window stays minimised, and will come back in the right
+    place when reopened; a maximised window is maximised again, on its new
+    screen.
     """
     if not usable:
         return []
@@ -278,10 +279,10 @@ def rescue_offscreen(
     minimized = (SW_SHOWMINIMIZED, SW_MINIMIZE, SW_SHOWMINNOACTIVE)
     for entry in capture():
         normal = _shift(entry.normal_rect, dx, dy)
-        # La place « normale » n'est pas toujours celle qu'occupe la
-        # fenetre : agrandie, ou collee a un bord (Aero Snap), elle est
-        # ailleurs. On juge donc sur sa place reelle -- sauf reduite, ou
-        # Windows la gare a -32000 et ou seule compte la place de retour.
+        # The "normal" place is not always where the window actually is:
+        # maximised, or snapped to an edge (Aero Snap), it is elsewhere.
+        # So we judge by its real place -- except when minimised, where
+        # Windows parks it at -32000 and only the restore place matters.
         shown = normal
         if entry.show_cmd not in minimized:
             actual = RECT()
@@ -290,7 +291,7 @@ def rescue_offscreen(
         if _grabbable(shown, usable):
             continue
         if not any(all(_overlap(shown, area)) for area in known):
-            continue  # jamais sur un ecran : garee a dessein, on n'y touche pas
+            continue  # never on a screen: parked on purpose, leave it alone
         centre = ((shown[0] + shown[2]) // 2, (shown[1] + shown[3]) // 2)
         target = min(usable, key=lambda area: _distance(centre, area))
         if entry.show_cmd in minimized or entry.show_cmd == SW_SHOWMAXIMIZED:
@@ -302,20 +303,20 @@ def rescue_offscreen(
             placement.flags = WPF_ASYNCWINDOWPLACEMENT
             placement.rcNormalPosition = RECT(*_shift(new, -dx, -dy))
             if entry.show_cmd == SW_SHOWMAXIMIZED:
-                # Deja agrandie, Windows la laisse ou elle est, meme avec
-                # une nouvelle place normale : on la ramene d'abord a sa
-                # taille normale, sur l'ecran vise, puis on l'y agrandit.
+                # Already maximised, Windows leaves it where it is, even with
+                # a new normal place: first restore it to its normal size
+                # on the target screen, then maximise it there.
                 placement.showCmd = SW_SHOWNOACTIVATE
                 done = user32.SetWindowPlacement(entry.hwnd, ctypes.byref(placement))
                 if done:
                     user32.ShowWindowAsync(entry.hwnd, SW_SHOWMAXIMIZED)
             else:
-                # Une fenetre reduite le reste, sans surgir au premier plan.
+                # A minimised window stays minimised, without popping to the front.
                 placement.showCmd = SW_SHOWMINNOACTIVE
                 done = user32.SetWindowPlacement(entry.hwnd, ctypes.byref(placement))
         else:
-            # Fenetre normale : on la deplace sans l'activer ni la faire
-            # passer devant les autres -- qu'on la retrouve, sans plus.
+            # Normal window: move it without activating it or bringing it
+            # in front of the others -- just so it can be found, nothing more.
             new = _fit(shown, target)
             done = user32.SetWindowPos(
                 entry.hwnd, None, new[0], new[1], new[2] - new[0], new[3] - new[1],

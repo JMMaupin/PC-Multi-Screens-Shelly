@@ -1,15 +1,16 @@
-r"""Enumeration des ecrans actifs et identification stable de chacun.
+r"""Enumeration of the active screens and a stable identity for each one.
 
-Couper l'alimentation d'un ecran le fait disparaitre de Windows : on a donc
-besoin de savoir quels ecrans sont presents a un instant donne, et de les
-reconnaitre d'une session a l'autre.
+Cutting a screen's power makes it disappear from Windows: so we need to
+know which screens are present at a given moment, and to recognise them
+from one session to the next.
 
-Le piege est l'identification. Le nom `\\.\DISPLAY1` est un simple rang
-d'enumeration : il change des qu'un ecran s'allume ou s'eteint. Le modele ne
-suffit pas non plus, des ecrans identiques donnant la meme chaine. On utilise
-donc le chemin d'interface renvoye par EnumDisplayDevices avec le drapeau
-EDD_GET_DEVICE_INTERFACE_NAME, qui contient l'UID de la sortie physique de la
-carte graphique -- stable, et distinct pour deux ecrans du meme modele.
+The catch is identification. The name `\\.\DISPLAY1` is just an
+enumeration rank: it changes as soon as a screen turns on or off. The model
+isn't enough either, since identical screens give the same string. So we
+use the interface path returned by EnumDisplayDevices with the
+EDD_GET_DEVICE_INTERFACE_NAME flag, which contains the UID of the graphics
+card's physical output -- stable, and distinct for two screens of the same
+model.
 """
 
 from __future__ import annotations
@@ -32,10 +33,10 @@ try:
     ]
     shcore.GetDpiForMonitor.restype = ctypes.c_long
 except (OSError, AttributeError):
-    shcore = None  # avant Windows 8.1 : pas d'echelle par ecran
+    shcore = None  # before Windows 8.1: no per-screen scaling
 
 MDT_EFFECTIVE_DPI = 0
-BASE_DPI = 96  # l'echelle 100 %
+BASE_DPI = 96  # the 100 % scale
 
 EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001
 MONITORINFOF_PRIMARY = 0x00000001
@@ -93,16 +94,16 @@ user32.MonitorFromPoint.restype = wintypes.HMONITOR
 
 @dataclass(frozen=True)
 class MonitorInfo:
-    """Un ecran actuellement actif."""
+    """A currently active screen."""
 
-    key: str  # identifiant stable, voir le module docstring
-    device_name: str  # \.\DISPLAY1 -- valable seulement dans l'instant
-    friendly_name: str  # ce que le pilote annonce ("Generic PnP Monitor"...)
-    rect: tuple[int, int, int, int]  # zone totale, coordonnees du bureau
-    work_rect: tuple[int, int, int, int]  # zone hors barre des taches
+    key: str  # stable identifier, see the module docstring
+    device_name: str  # \.\DISPLAY1 -- only valid at this moment
+    friendly_name: str  # what the driver reports ("Generic PnP Monitor"...)
+    rect: tuple[int, int, int, int]  # full area, desktop coordinates
+    work_rect: tuple[int, int, int, int]  # area excluding the taskbar
     is_primary: bool
-    # Echelle reglee dans Windows (1.25 pour 125 %) : un ecran 4K a 150 %
-    # offre l'espace de travail d'un 2560x1440.
+    # Scale set in Windows (1.25 for 125 %): a 4K screen at 150 %
+    # offers the workspace of a 2560x1440 one.
     scale: float = 1.0
 
     @property
@@ -114,7 +115,7 @@ class MonitorInfo:
         return self.rect[3] - self.rect[1]
 
     def describe(self) -> str:
-        """Libelle lisible, pour les menus et les journaux."""
+        """Readable label, for menus and logs."""
         tag = " (primary)" if self.is_primary else ""
         return (
             f"{self.friendly_name} {self.width}x{self.height} "
@@ -123,7 +124,7 @@ class MonitorInfo:
 
 
 def _scale_of(handle) -> float:
-    """Echelle d'un ecran, telle que reglee dans les parametres d'affichage."""
+    """A screen's scale, as set in the display settings."""
     if shcore is None:
         return 1.0
     dpi_x, dpi_y = wintypes.UINT(), wintypes.UINT()
@@ -134,7 +135,7 @@ def _scale_of(handle) -> float:
 
 
 def list_monitors() -> list[MonitorInfo]:
-    """Ecrans actifs, tries de gauche a droite puis de haut en bas."""
+    """Active screens, sorted left to right, then top to bottom."""
     found: list[MonitorInfo] = []
 
     def callback(handle, _hdc, _rect, _param) -> int:
@@ -154,7 +155,7 @@ def list_monitors() -> list[MonitorInfo]:
                     scale=_scale_of(handle),
                 )
             )
-        return 1  # continuer l'enumeration
+        return 1  # continue the enumeration
 
     user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(callback), 0)
     found.sort(key=lambda m: (m.rect[0], m.rect[1]))
@@ -162,34 +163,34 @@ def list_monitors() -> list[MonitorInfo]:
 
 
 def _identify(device_name: str) -> tuple[str, str]:
-    """Nom lisible et cle stable d'un adaptateur d'affichage donne."""
+    """Readable name and stable key of a given display adapter."""
     device = DISPLAY_DEVICEW()
     device.cb = ctypes.sizeof(DISPLAY_DEVICEW)
     ok = user32.EnumDisplayDevicesW(
         device_name, 0, ctypes.byref(device), EDD_GET_DEVICE_INTERFACE_NAME
     )
     if not ok:
-        # Sans information moniteur, on se rabat sur le rang d'enumeration.
-        # Moins stable, mais mieux que rien.
+        # Without monitor information, fall back on the enumeration rank.
+        # Less stable, but better than nothing.
         return ("Unknown display", f"device:{device_name}")
     friendly = device.DeviceString.strip() or "Display"
     return (friendly, monitor_key(device.DeviceID) or f"device:{device_name}")
 
 
 def monitor_key(device_id: str) -> str:
-    r"""Normalise un chemin d'interface moniteur en cle stable.
+    r"""Normalise a monitor interface path into a stable key.
 
-    Windows renvoie par exemple :
+    Windows returns, for example:
         \\?\DISPLAY#GSM5B09#5&2b1e0c4&0&UID4353#{e6f07b5f-...}
 
-    On en garde l'identifiant materiel et l'UID de la sortie graphique, soit
-    ici `GSM5B09#UID4353`. Le GUID de classe final est commun a tous les
-    moniteurs et la partie instance varie selon le chemin PCI : ni l'un ni
-    l'autre n'aide a distinguer deux ecrans.
+    We keep the hardware identifier and the UID of the graphics output,
+    here `GSM5B09#UID4353`. The trailing class GUID is common to all
+    monitors and the instance part varies with the PCI path: neither one
+    helps tell two screens apart.
 
-    Le decoupage se fait sur le marqueur `DISPLAY#` plutot qu'avec une
-    expression reguliere : le chemin est truffe d'antislashes, qu'une regex
-    obligerait a echapper deux fois pour rien.
+    Splitting is done on the `DISPLAY#` marker rather than with a regular
+    expression: the path is riddled with backslashes, which a regex would
+    force us to escape twice for nothing.
     """
     if not device_id:
         return ""
@@ -206,28 +207,28 @@ def monitor_key(device_id: str) -> str:
     return f"{hardware_id}#{suffix}" if suffix else hardware_id
 
 
-# ------------------------------------------------------------ taille physique
+# ------------------------------------------------------------ physical size
 
 ENUM_DISPLAY = r"SYSTEM\CurrentControlSet\Enum\DISPLAY"
-# En deca, la « taille » est un rapport d'aspect deguise (16x9) ou une
-# valeur de remplissage : aucun ecran de bureau n'est aussi petit.
+# Below this, the "size" is a disguised aspect ratio (16x9) or a filler
+# value: no desktop screen is that small.
 MIN_DIAGONAL_IN = 5.0
 
 _diagonals: dict[str, float] = {}
 
 
 def parse_edid_diagonal(edid: bytes) -> float:
-    """Diagonale en pouces annoncee par un EDID ; 0 s'il ne la donne pas.
+    """Diagonal in inches reported by an EDID; 0 if it doesn't give one.
 
-    La norme VESA la porte a deux endroits : le premier descripteur de
-    timing, en millimetres, et l'en-tete, en centimetres arrondis -- ou
-    0x0, « non definie ». On prend le plus precis des deux qui soit
-    renseigne. Largeur et hauteur ne servent qu'a en tirer la diagonale :
-    certains ecrans les remplissent d'un gabarit qui n'a meme pas leur
-    format (609x355 mm pour un 16:9), alors que la diagonale reste juste.
+    The VESA standard carries it in two places: the first timing
+    descriptor, in millimetres, and the header, in rounded centimetres --
+    or 0x0, "undefined". We take the more precise of the two that is
+    filled in. Width and height only serve to derive the diagonal: some
+    screens fill them with a template that doesn't even match their
+    format (609x355 mm for a 16:9), while the diagonal stays correct.
     """
     candidates = []
-    if len(edid) >= 72 and (edid[54] or edid[55]):  # horloge non nulle : un timing
+    if len(edid) >= 72 and (edid[54] or edid[55]):  # non-zero clock: a timing
         block = edid[54:72]
         width = block[12] | (block[14] & 0xF0) << 4
         height = block[13] | (block[14] & 0x0F) << 8
@@ -238,12 +239,12 @@ def parse_edid_diagonal(edid: bytes) -> float:
 
 
 def physical_diagonal(key: str) -> float:
-    """Diagonale d'un ecran en pouces, lue dans son EDID ; 0 si inconnue.
+    """A screen's diagonal in inches, read from its EDID; 0 if unknown.
 
-    Windows garde l'EDID de chaque ecran dans le registre, sous l'instance
-    que designe la cle (`GSM774B#UID8453` : materiel `GSM774B`, instance
-    finissant par `UID8453`). Il y reste quand l'ecran est eteint, et se lit
-    sans droits d'administrateur. Il ne change pas : on le lit une fois.
+    Windows keeps each screen's EDID in the registry, under the instance
+    the key designates (`GSM774B#UID8453`: hardware `GSM774B`, instance
+    ending in `UID8453`). It stays there while the screen is off, and can
+    be read without administrator rights. It doesn't change: read it once.
     """
     if key in _diagonals:
         return _diagonals[key]
@@ -276,11 +277,11 @@ def physical_diagonal(key: str) -> float:
     return value
 
 
-# ------------------------------------------------------------ sorties physiques
+# ------------------------------------------------------------ physical outputs
 
-# Technologies de sortie de DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY qui ne
-# designent pas un ecran : un ecran virtuel (Parsec, Sunshine, spacedesk...)
-# et un ecran sans fil. Un dock USB (INDIRECT_WIRED) est, lui, bien reel.
+# DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY output technologies that don't
+# denote a physical screen: a virtual screen (Parsec, Sunshine, spacedesk...)
+# and a wireless screen. A USB dock (INDIRECT_WIRED), however, is real.
 TECHNOLOGY_MIRACAST = 15
 TECHNOLOGY_INDIRECT_VIRTUAL = 17
 VIRTUAL_TECHNOLOGIES = {TECHNOLOGY_MIRACAST, TECHNOLOGY_INDIRECT_VIRTUAL}
@@ -337,12 +338,12 @@ class _TARGET_DEVICE_NAME(ctypes.Structure):
 
 @dataclass(frozen=True)
 class DisplayOutput:
-    """Un ecran branche a une sortie active, vu par QueryDisplayConfig."""
+    """A screen plugged into an active output, as seen by QueryDisplayConfig."""
 
-    key: str  # meme cle que MonitorInfo
-    technology: int  # HDMI, DisplayPort, virtuel...
-    source: tuple[int, int, int]  # adaptateur et source : partagee = miroir
-    edid_name: str  # le modele, lu dans l'EDID ("LG ULTRAGEAR")
+    key: str  # same key as MonitorInfo
+    technology: int  # HDMI, DisplayPort, virtual...
+    source: tuple[int, int, int]  # adapter and source: shared = mirror
+    edid_name: str  # the model, read from the EDID ("LG ULTRAGEAR")
 
     @property
     def virtual(self) -> bool:
@@ -350,11 +351,12 @@ class DisplayOutput:
 
 
 def list_outputs() -> dict[str, DisplayOutput] | None:
-    """Ecrans des sorties actives, par cle ; None si Windows ne repond pas.
+    """Screens on the active outputs, by key; None if Windows doesn't answer.
 
-    EnumDisplayMonitors ne dit ni si un ecran est virtuel, ni si deux
-    ecrans en miroir se partagent la meme image : il n'en rend qu'un. La
-    configuration d'affichage, elle, detaille chaque sortie.
+    EnumDisplayMonitors tells neither whether a screen is virtual, nor
+    whether two mirrored screens share the same image: it returns only one
+    of them. The display configuration, on the other hand, details every
+    output.
     """
     try:
         paths_count, modes_count = ctypes.c_uint32(), ctypes.c_uint32()
@@ -370,7 +372,7 @@ def list_outputs() -> dict[str, DisplayOutput] | None:
         ):
             return None
     except (AttributeError, OSError):
-        return None  # avant Windows 7
+        return None  # before Windows 7
     outputs: dict[str, DisplayOutput] = {}
     for path in paths[: paths_count.value]:
         target = path.targetInfo
@@ -396,10 +398,10 @@ def list_outputs() -> dict[str, DisplayOutput] | None:
 
 
 def physical_monitors(outputs: dict[str, DisplayOutput] | None) -> list[MonitorInfo]:
-    """Ecrans actifs, hors ecrans virtuels et sans fil.
+    """Active screens, excluding virtual and wireless ones.
 
-    Sans configuration d'affichage lisible, on les garde tous : mieux vaut
-    un ecran virtuel de trop qu'un ecran reel ignore.
+    Without a readable display configuration, keep them all: better one
+    virtual screen too many than a real screen ignored.
     """
     found = list_monitors()
     if outputs is None:
@@ -408,15 +410,15 @@ def physical_monitors(outputs: dict[str, DisplayOutput] | None) -> list[MonitorI
 
 
 def monitor_keys() -> set[str]:
-    """Cles des ecrans actuellement actifs."""
+    """Keys of the currently active screens."""
     return {monitor.key for monitor in list_monitors()}
 
 
-# Deux bords a moins de ce nombre de pixels sont consideres comme jointifs :
-# Windows les aligne au pixel, mais une mise a l'echelle peut les decaler.
+# Two edges less than this many pixels apart are considered adjacent:
+# Windows aligns them to the pixel, but scaling can shift them.
 EDGE_TOLERANCE_PX = 16
-# Un ecran du haut ou du bas dont le centre s'ecarte de celui de l'ecran
-# principal de plus de cette fraction de sa largeur est dit decale.
+# A top or bottom screen whose centre is further from the primary
+# screen's centre than this fraction of its width is called shifted.
 OFFSET_RATIO = 0.1
 
 
@@ -429,16 +431,16 @@ def _names(items: list[str]) -> str:
 def arrangement(
     screens: list[MonitorInfo], names: dict[str, str]
 ) -> list[tuple[MonitorInfo, str, str]]:
-    """La disposition des ecrans telle que Windows la definit, en clair.
+    """The screen layout as Windows defines it, in plain words.
 
-    Rend, pour chaque ecran, son nom et sa place : a gauche, au centre ou a
-    droite de l'ecran principal, en haut ou en bas, decale d'un cote, et
-    au-dessus -- ou au-dessous -- de quels autres ecrans. `names` donne le
-    nom de la prise qui alimente chaque ecran, par cle ; a defaut, le nom
-    du pilote et la definition.
+    Returns, for each screen, its name and its place: left of, centred on
+    or right of the primary screen, at the top or the bottom, shifted to
+    one side, and above -- or below -- which other screens. `names` gives
+    the name of the outlet powering each screen, by key; failing that, the
+    driver name and the resolution.
 
-    L'application ne stocke rien de tout cela : c'est Windows qui fait
-    autorite, et on le relit a chaque fois.
+    The application stores none of this: Windows is the authority, and it
+    is read again every time.
     """
     primary = next((m for m in screens if m.is_primary), None)
     if primary is None:
@@ -469,8 +471,8 @@ def arrangement(
         elif m.rect[0] >= right - tol:
             parts.append(t("right"))
         elif vertical:
-            # Au-dessus ou au-dessous de l'ecran principal : ce qui compte
-            # alors, c'est le cote vers lequel il deborde.
+            # Above or below the primary screen: what matters then is the
+            # side it overhangs.
             shift = (m.rect[0] + m.rect[2]) / 2 - (left + right) / 2
             parts.append(t("top") if vertical == "top" else t("bottom"))
             if shift > OFFSET_RATIO * primary.width:
@@ -482,7 +484,7 @@ def arrangement(
             parts.append(t("centre"))
         if vertical:
             parts.append(t("top") if vertical == "top" else t("bottom"))
-        # Les voisins du dessous ou du dessus, bord contre bord.
+        # The neighbours below or above, edge to edge.
         beneath = [
             name_of(o) for o in screens
             if o is not m and abs(m.rect[3] - o.rect[1]) <= tol and overlap_x(m, o)

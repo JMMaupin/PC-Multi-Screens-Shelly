@@ -1,25 +1,25 @@
-"""Petite fenetre de choix des profils, appelee par le raccourci global.
+"""Small profile picker window, opened by the global shortcut.
 
-Un bouton par profil ; un clic applique le profil, sans confirmation, et
-la fenetre se ferme. Elle s'ouvre au premier plan, au centre de l'ecran
-principal -- celui que Windows designe comme tel, ou apparaissent aussi
-ses propres dialogues.
+One button per profile; a click applies the profile, without confirmation,
+and the window closes. It opens in the foreground, centered on the primary
+screen -- the one Windows designates as such, where its own dialogs also
+appear.
 
-Pensee pour le clavier autant que pour la souris : les fleches deplacent
-la selection, Entree applique, les chiffres 1 a 9 appliquent directement
-les neuf premiers profils, Echap ferme, et le raccourci presse une seconde
-fois aussi. Le survol a la souris deplace la meme selection : une seule
-surbrillance, jamais deux qui se contredisent. Elle se ferme d'elle-meme quand on clique ailleurs :
-un choix rapide qui trainerait a l'ecran deviendrait un encombrement.
+Designed for the keyboard as much as for the mouse: the arrows move the
+selection, Enter applies, digits 1 to 9 directly apply the first nine
+profiles, Esc closes, and so does pressing the shortcut a second time.
+Mouse hover moves the same selection: a single highlight, never two that
+contradict each other. It closes by itself when you click elsewhere:
+a quick choice lingering on screen would become clutter.
 
-Sous les boutons, le plan des ecrans, dessine comme dans les reglages. A
-l'ouverture, il montre l'etat reel ; des que la selection bouge, il montre
-ce que donnerait le profil selectionne. Un clic sur un ecran part de ce qui
-est affiche et bascule son etat prevu, sans rien commuter : c'est Entree,
-ou le bouton Appliquer, qui met la selection en oeuvre. C'est toujours une
-configuration ponctuelle, hors profils : les clics ne modifient aucun
-profil, et aucun profil ne devient « en cours ». Changer de selection
-abandonne les clics : le plan montre toujours ce qui arrivera si l'on valide.
+Below the buttons, the screen map, drawn as in the settings. On opening,
+it shows the actual state; as soon as the selection moves, it shows what
+the selected profile would give. A click on a screen starts from what is
+displayed and toggles its planned state, without switching anything: it
+is Enter, or the Apply button, that carries out the selection. It is
+always a one-off configuration, outside profiles: the clicks change no
+profile, and no profile becomes "current". Changing the selection
+discards the clicks: the map always shows what will happen on confirm.
 """
 
 from __future__ import annotations
@@ -43,16 +43,16 @@ _state_lock = threading.Lock()
 _is_open = False
 _current: "ProfilePicker | None" = None
 
-# Largeur des boutons, en caracteres : assez pour un nom de profil
-# ordinaire, sans que la fenetre s'etale.
+# Button width, in characters: enough for an ordinary profile name,
+# without the window sprawling.
 BUTTON_WIDTH = 26
-MAP_HEIGHT = 120  # le plan des ecrans, sous les boutons
+MAP_HEIGHT = 120  # the screen map, below the buttons
 
 
 def toggle_picker(application: "Application") -> None:
-    """Ouvre la fenetre, ou la ferme si elle l'est deja.
+    """Open the window, or close it if it is already open.
 
-    Appele depuis le thread des messages Windows : ne doit rien bloquer.
+    Called from the Windows message thread: must not block anything.
     """
     global _is_open
     with _state_lock:
@@ -61,7 +61,7 @@ def toggle_picker(application: "Application") -> None:
             if picker is not None:
                 try:
                     picker.root.after(0, picker.close)
-                except Exception:  # noqa: BLE001 - fenetre en cours de fermeture
+                except Exception:  # noqa: BLE001 - window already closing
                     pass
             return
         _is_open = True
@@ -72,7 +72,7 @@ def toggle_picker(application: "Application") -> None:
             root = tk.Tk()
             _current = ProfilePicker(root, application)
             root.mainloop()
-        except Exception as exc:  # noqa: BLE001 - une UI ratee ne doit pas tuer l'appli
+        except Exception as exc:  # noqa: BLE001 - a failed UI must not kill the app
             application.log(f"Profile picker failed: {exc}")
         finally:
             with _state_lock:
@@ -83,7 +83,7 @@ def toggle_picker(application: "Application") -> None:
 
 
 class ProfilePicker:
-    """Les boutons des profils, et rien d'autre."""
+    """The profile buttons, and nothing else."""
 
     def __init__(self, root: tk.Tk, application: "Application") -> None:
         self.root = root
@@ -91,12 +91,12 @@ class ProfilePicker:
         self.closing = False
         config = application.config
 
-        root.withdraw()  # construite hors champ, montree une fois placee
+        root.withdraw()  # built off-screen, shown once positioned
         root.title(t("Profiles"))
         icon_module.apply_to_window(root)
         root.resizable(False, False)
-        # Fenetre d'outil : pas de bouton dans la barre des taches pour une
-        # boite qui ne vit que quelques secondes.
+        # Tool window: no taskbar button for a box that only lives a few
+        # seconds.
         root.attributes("-toolwindow", True)
         palette = theme_module.apply(root, config.settings.theme)
         self.palette = palette
@@ -104,9 +104,9 @@ class ProfilePicker:
         theme_module.apply_titlebar(root, palette.dark)
 
         style = ttk.Style(root)
-        # La selection prend l'accent, comme dans un menu : c'est elle que
-        # l'on suit des yeux en naviguant aux fleches. Le focus passe avant
-        # le survol, pour que le bouton choisi reste marque sous la souris.
+        # The selection takes the accent, as in a menu: it is what the eye
+        # follows when navigating with the arrows. Focus takes precedence
+        # over hover, so the chosen button stays marked under the mouse.
         hover = theme_module._mix(palette.surface_alt, palette.accent, 0.25)
         style.map(
             "Picker.TButton",
@@ -122,9 +122,9 @@ class ProfilePicker:
         self.profiles = profiles
         current = config.settings.last_profile
         self.buttons: list[ttk.Button] = []
-        # Le profil en cours : la selection de depart, et une coche. Il
-        # reste cliquable -- le reappliquer sert, apres un ecran rallume a
-        # la main.
+        # The current profile: the initial selection, and a check mark. It
+        # stays clickable -- reapplying it is useful after a screen was
+        # turned back on by hand.
         self.start = 0
         if not profiles:
             ttk.Label(body, text=t("No profile configured")).pack(padx=20, pady=10)
@@ -162,10 +162,10 @@ class ProfilePicker:
         root.protocol("WM_DELETE_WINDOW", self.close)
         self._show()
 
-    # ------------------------------------------------------------- affichage
+    # ------------------------------------------------------------- display
 
     def _show(self) -> None:
-        """Centre sur l'ecran principal, puis passe au premier plan."""
+        """Center on the primary screen, then bring to the foreground."""
         root = self.root
         root.update_idletasks()
         width, height = root.winfo_reqwidth(), root.winfo_reqheight()
@@ -177,20 +177,20 @@ class ProfilePicker:
         root.attributes("-topmost", True)
         root.lift()
         root.update_idletasks()
-        # Tk seul ne suffit pas : Windows refuse le premier plan a qui ne
-        # l'a pas demande. L'appui sur le raccourci nous en donne le droit,
-        # encore faut-il le reclamer pour la bonne fenetre -- le cadre que
-        # Windows connait, pas le widget interieur de Tk.
+        # Tk alone is not enough: Windows refuses the foreground to whoever
+        # did not ask for it. Pressing the shortcut grants us that right,
+        # but it still has to be claimed for the right window -- the frame
+        # Windows knows, not Tk's inner widget.
         try:
             ctypes.windll.user32.SetForegroundWindow(int(root.wm_frame(), 16))
         except (ValueError, OSError):
             pass
         root.focus_force()
-        # A l'ouverture, le plan garde l'etat reel : la previsualisation ne
-        # commence qu'au premier mouvement de la selection.
+        # On opening, the map keeps the actual state: the preview only
+        # starts on the first move of the selection.
         self._select(self.start, preview=False)
 
-    # ------------------------------------------------------------- clavier
+    # ------------------------------------------------------------- keyboard
 
     def _select(self, index: int, preview: bool = True) -> str:
         if self.buttons:
@@ -201,19 +201,19 @@ class ProfilePicker:
         return "break"
 
     def _hover(self, index: int) -> None:
-        """Le survol deplace la selection -- sans effacer les clics s'il n'y a
-        pas de changement : repasser sur le bouton deja choisi ne dit rien."""
+        """Hover moves the selection -- without discarding the clicks if nothing
+        changes: hovering again over the already chosen button means nothing."""
         if self.root.focus_get() is not self.buttons[index]:
             self._select(index)
 
     def _move(self, step: int) -> str:
-        """Selection suivante ou precedente, en bouclant aux extremites."""
+        """Next or previous selection, wrapping around at the ends."""
         focused = self.root.focus_get()
         index = self.buttons.index(focused) if focused in self.buttons else self.start - step
         return self._select(index + step)
 
     def _invoke(self, _event) -> str:
-        # Des ecrans ont ete bascules sur le plan : Entree valide ce choix-la.
+        # Screens were toggled on the map: Enter confirms that choice.
         if self._changed():
             self.apply_selection()
             return "break"
@@ -223,8 +223,8 @@ class ProfilePicker:
         return "break"
 
     def _focus_out(self, _event) -> None:
-        # Le focus passe d'un bouton a l'autre sans quitter la fenetre ; on
-        # ne ferme que s'il a quitte l'application.
+        # Focus moves from one button to another without leaving the window;
+        # only close if it has left the application.
         self.root.after(150, self._close_if_inactive)
 
     def _close_if_inactive(self) -> None:
@@ -234,24 +234,24 @@ class ProfilePicker:
             if self.root.focus_get() is None:
                 self.close()
         except (tk.TclError, KeyError):
-            # `focus_get` echoue quand le focus est sur une fenetre d'un
-            # autre programme : la fenetre n'est plus active.
+            # `focus_get` fails when the focus is on another program's
+            # window: this window is no longer active.
             self.close()
 
-    # --------------------------------------------------------------- plan
+    # --------------------------------------------------------------- map
 
     def _build_map(self, body: ttk.Frame) -> None:
-        """Le plan des ecrans et son bouton Appliquer, s'il y a une disposition."""
+        """The screen map and its Apply button, if there is a layout."""
         config = self.app.config
-        # L'etat reel des prises d'ecran : le point de depart des clics.
+        # The actual state of the screen outlets: the starting point for clicks.
         self.actual = {
             o.ref: bool(self.app.states[o.ref].output)
             for o in config.outlets
             if o.monitor_key and o.ref in self.app.states
         }
         self.pending = dict(self.actual)
-        # Vrai une fois des ecrans bascules a la main : Entree valide alors
-        # ces clics, et non le profil selectionne.
+        # True once screens have been toggled by hand: Enter then confirms
+        # these clicks, not the selected profile.
         self.edited = False
         self.map = None
         self.apply_button = None
@@ -276,7 +276,7 @@ class ProfilePicker:
         ))
 
     def _preview(self, profile) -> None:
-        """Montre ce que donnerait ce profil ; abandonne les clics en cours."""
+        """Show what this profile would give; discards pending clicks."""
         if self.map is None:
             return
         config = self.app.config
@@ -288,34 +288,45 @@ class ProfilePicker:
         self._refresh_controls()
 
     def _toggle(self, ref: str) -> None:
-        """Bascule l'etat prevu d'un ecran : rien n'est encore commute."""
+        """Toggle a screen's planned state: nothing is switched yet."""
         if ref not in self.pending:
-            return  # appareil muet : on ne sait pas ce qu'on changerait
+            return  # silent device: we don't know what we would change
         self.pending[ref] = not self.pending[ref]
         self.edited = True
         self._refresh_controls()
 
     def _refresh_controls(self) -> None:
         changed = self._changed()
-        self.apply_button.configure(state="normal" if changed else "disabled")
-        self.hint.set(
-            t("Enter or Apply to switch the screens, Esc to cancel")
-            if changed else t("Arrows and Enter to choose, Esc to close")
-        )
+        allowed = self._keeps_a_screen()
+        self.apply_button.configure(state="normal" if changed and allowed else "disabled")
+        if changed and not allowed:
+            hint = t("At least one screen must stay on")
+        elif changed:
+            hint = t("Enter or Apply to switch the screens, Esc to cancel")
+        else:
+            hint = t("Arrows and Enter to choose, Esc to close")
+        self.hint.set(hint)
         self._draw_map()
 
     def _changed(self) -> bool:
-        """Des clics a valider, et qui changeraient quelque chose."""
+        """Clicks to confirm, that would actually change something."""
         return self.edited and self.pending != self.actual
 
-    def apply_selection(self) -> None:
-        """Met en oeuvre les ecrans bascules sur le plan, puis ferme.
+    def _keeps_a_screen(self) -> bool:
+        """True if the map selection leaves at least one screen on."""
+        powered = {ref for ref, state in self.app.states.items() if state.output}
+        powered -= set(self.pending)
+        powered |= {ref for ref, on in self.pending.items() if on}
+        return self.app.config.leaves_a_screen(powered)
 
-        Une configuration ponctuelle, meme si elle ressemble a un profil :
-        choisir sur le plan, c'est vouloir autre chose que les profils. On
-        ne commute que les ecrans qui changent ; le reste ne bouge pas.
+    def apply_selection(self) -> None:
+        """Carry out the screens toggled on the map, then close.
+
+        A one-off configuration, even if it looks like a profile: choosing
+        on the map means wanting something other than the profiles. Only
+        the screens that change are switched; the rest stays as is.
         """
-        if self.closing or not self._changed():
+        if self.closing or not self._changed() or not self._keeps_a_screen():
             return
         config = self.app.config
         changes = {ref: on for ref, on in self.pending.items() if on != self.actual[ref]}
@@ -330,12 +341,12 @@ class ProfilePicker:
     # --------------------------------------------------------------- actions
 
     def choose(self, name: str) -> None:
-        """Applique le profil et ferme, sans rien demander."""
+        """Apply the profile and close, without asking anything."""
         if self.closing:
             return
         self.app.log(f"Profile '{name}' chosen from the keyboard shortcut")
-        # L'application se charge du reseau dans son propre thread : la
-        # fenetre peut se fermer sans attendre les appareils.
+        # The application handles the network in its own thread: the
+        # window can close without waiting for the devices.
         self.app.apply_profile(name)
         self.close()
 
@@ -348,7 +359,7 @@ class ProfilePicker:
 
 
 def _primary_work_area(root: tk.Misc) -> tuple[int, int, int, int]:
-    """Zone utile de l'ecran principal, barre des taches exclue."""
+    """Work area of the primary screen, taskbar excluded."""
     for monitor in monitors.list_monitors():
         if monitor.is_primary:
             return monitor.work_rect

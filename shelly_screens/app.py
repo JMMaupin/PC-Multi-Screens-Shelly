@@ -1,13 +1,13 @@
-"""Application : icone de notification, menu, et reaction aux evenements.
+"""Application: tray icon, menu, and reactions to events.
 
-Le thread principal ne fait qu'une chose : pomper les messages Windows. Tout
-ce qui parle au reseau part dans un thread de travail, sans quoi le menu se
-figerait a chaque appel aux appareils.
+The main thread does only one thing: pump Windows messages. Anything that
+talks to the network goes to a worker thread, otherwise the menu would
+freeze on every call to the devices.
 
-Une exception assumee : la mise en veille et l'arret. Windows attend la
-reponse du programme avant de suspendre la machine, donc la coupure s'y fait
-de facon synchrone -- et sans temporisation, d'ou le mode urgent du
-controleur.
+One deliberate exception: sleep and shutdown. Windows waits for the
+program's reply before suspending the machine, so the power-off happens
+synchronously there -- and without delay, hence the controller's urgent
+mode.
 """
 
 from __future__ import annotations
@@ -36,13 +36,13 @@ REFRESH_INTERVAL_MS = 5000
 
 
 class Application:
-    """Assemble le controleur, l'icone et les evenements systeme."""
+    """Ties together the controller, the icon and the system events."""
 
     def __init__(self, app_config: AppConfig) -> None:
         self.config = app_config
         self.controller = ScreenController(app_config, log=self.log)
-        # Historique de consommation : il se nourrit des releves que
-        # l'application fait deja, sans rien demander de plus a l'appareil.
+        # Consumption history: it feeds on the readings the application
+        # already takes, without asking anything more of the device.
         self.history = power_history.HistoryRecorder(
             app_config, self.controller, self.log
         )
@@ -58,36 +58,36 @@ class Application:
             build_menu=self._build_menu,
             tick_interval_ms=REFRESH_INTERVAL_MS,
         )
-        # Le journal s'installe ici s'il ne l'a pas deja ete : un logger sans
-        # gestionnaire avalerait tout en silence, precisement ce qu'on veut
-        # eviter quand il n'y a pas de console.
+        # The log is set up here if it hasn't been already: a logger with no
+        # handler would silently swallow everything, precisely what we want
+        # to avoid when there is no console.
         self._logger = logging_setup.setup()
         self.states: dict[str, SwitchState] = {}
         self.online = False
-        self.busy = ""  # intitule de l'operation en cours, vide sinon
+        self.busy = ""  # name of the operation in progress, empty otherwise
         self._busy_lock = threading.Lock()
         self._refreshing = False
-        # Appareils dont le refus d'authentification a deja ete signale :
-        # le rafraichissement est periodique, une bulle toutes les cinq
-        # secondes serait insupportable.
+        # Devices whose authentication refusal has already been reported:
+        # refreshing is periodic, a balloon every five seconds would be
+        # unbearable.
         self._auth_warned: set[str] = set()
 
     # ------------------------------------------------------------------ log
 
     def log(self, message: str) -> None:
-        """Trace une action. Sous pythonw il n'y a pas de console : tout part
-        dans le fichier journal, seul temoin de ce que fait l'application."""
+        """Logs an action. Under pythonw there is no console: everything goes
+        to the log file, the only witness of what the application does."""
         self._logger.info(message)
 
-    # -------------------------------------------------------------- demarrage
+    # ---------------------------------------------------------------- startup
 
     def start(self) -> None:
         self.log(f"{APP_NAME} {__version__} starting")
         self.tray.create()
         self._update_icon()
         self._install_hotkey()
-        # La premiere connexion peut demander un balayage reseau : en tache de
-        # fond, pour que l'icone apparaisse tout de suite.
+        # The first connection may require a network scan: in the
+        # background, so the icon appears right away.
         threading.Thread(target=self._initial_connect, daemon=True).start()
         self.tray.run()
         self.log(f"{APP_NAME} stopped")
@@ -99,20 +99,19 @@ class Application:
                 self._update_icon()
                 return
             self.controller.connect_all()
-            # Les sorties protegees sont posees a la connexion ; on les
-            # repasse ici au cas ou la configuration aurait change entre
-            # deux lancements.
+            # Protected outputs are set on connection; we apply them again
+            # here in case the configuration changed between two launches.
             self.controller.refresh_protection()
             self._refresh_states()
-            # Sans profil memorise, le script embarque ne rallumerait que
-            # l'ecran de demarrage : on lui laisse au moins l'etat courant.
+            # Without a stored profile, the on-device script would only turn
+            # the boot screen back on: we leave it at least the current state.
             from . import sensing
 
             changed = sensing.sync_installed(self.controller, self.config)
             if changed:
                 self.log(f"On-device script {changed}")
-            # Le releveur voit la consommation pendant que le PC dort :
-            # l'historique en depend, il doit etre en place et a jour.
+            # The probe sees the consumption while the PC sleeps: the
+            # history depends on it, so it must be installed and up to date.
             probe = sensing.sync_probe(self.controller, self.config)
             if probe:
                 self.log(f"On-device probe {probe}")
@@ -124,25 +123,25 @@ class Application:
                 if name and self.config.profile(name):
                     self.log(f"Applying profile '{name}' at startup")
                     self._apply_profile_sync(name)
-        except Exception as exc:  # noqa: BLE001 - un demarrage rate ne doit pas tuer l'appli
+        except Exception as exc:  # noqa: BLE001 - a failed startup must not kill the app
             self.log(f"Startup error: {exc}")
 
     def stop(self) -> None:
         self.history.sync()
         self.tray.stop()
 
-    # ------------------------------------------------------------------ etat
+    # ----------------------------------------------------------------- state
 
     def _refresh_states(self) -> None:
-        """Relit l'etat des prises et met l'icone a jour."""
+        """Rereads the outlet states and updates the icon."""
         try:
             self.states = self.controller.read_outlets()
             self.online = bool(self.states)
             try:
                 self.history.feed(self.states)
-            except Exception as exc:  # noqa: BLE001 - jamais au detriment du pilotage
+            except Exception as exc:  # noqa: BLE001 - never at the expense of control
                 self.log(f"History not recorded: {exc}")
-            # La disposition se juge sur l'etat des prises qu'on vient de lire.
+            # The layout is judged on the outlet states just read.
             self._remember_screens()
         except (NotConnected, OSError) as exc:
             self.online = False
@@ -151,7 +150,7 @@ class Application:
         self._update_icon()
 
     def _warn_about_auth_failures(self) -> None:
-        """Previent une seule fois par appareil qui refuse le mot de passe."""
+        """Warns only once per device that refuses the password."""
         failures = set(self.controller.auth_failures)
         for key in sorted(failures - self._auth_warned):
             self.log(f"Device '{key}' refuses the stored password")
@@ -160,21 +159,21 @@ class Application:
                 f"{key}: wrong or missing password. Open Settings > Devices "
                 "to fix it, or reset the device with its buttons.",
             )
-        # Un appareil redevenu accessible pourra reavertir plus tard.
+        # A device that became reachable again may warn again later.
         self._auth_warned = failures
 
     def _outlet_states(self) -> list[bool]:
-        """Etat des prises, dans l'ordre de la configuration."""
+        """Outlet states, in configuration order."""
         return [
             bool(self.states.get(outlet.ref) and self.states[outlet.ref].output)
             for outlet in self.config.outlets
         ]
 
     def _update_icon(self) -> None:
-        """Repose l'icone : le visuel de l'application, pastille d'etat comprise.
+        """Resets the icon: the application's artwork, status dot included.
 
-        Le decompte des prises n'est plus dessine mais dit par l'infobulle :
-        a seize pixels de cote, une pastille se lit, un decompte non.
+        The outlet count is no longer drawn but given by the tooltip: at
+        sixteen pixels square, a dot is readable, a count is not.
         """
         status = icon_module.status_for(
             self._outlet_states(),
@@ -205,7 +204,7 @@ class Application:
     # --------------------------------------------------------------- actions
 
     def _run_async(self, label: str, function) -> None:
-        """Lance une operation en tache de fond, une seule a la fois."""
+        """Runs an operation in the background, one at a time."""
         with self._busy_lock:
             if self.busy:
                 self.log(f"Ignored '{label}': '{self.busy}' still running")
@@ -215,7 +214,7 @@ class Application:
         def worker() -> None:
             try:
                 function()
-            except Exception as exc:  # noqa: BLE001 - remonter sans tuer le thread
+            except Exception as exc:  # noqa: BLE001 - report without killing the thread
                 self.log(f"{label} failed: {exc}")
                 self.tray.notify(APP_NAME, f"{label} failed: {exc}")
             finally:
@@ -239,7 +238,9 @@ class Application:
         target = not (state and state.output)
         outlet = self.config.outlet(ref)
         label = f"{outlet.label if outlet else ref} {'on' if target else 'off'}"
-        self._run_async(label, lambda: self.controller.set_outlet(ref, target))
+        self._run_async(
+            label, lambda: self.controller.set_outlet(ref, target, keep_a_screen=True)
+        )
 
     def refresh_now(self) -> None:
         self._run_async("Refresh", lambda: None)
@@ -293,9 +294,10 @@ class Application:
             )
 
         if self.script_out_of_date:
-            # Le plus visible des emplacements : le menu s'ouvre d'un
-            # clic droit, sans savoir ou chercher. Un ecart entre les
-            # reglages et le script pose est indevinable autrement.
+            # The most visible spot: the menu opens with a right-click,
+            # without having to know where to look. A mismatch between the
+            # settings and the installed script is impossible to guess
+            # otherwise.
             items.append(MenuItem.info(t("On-device script is out of date")))
             items.append(
                 MenuItem(t("Update it now"), action=self.update_script)
@@ -321,37 +323,37 @@ class Application:
 
     @property
     def script_out_of_date(self) -> bool:
-        """Les reglages ont-ils change depuis la derniere installation ?
+        """Have the settings changed since the last installation?
 
-        Calcule localement, sans reseau : on peut donc le demander a
-        chaque construction du menu sans rien couter a l'appareil.
+        Computed locally, without the network: it can therefore be asked on
+        every menu build without costing the device anything.
         """
         from . import sensing
 
         try:
             return sensing.needs_update(self.config)
-        except Exception:  # noqa: BLE001 - un doute ne doit rien casser
+        except Exception:  # noqa: BLE001 - a doubt must not break anything
             return False
 
     def update_script(self) -> None:
-        """Repose le script embarque avec les reglages courants."""
+        """Reinstalls the on-device script with the current settings."""
         from . import sensing
 
         def worker() -> None:
             status = sensing.install(self.controller, self.config)
-            # `install` retient la nouvelle empreinte : il faut l'ecrire,
-            # sans quoi l'avertissement reapparaitrait au prochain demarrage.
+            # `install` records the new fingerprint: it must be saved,
+            # otherwise the warning would come back at the next startup.
             self.config.save()
             self.log(f"On-device script updated: {status.summary()}")
 
         self._run_async("Updating script", worker)
 
     def restart_frozen(self) -> None:
-        """Redemarre les appareils dont une voie de mesure est gelee.
+        """Restarts the devices with a frozen measurement channel.
 
-        C'est le seul remede connu a ce defaut du firmware, et il est sans
-        danger : relais bistables, et `initial_state` ramene la prise du PC
-        sous tension quoi qu'il arrive.
+        It is the only known remedy for this firmware defect, and it is
+        harmless: latching relays, and `initial_state` brings the PC's
+        outlet back on no matter what.
         """
         keys = {
             ref.split(":")[0] for ref in self.controller.frozen_meters()
@@ -366,13 +368,13 @@ class Application:
         self._run_async("Restarting device", worker)
 
     def open_log(self) -> None:
-        """Ouvre le journal dans l'editeur associe.
+        """Opens the log file in the associated editor.
 
-        Sans console, c'est le seul moyen de voir ce que fait l'application.
+        Without a console, it is the only way to see what the application does.
         """
         path = logging_setup.log_path()
         try:
-            os.startfile(str(path))  # noqa: S606 - ouverture par l'editeur du systeme
+            os.startfile(str(path))  # noqa: S606 - opened by the system's editor
         except OSError as exc:
             self.log(f"Cannot open the log file ({path}): {exc}")
 
@@ -396,7 +398,7 @@ class Application:
         return items
 
     def _outlet_items(self) -> list[MenuItem]:
-        """Prises, regroupees par appareil quand il y en a plusieurs."""
+        """Outlets, grouped by device when there are several."""
         if len(self.config.devices) <= 1:
             return self._outlet_entries(self.config.outlets)
         items: list[MenuItem] = []
@@ -411,8 +413,16 @@ class Application:
 
     def _outlet_entries(self, outlets: list) -> list[MenuItem]:
         items: list[MenuItem] = []
+        powered = {ref for ref, state in self.states.items() if state.output}
         for outlet in outlets:
             state = self.states.get(outlet.ref)
+            # The last screen on can't be turned off from here: the menu
+            # would vanish with it, and nothing would let it be turned back on.
+            last_screen = (
+                outlet.is_screen
+                and outlet.ref in powered
+                and not self.config.leaves_a_screen(powered - {outlet.ref})
+            )
             power = f" - {state.apower:.0f} W" if state and state.output else ""
             tags = []
             if outlet.host_pc:
@@ -428,14 +438,17 @@ class Application:
                     action=lambda r=outlet.ref: self.toggle_outlet(r),
                     checked=bool(state and state.output),
                     enabled=(
-                        state is not None and not self.busy and not outlet.never_switch_off
+                        state is not None
+                        and not self.busy
+                        and not outlet.never_switch_off
+                        and not last_screen
                     ),
                 )
             )
         return items
 
     def _screen_items(self) -> list[MenuItem]:
-        """Les ecrans allumes et leur place, telle que Windows la definit."""
+        """The screens that are on and their position, as Windows defines it."""
         names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
         placed = monitors.arrangement(monitors.list_monitors(), names)
         items = [MenuItem.info(f"{name} — {where}") for _m, name, where in placed]
@@ -447,10 +460,10 @@ class Application:
         )
         return items
 
-    # ------------------------------------------------------- evenements systeme
+    # ----------------------------------------------------------- system events
 
     def _on_tick(self) -> None:
-        """Rafraichissement periodique, sans empiler les requetes."""
+        """Periodic refresh, without piling up requests."""
         if self._refreshing or self.busy or not self.config.devices:
             return
         self._refreshing = True
@@ -464,7 +477,7 @@ class Application:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_activate(self) -> None:
-        """Clic gauche sur l'icone : ouvrir la fenetre de reglages."""
+        """Left click on the icon: open the settings window."""
         self._open_settings()
 
     def _on_display_change(self) -> None:
@@ -472,14 +485,14 @@ class Application:
         self._remember_screens()
 
     def capture_screen_layout(self, on_done=None, progress=None) -> None:
-        """Etablit la disposition des ecrans, en tache de fond.
+        """Captures the screen layout, in the background.
 
-        Depuis le menu de l'icone, sans `on_done`, tout revient en place
-        aussitot : il n'y a pas de fenetre ou poser la question. Avec
-        `on_done(capture)`, les ecrans restent allumes et l'appelant propose
-        de rester ainsi ou de revenir en arriere (`return_after_capture`).
-        Les deux rappels viennent du fil de la tache : a l'appelant de
-        repasser dans le sien.
+        From the icon menu, without `on_done`, everything goes back
+        immediately: there is no window in which to ask the question. With
+        `on_done(capture)`, the screens stay on and the caller offers to
+        stay that way or to go back (`return_after_capture`). Both callbacks
+        come from the task's thread: it is up to the caller to switch back
+        to its own.
         """
         def run() -> None:
             capture = self.controller.capture_screen_layout(
@@ -493,20 +506,20 @@ class Application:
         self._run_async("Capture screen layout", run)
 
     def apply_outlets(self, targets: dict[str, bool]) -> None:
-        """Applique une selection de prises hors profil, en tache de fond."""
+        """Applies a selection of outlets outside any profile, in the background."""
         self._run_async("Screen selection", lambda: self.controller.apply_outlets(targets))
 
     def stay_after_capture(self) -> None:
-        """Garde tout allume : « All on » devient le profil en cours."""
+        """Keeps everything on: "All on" becomes the current profile."""
         self._run_async(
             "Keep 'All on'", lambda: self.controller.adopt_profile(ALL_ON_PROFILE)
         )
 
     def return_after_capture(self, capture) -> None:
-        """Revient au profil d'avant le releve, ou a defaut a l'etat d'avant.
+        """Goes back to the pre-capture profile, or failing that the prior state.
 
-        Reappliquer le profil plutot que recouper une a une les prises
-        allumees : c'est ce qu'on a choisi de retrouver, fenetres comprises.
+        Reapply the profile rather than turn the lit outlets off again one
+        by one: it is what the user chose to get back, windows included.
         """
         name = self.config.settings.last_profile
         if name and self.config.profile(name) is not None:
@@ -515,32 +528,32 @@ class Application:
             self._run_async("Restore outlets", lambda: self.controller.undo_capture(capture))
 
     def _remember_screens(self) -> None:
-        """Retient la place des ecrans, sans jamais gener le reste."""
+        """Records the screens' positions, without ever getting in the way."""
         if self.busy:
-            return  # une manoeuvre est en cours : l'etat lu n'est deja plus le bon
+            return  # an operation is in progress: the state read is already stale
         try:
             self.controller.remember_screens(self.states)
-        except Exception as exc:  # noqa: BLE001 - un releve rate n'est pas fatal
+        except Exception as exc:  # noqa: BLE001 - a failed capture is not fatal
             self.log(f"Screen positions not read: {exc}")
 
     def _on_suspend(self) -> None:
-        """Mise en veille : couper, mais garder ce qui doit rester allume.
+        """Going to sleep: switch off, but keep what must stay on.
 
-        Synchrone a dessein -- Windows suspend le processus des que l'on rend
-        la main, et une coupure lancee en tache de fond n'aurait pas le temps
-        d'aboutir.
+        Synchronous on purpose -- Windows suspends the process as soon as we
+        return, and a power-off started in the background wouldn't have
+        time to complete.
         """
-        # L'historique d'abord : Windows suspend le processus des qu'on
-        # rend la main, et ce qui n'est pas sur le disque serait perdu si
-        # le PC ne se reveillait pas.
+        # History first: Windows suspends the process as soon as we return,
+        # and whatever isn't on disk would be lost if the PC didn't wake
+        # up.
         self.history.sync()
         if not self.config.settings.power_off_on_suspend or not self.config.devices:
             return
         if self.config.sensing.enabled:
-            # Le script embarque coupe deja, apres son delai de
-            # confirmation. Couper ici en plus ferait claquer les relais a
-            # l'instant meme de la mise en veille, sans rien apporter : on
-            # se contente de noter ce qu'il faudra rendre au reveil.
+            # The on-device script already switches off, after its
+            # confirmation delay. Switching off here as well would click the
+            # relays at the very moment of going to sleep, for no benefit:
+            # we just record what will need to be restored on wake.
             try:
                 self.controller.remember_for_resume()
             except Exception as exc:  # noqa: BLE001
@@ -551,13 +564,13 @@ class Application:
         try:
             report = self.controller.prepare_for_suspend()
             self.log(report.summary())
-        except Exception as exc:  # noqa: BLE001 - ne jamais bloquer la veille
+        except Exception as exc:  # noqa: BLE001 - never block sleep
             self.log(f"Suspend handling failed: {exc}")
 
     def _on_resume(self) -> None:
-        """Reveil : reappliquer le dernier profil."""
-        # Pendant la veille, seul le releveur embarque a mesure : ses
-        # ticks viendront combler le trou a la prochaine lecture.
+        """Wake: reapply the last profile."""
+        # During sleep, only the on-device probe measured: its ticks will
+        # fill the gap on the next read.
         self.history.request_recovery()
         if not self.config.settings.restore_on_resume:
             self._on_tick()
@@ -565,8 +578,8 @@ class Application:
         self.log("Resuming")
 
         def worker() -> None:
-            # Le reseau met un instant a revenir apres le reveil : sans cette
-            # pause, les premieres requetes echoueraient a coup sur.
+            # The network takes a moment to come back after wake: without
+            # this pause, the first requests would be sure to fail.
             time.sleep(3.0)
             self.controller.connect_all(allow_scan=False)
             try:
@@ -578,16 +591,17 @@ class Application:
         self._run_async("Resume", worker)
 
     def _on_shutdown(self) -> None:
-        """Arret ou redemarrage : meme traitement que la veille."""
+        """Shutdown or restart: same handling as sleep."""
         self._on_suspend()
 
-    # ------------------------------------------------------------- reglages
+    # ------------------------------------------------------------- settings
 
     def _install_hotkey(self) -> None:
-        """Pose le raccourci des profils au demarrage, et dit s'il manque.
+        """Registers the profile shortcut at startup, and says if it's missing.
 
-        Un raccourci deja pris ailleurs ne se remarque pas : on presse, rien
-        ne vient, et l'on accuse l'application. D'ou la bulle, une fois.
+        A shortcut already taken elsewhere goes unnoticed: you press it,
+        nothing happens, and you blame the application. Hence the balloon,
+        once.
         """
         text = self.config.settings.profile_hotkey
         wanted = hotkey_module.parse(text)
@@ -622,13 +636,13 @@ class Application:
 
 
 def main(verbose: bool = False) -> int:
-    # Le journal se met en place avant tout le reste : sans lui, une erreur
-    # au chargement de la configuration disparaitrait sans laisser de trace.
+    # The log is set up before anything else: without it, an error while
+    # loading the configuration would vanish without a trace.
     logger = logging_setup.setup(verbose=verbose)
 
-    # Une seule instance : deux programmes qui ecrivent le meme fichier de
-    # configuration se marchent dessus, et le dernier a enregistrer efface
-    # le travail de l'autre.
+    # A single instance: two programs writing the same configuration file
+    # step on each other, and the last one to save wipes out the other's
+    # work.
     if not single_instance.acquire():
         shown = single_instance.wake_existing(
             TrayWindow.CLASS_NAME, WM_SHOW_SETTINGS

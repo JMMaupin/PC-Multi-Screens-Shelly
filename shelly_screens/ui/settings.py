@@ -1,10 +1,9 @@
-"""Fenetre de reglages : appareils, prises, profils, comportement.
+"""Settings window: devices, outlets, profiles, behaviour.
 
-Tkinter exige que tous ses appels viennent du thread qui a cree la racine.
-La fenetre tourne donc dans son propre thread, avec sa propre boucle, et ne
-touche jamais directement a la boucle de messages de l'icone. Une seule
-fenetre a la fois, sans quoi deux racines Tk cohabiteraient dans le meme
-processus.
+Tkinter requires every call to come from the thread that created the root.
+The window therefore runs in its own thread, with its own loop, and never
+touches the tray icon's message loop directly. Only one window at a time,
+otherwise two Tk roots would coexist in the same process.
 """
 
 from __future__ import annotations
@@ -34,19 +33,19 @@ if TYPE_CHECKING:
 _state_lock = threading.Lock()
 _is_open = False
 
-# Au-dela de cette puissance, une prise n'est pas tenue pour porter un
-# ecran, et l'assistant d'identification refuse d'y toucher. Un moniteur,
-# meme grand, depasse rarement 60 W ; une unite centrale en consomme plus
-# de 100. C'est une securite physique : elle ne depend d'aucun marquage.
+# Above this power draw, an outlet is not considered to carry a screen,
+# and the identification assistant refuses to touch it. A monitor, even a
+# large one, rarely exceeds 60 W; a desktop tower draws more than 100.
+# This is a physical safeguard: it does not depend on any labelling.
 IDENTIFY_MAX_WATTS = 80.0
-# Rafraichissement de l'etat du releve, en nombre de cycles de 3 secondes.
+# Refresh of the power log status, as a number of 3-second cycles.
 SENSING_REFRESH_TICKS = 5
-# Un rafraichissement de la mesure tous les N cycles de 3 secondes.
+# One refresh of the measurement every N 3-second cycles.
 SENSING_REFRESH_TICKS = 5
 
 
 def open_settings(application: "Application") -> None:
-    """Ouvre la fenetre de reglages, si elle ne l'est pas deja."""
+    """Open the settings window, unless it is already open."""
     global _is_open
     with _state_lock:
         if _is_open:
@@ -59,7 +58,7 @@ def open_settings(application: "Application") -> None:
             root = tk.Tk()
             SettingsWindow(root, application)
             root.mainloop()
-        except Exception as exc:  # noqa: BLE001 - une UI ratee ne doit pas tuer l'appli
+        except Exception as exc:  # noqa: BLE001 - a failed UI must not kill the app
             application.log(f"Settings window failed: {exc}")
         finally:
             with _state_lock:
@@ -69,24 +68,24 @@ def open_settings(application: "Application") -> None:
 
 
 class SettingsWindow:
-    """Contenu de la fenetre de reglages."""
+    """Contents of the settings window."""
 
     def __init__(self, root: tk.Tk, application: "Application") -> None:
         self.root = root
         self.app = application
         self.config = application.config
 
-        # Avant toute construction : les widgets lisent leur texte une fois.
+        # Before building anything: widgets read their text only once.
         i18n.set_language(self.config.settings.language)
         icon_module.apply_to_window(root)
         root.title(t("Shelly Screens {version} - Settings", version=__version__))
-        # La vue Devices aligne 944 pixels de colonnes ; en deca, les
-        # dernieres sont tronquees sans que rien ne le signale.
+        # The Devices view lines up 944 pixels of columns; any narrower and
+        # the last ones get truncated with nothing to show it.
         root.geometry("1020x760")
         root.minsize(900, 640)
 
-        # Le theme doit etre pose avant la creation des widgets : certains
-        # lisent leurs couleurs a la construction.
+        # The theme must be set before the widgets are created: some of
+        # them read their colours at construction time.
         self.palette = theme_module.apply(root, self.config.settings.theme)
         self._system_was_dark = theme_module.system_prefers_dark()
         self._sensing_ticks = 0
@@ -106,7 +105,7 @@ class SettingsWindow:
         notebook.add(self.sensing_tab, text=t("PC power"))
         notebook.add(self.behaviour_tab, text=t("Behaviour"))
         notebook.add(self.about_tab, text=t("About"))
-        # Sans cet appel, Ctrl+Tab et Alt+lettre ne changent pas d'onglet.
+        # Without this call, Ctrl+Tab and Alt+letter do not switch tabs.
         notebook.enable_traversal()
 
         self.status = tk.StringVar(self.root, value="")
@@ -126,31 +125,30 @@ class SettingsWindow:
         self._restyle()
         self._update_theme_hint()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
-        # Rafraichissement doux, pour refleter les changements venus du menu.
+        # Gentle refresh, to reflect changes made from the menu.
         self._schedule_refresh()
 
-    # ------------------------------------------------------------- utilitaires
+    # --------------------------------------------------------------- utilities
 
     def set_status(self, message: str) -> None:
         self.status.set(message)
 
     def _schedule_refresh(self) -> None:
         self.refresh_readings()
-        # La disposition peut avoir ete relevee en arriere-plan : un profil
-        # qui allume tout, une procedure lancee depuis l'icone.
+        # The layout may have been captured in the background: a profile
+        # that turns everything on, a procedure started from the tray icon.
         ghosts = list(self.app.controller.ghost_screens)
         if self._capturing:
-            pass  # le plan se construit en direct : ne pas l'ecraser
+            pass  # the map is being built live: do not overwrite it
         elif self.config.screens != self._drawn_screens or ghosts != self._drawn_ghosts:
             self._draw_screen_map()
         else:
             self._update_layout_state()
         self._follow_system_theme()
-        # Le releve avance tout seul sur l'appareil : sans un rappel
-        # periodique, l'interface continuerait d'annoncer « aucune mesure »
-        # pendant que les echantillons s'accumulent. On espace davantage
-        # que le reste : c'est un appel reseau, et le releve ecrit au plus
-        # une fois par minute.
+        # The power log advances on its own on the device: without a periodic
+        # callback, the UI would keep announcing "no measurement" while
+        # samples pile up. It is spaced out more than the rest: it is a
+        # network call, and the logger writes at most once per minute.
         self._sensing_ticks += 1
         if self._sensing_ticks >= SENSING_REFRESH_TICKS:
             self._sensing_ticks = 0
@@ -158,22 +156,22 @@ class SettingsWindow:
         self.root.after(3000, self._schedule_refresh)
 
     def _on_tab_changed(self, _event=None) -> None:
-        """Reconstruit les listes en arrivant sur un onglet.
+        """Rebuild the lists when arriving on a tab.
 
-        Le rappel periodique ne repose que les valeurs qui bougent -- etat,
-        puissance, adresse. Tout le reste, roles et types des prises,
-        appareils ajoutes par une reconnexion, profil applique depuis le
-        menu, n'apparaissait qu'apres une action explicite dans la fenetre.
-        Or changer d'onglet est precisement le moment ou l'on vient
-        regarder : c'est la qu'on attend des listes a jour.
+        The periodic callback only refreshes the values that move -- state,
+        power, address. Everything else, outlet roles and kinds, devices
+        added by a reconnection, a profile applied from the menu, only
+        showed up after an explicit action in the window. Yet switching tabs
+        is precisely the moment one comes to look: that is where up-to-date
+        lists are expected.
         """
-        # `refresh` couvre tout, y compris l'onglet de detection : inutile
-        # d'y ajouter quoi que ce soit, on ne ferait qu'interroger
-        # l'appareil deux fois pour le meme affichage.
+        # `refresh` covers everything, including the detection tab: no need
+        # to add anything here, it would only query the device twice for
+        # the same display.
         self.refresh()
 
     def _follow_system_theme(self) -> None:
-        """En mode `system`, suivre un basculement clair/sombre de Windows."""
+        """In `system` mode, follow a Windows light/dark switch."""
         if self.config.settings.theme != "system":
             return
         now_dark = theme_module.system_prefers_dark()
@@ -183,12 +181,12 @@ class SettingsWindow:
             self._update_theme_hint()
 
     def apply_theme(self) -> None:
-        """Applique le theme courant a la fenetre et a ses widgets."""
+        """Apply the current theme to the window and its widgets."""
         self.palette = theme_module.apply(self.root, self.config.settings.theme)
         self._restyle()
 
     def _restyle(self) -> None:
-        """Recolore ce que ttk.Style ne couvre pas."""
+        """Recolour what ttk.Style does not cover."""
         palette = self.palette
         self.screen_map.draw()
         theme_module.refresh_plain_widgets(self.root, palette)
@@ -213,7 +211,7 @@ class SettingsWindow:
         except OSError as exc:
             messagebox.showerror("Shelly Screens", f"Cannot save configuration:\n{exc}")
 
-    # ---------------------------------------------------------- onglet appareils
+    # ------------------------------------------------------------- devices tab
 
     def _build_devices_tab(self) -> None:
         frame = self.devices_tab
@@ -229,10 +227,10 @@ class SettingsWindow:
             justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        # Hote et adresse sont deux colonnes distinctes : on joint souvent
-        # l'appareil par son nom mDNS, plus stable que son bail DHCP, mais
-        # c'est l'adresse qu'on veut lire pour ouvrir son interface web ou
-        # reperer qu'elle a change.
+        # Host and address are two separate columns: the device is often
+        # reached by its mDNS name, more stable than its DHCP lease, but the
+        # address is what one wants to read to open its web interface or
+        # notice that it has changed.
         columns = ("kind", "host", "ip", "signal", "outlets", "auth", "state")
         self.device_tree = ttk.Treeview(frame, columns=columns, height=7)
         self.device_tree.heading("#0", text=t("Key / name"))
@@ -249,22 +247,21 @@ class SettingsWindow:
         self.device_tree.column("ip", width=110)
         self.device_tree.column("signal", width=118)
         self.device_tree.column("outlets", width=58, anchor="center")
-        # « Mot de passe » ne tenait pas dans les 78 pixels calibres pour
-        # « Password » ; la place est reprise sur la colonne des noms mDNS,
-        # qui en avait de trop.
+        # "Mot de passe" did not fit in the 78 pixels sized for "Password";
+        # the room is taken from the mDNS name column, which had too much.
         self.device_tree.column("auth", width=100, anchor="center")
         self.device_tree.column("state", width=90)
-        # La cellule d'adresse se comporte comme un lien. ttk.Treeview ne
-        # sait pas styler une cellule isolee -- impossible de la souligner
-        # sans repeindre toute la ligne -- alors on s'en remet au signal
-        # universel : le curseur en main au survol.
+        # The address cell behaves like a link. ttk.Treeview cannot style
+        # a single cell -- no way to underline it without repainting the
+        # whole row -- so we rely on the universal signal: the hand cursor
+        # on hover.
         self.device_tree.bind("<Motion>", self._device_tree_hover)
         self.device_tree.bind("<Leave>", lambda _e: self.device_tree.configure(cursor=""))
         self.device_tree.bind("<Button-1>", self._device_tree_click, add="+")
         self.device_tree.pack(fill="both", expand=True)
 
-        # Bandeau d'alerte : masque tant que tout va bien, il apparait des
-        # qu'un appareil refuse le mot de passe et mene a la marche a suivre.
+        # Alert banner: hidden while all is well, it appears as soon as a
+        # device rejects the password and leads to the recovery steps.
         self.auth_banner = ttk.Frame(frame)
         self.auth_alert = tk.StringVar(self.root, value="")
         ttk.Label(
@@ -294,12 +291,12 @@ class SettingsWindow:
             )
 
     def _signal_label(self, key: str) -> str:
-        """Puissance du signal, assortie de ce qu'elle vaut.
+        """Signal strength, along with what it is worth.
 
-        Un nombre negatif en decibels ne parle qu'a qui le pratique. Le
-        qualificatif, lui, se lit d'un coup d'oeil -- et c'est la lecture
-        qui compte : une multiprise a -79 dBm tenait au bord du
-        decrochage sans que rien ne l'annonce.
+        A negative number in decibels only speaks to those used to it. The
+        qualifier, on the other hand, reads at a glance -- and reading is
+        what matters: a power strip at -79 dBm was on the verge of dropping
+        out with nothing to announce it.
         """
         rssi = self.app.controller.wifi_signal(key)
         if rssi is None:
@@ -307,24 +304,24 @@ class SettingsWindow:
         return f"{rssi} dBm - {wifi_setup.signal_quality(rssi)}"
 
     def _auth_label(self, device) -> str:
-        """Etat du mot de passe tel que l'appareil le rapporte.
+        """Password state as reported by the device.
 
-        La colonne montrait ce que l'application avait memorise, ce qui
-        ment des que l'appareil change de son cote : une remise a zero lui
-        retire son mot de passe sans que le notre disparaisse, et l'on
-        croyait proteger un appareil grand ouvert. On affiche donc ce qu'il
-        annonce, et l'on signale le desaccord plutot que de le taire.
+        The column used to show what the application had stored, which lies
+        as soon as the device changes on its side: a factory reset removes
+        its password without ours disappearing, and we believed we were
+        protecting a wide-open device. So we show what it announces, and
+        flag the mismatch rather than hide it.
         """
         identity = self.app.controller.identity(device.key)
         if identity is None:
-            # Hors ligne : on ne sait rien de lui, seulement ce qu'on garde.
+            # Offline: we know nothing about it, only what we keep.
             return t("stored") if device.has_password else t("none")
         if identity.auth_enabled:
             return t("set") if device.has_password else t("unknown")
         return t("none, stored") if device.has_password else t("none")
 
     def _device_state_label(self, key: str, online: set[str]) -> str:
-        """Etat lisible d'un appareil, l'echec d'authentification en propre."""
+        """Readable state of a device, with authentication failure on its own."""
         if key in self.app.controller.auth_failures:
             return t("auth failed")
         return t("online") if key in online else t("offline")
@@ -334,11 +331,11 @@ class SettingsWindow:
         return selection[0] if selection else None
 
     def _ip_column_id(self) -> str:
-        """Identifiant Tk de la colonne d'adresse (#1 est la premiere)."""
+        """Tk identifier of the address column (#1 is the first)."""
         return f"#{list(self.device_tree['columns']).index('ip') + 1}"
 
     def _ip_link_at(self, x: int, y: int) -> tuple[str, str] | None:
-        """Cle et adresse si le point vise une cellule d'adresse utilisable."""
+        """Key and address if the point targets a usable address cell."""
         if self.device_tree.identify_region(x, y) != "cell":
             return None
         if self.device_tree.identify_column(x) != self._ip_column_id():
@@ -410,7 +407,7 @@ class SettingsWindow:
         PasswordDialog.show_reset_help(self.root)
 
     def _update_auth_banner(self) -> None:
-        """Affiche ou masque l'alerte d'authentification."""
+        """Show or hide the authentication alert."""
         failures = self.app.controller.auth_failures
         if not failures:
             self.auth_banner.pack_forget()
@@ -432,7 +429,7 @@ class SettingsWindow:
         PasswordDialog(self.root, self, device)
 
     def _open_web_ui(self) -> None:
-        """Ouvre l'interface web de l'appareil selectionne dans le navigateur."""
+        """Open the selected device's web interface in the browser."""
         key = self._selected_device_key()
         device = self.config.device(key) if key else None
         if device is None:
@@ -449,7 +446,7 @@ class SettingsWindow:
         self.set_status("Searching for devices...")
         self.app.reconnect()
 
-    # ------------------------------------------------------------- onglet prises
+    # ------------------------------------------------------------- outlets tab
 
     def _build_outlets_tab(self) -> None:
         frame = self.outlets_tab
@@ -464,10 +461,10 @@ class SettingsWindow:
             justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        # Une colonne vide separe la puissance de l'ecran. Le nombre est cale
-        # a droite, le libelle a gauche : sans rien entre eux, « 105 W » et
-        # « non identifie » se touchent et se lisent comme une seule valeur.
-        # ttk.Treeview ne sait pas espacer une cellule, d'ou cette colonne.
+        # An empty column separates the power from the screen. The number is
+        # right-aligned, the label left-aligned: with nothing between them,
+        # "105 W" and "not identified" touch and read as a single value.
+        # ttk.Treeview cannot pad a cell, hence this column.
         columns = ("kind", "state", "power", "gap", "display", "flags")
         self.outlet_tree = ttk.Treeview(frame, columns=columns, height=9)
         self.outlet_tree.heading("#0", text=t("Outlet"))
@@ -585,7 +582,7 @@ class SettingsWindow:
         selection = self.outlet_tree.selection()
         if not selection:
             return None
-        # Les noeuds d'appareil ne sont pas des prises : ils n'ont pas de ":".
+        # Device nodes are not outlets: they have no ":".
         return selection[0] if ":" in selection[0] else None
 
     def _on_outlet_selected(self) -> None:
@@ -612,18 +609,18 @@ class SettingsWindow:
                 break
         outlet.critical = self.outlet_critical.get()
         outlet.cut_on_sleep = self.outlet_cut_on_sleep.get()
-        # Declarer un ecran, c'est vouloir qu'il suive la veille : c'est tout
-        # l'objet du montage. La case gardait pourtant l'etat herite de ce
-        # que la prise portait avant -- un accessoire, donc decochee -- et
-        # l'ecran restait hors du pilotage sans que rien ne le dise.
+        # Declaring a screen means wanting it to follow sleep: that is the
+        # whole point of the setup. Yet the checkbox kept the state inherited
+        # from what the outlet carried before -- an accessory, so unticked --
+        # and the screen stayed out of control with nothing to say so.
         became_screen = (
             outlet.kind == KIND_SCREEN and previous_kind != KIND_SCREEN
         )
         if became_screen and not outlet.cut_on_sleep:
             outlet.cut_on_sleep = True
             self.outlet_cut_on_sleep.set(True)
-        # Un seul ecran de demarrage et une seule prise PC, sinon ces roles
-        # perdent leur sens.
+        # Only one boot screen and only one PC outlet, otherwise these roles
+        # lose their meaning.
         if self.outlet_boot.get():
             for other in self.config.outlets:
                 other.boot_screen = other.ref == outlet.ref
@@ -636,11 +633,11 @@ class SettingsWindow:
             outlet.host_pc = False
         self._save()
 
-        # Les clients deja ouverts gardent leur ancienne liste de sorties
-        # protegees : il faut la leur repasser, sinon la prise du PC
-        # resterait coupable jusqu'a la prochaine reconnexion.
+        # Clients already open keep their old list of protected outputs: it
+        # must be handed to them again, otherwise the PC outlet would remain
+        # switchable until the next reconnection.
         self.app.controller.refresh_protection()
-        # Et le gardien embarque suit le role, d'un appareil a l'autre.
+        # And the on-device guard follows the role, from one device to another.
         _run_off_thread(
             self.root,
             lambda: sensing.sync_guard(self.app.controller, self.config),
@@ -666,13 +663,13 @@ class SettingsWindow:
         self._save()
         self.refresh()
 
-    # ------------------------------------------------------------ onglet a propos
+    # --------------------------------------------------------------- about tab
 
     def _build_about_tab(self) -> None:
-        """Logo, nom, version, auteur, appareils valides, page des versions.
+        """Logo, name, version, author, validated devices, releases page.
 
-        Pas de cadres ici : un lien pose sur une carte y garderait le fond de
-        la fenetre. De simples titres de section suffisent.
+        No frames here: a link placed on a card would keep the window's
+        background. Plain section titles are enough.
         """
         frame = self.about_tab
         header = ttk.Frame(frame)
@@ -719,12 +716,12 @@ class SettingsWindow:
         )
 
     def _link(self, parent: tk.Misc, text: str, url: str) -> ttk.Label:
-        """Une etiquette qui ouvre une adresse dans le navigateur."""
+        """A label that opens an address in the browser."""
         label = ttk.Label(parent, text=text, style="Link.TLabel", cursor="hand2")
         label.bind("<Button-1>", lambda _e: webbrowser.open(url))
         return label
 
-    # ------------------------------------------------------------ onglet profils
+    # ------------------------------------------------------------ profiles tab
 
     def _build_profiles_tab(self) -> None:
         frame = self.profiles_tab
@@ -733,21 +730,20 @@ class SettingsWindow:
 
         ttk.Label(left, text=t("Profiles")).pack(anchor="w")
         self.profile_list = tk.Listbox(left, width=22, height=16, exportselection=False)
-        # La liste occupe toute la largeur de sa colonne : remplie en
-        # hauteur seulement, elle flottait au milieu d'une colonne elargie
-        # par les boutons, decalee par rapport a son titre.
+        # The list takes the full width of its column: filled vertically
+        # only, it floated in the middle of a column widened by the buttons,
+        # offset from its title.
         self.profile_list.pack(fill="both", expand=True)
         self.profile_list.bind("<<ListboxSelect>>", lambda _e: self._on_profile_selected())
-        # Glisser un profil le deplace dans la liste ; l'ordre est celui du
-        # menu de l'icone et des touches de la fenetre du raccourci.
+        # Dragging a profile moves it in the list; the order is that of the
+        # tray icon menu and of the keys in the hotkey window.
         self.profile_list.bind("<B1-Motion>", self._drag_profile)
 
         list_buttons = ttk.Frame(left)
         list_buttons.pack(fill="x", pady=6)
-        # Pas de largeur figee : ces boutons avaient ete calibres sur
-        # « New », « Rename », « Delete », et « Supprimer » s'y retrouvait
-        # rogne en « Suppri ». Chaque libelle prend la place qu'il demande,
-        # dans toutes les langues.
+        # No fixed width: these buttons had been sized for "New", "Rename",
+        # "Delete", and "Supprimer" ended up clipped to "Suppri". Each label
+        # takes the room it needs, in every language.
         ttk.Button(list_buttons, text=t("New"), command=self._new_profile).pack(
             side="left"
         )
@@ -755,7 +751,7 @@ class SettingsWindow:
         rename.pack(side="left", padx=3)
         delete = ttk.Button(list_buttons, text=t("Delete"), command=self._delete_profile)
         delete.pack(side="left")
-        # Figes quand le profil integre est selectionne.
+        # Disabled when the built-in profile is selected.
         self._profile_edit_buttons = [rename, delete]
         self._profile_rows: list[str] = []
 
@@ -773,9 +769,9 @@ class SettingsWindow:
         right = ttk.Frame(frame)
         right.pack(side="left", fill="both", expand=True)
 
-        # Le plan des ecrans occupe le bas de la zone, sur toute sa largeur :
-        # c'est la qu'il a la place d'etre lisible. Il se reserve avant le
-        # haut, sinon il disparait quand la fenetre manque de hauteur.
+        # The screen map takes the bottom of the area, across its full width:
+        # that is where it has room to be readable. It is reserved before the
+        # top, otherwise it disappears when the window lacks height.
         map_box = ttk.LabelFrame(right, text=t("Screens"), padding=8)
         map_box.pack(side="bottom", fill="both", expand=True, pady=(4, 0))
         self.screen_map = screen_map.ScreenMap(
@@ -785,15 +781,15 @@ class SettingsWindow:
             empty_text=t("Screen positions are not known yet. Capture the layout: "
                          "every screen is switched on for a few seconds."),
         )
-        # Le bouton se reserve avant le plan extensible, sinon il disparait
-        # quand la fenetre manque de hauteur.
+        # The button is reserved before the expanding map, otherwise it
+        # disappears when the window lacks height.
         map_buttons = ttk.Frame(map_box)
         map_buttons.pack(side="bottom", fill="x", pady=(6, 0))
         ttk.Button(
             map_buttons, text=t("Capture layout..."), command=self._capture_layout
         ).pack(side="left")
-        # Date du releve, ou raison du dernier refus : on sait ainsi si le
-        # plan est a jour, et sinon pourquoi.
+        # Date of the capture, or reason for the last refusal: this tells
+        # whether the map is up to date, and if not, why.
         self.layout_state = tk.StringVar(self.root, value="")
         ttk.Label(
             map_buttons, textvariable=self.layout_state, style="Hint.TLabel",
@@ -808,11 +804,11 @@ class SettingsWindow:
         top = ttk.Frame(right)
         top.pack(side="top", fill="x")
 
-        # Le logo prend la place laissee libre a droite. Sans lui, les cases
-        # s'etiraient sur toute la largeur de la fenetre : une case a cocher
-        # large d'un ecran est plus penible a viser qu'une case serree contre
-        # son libelle, et l'oeil parcourt une distance inutile entre
-        # l'intitule et la case suivante.
+        # The logo takes the space left free on the right. Without it, the
+        # checkboxes stretched across the whole window width: a checkbox as
+        # wide as a screen is harder to aim at than one snug against its
+        # label, and the eye travels a needless distance between the caption
+        # and the next checkbox.
         badge = ttk.Frame(top)
         badge.pack(side="right", fill="y", padx=(24, 0))
         self._profile_logo = icon_module.load_photo(96, self.root)
@@ -827,8 +823,8 @@ class SettingsWindow:
             anchor="w"
         )
 
-        # Les cases sont reconstruites a chaque changement de configuration :
-        # ajouter une multiprise ajoute des prises, et donc des cases.
+        # The checkboxes are rebuilt on every configuration change: adding a
+        # power strip adds outlets, and therefore checkboxes.
         self.outlets_box = ttk.LabelFrame(content, text=t("Powered outlets"), padding=10)
         self.outlets_box.pack(fill="x", pady=10)
         self.profile_outlet_vars: dict[str, tk.BooleanVar] = {}
@@ -840,7 +836,7 @@ class SettingsWindow:
         ).pack(side="left")
 
     def _rebuild_profile_outlets(self) -> None:
-        """Recree les cases a cocher, une par prise connue."""
+        """Recreate the checkboxes, one per known outlet."""
         for child in self.outlets_box.winfo_children():
             child.destroy()
         self.profile_outlet_vars = {}
@@ -879,8 +875,8 @@ class SettingsWindow:
             self._profile_boxes.append((box, outlet.ref))
 
     def _selected_profile(self) -> Profile | None:
-        # La liste affiche les noms traduits : on retrouve le profil par son
-        # rang, pas par le texte de la ligne.
+        # The list shows translated names: the profile is found by its row
+        # index, not by the row's text.
         selection = self.profile_list.curselection()
         if not selection or selection[0] >= len(self._profile_rows):
             return None
@@ -898,7 +894,7 @@ class SettingsWindow:
             outlet = self.config.outlet(ref)
             always_on = outlet is not None and outlet.never_switch_off
             variable.set(always_on or ref in profile.outlets_on)
-        # Le profil integre ne se modifie pas : ses cases sont figees.
+        # The built-in profile cannot be edited: its checkboxes are disabled.
         for box, ref in self._profile_boxes:
             outlet = self.config.outlet(ref)
             locked = profile.builtin or (outlet is not None and outlet.never_switch_off)
@@ -908,10 +904,10 @@ class SettingsWindow:
         self._update_move_buttons(profile)
         self._draw_screen_map()
 
-    # ------------------------------------------------------------ ordre
+    # ------------------------------------------------------------ order
 
     def _update_move_buttons(self, profile: Profile) -> None:
-        """Le profil integre reste en tete : ni lui ni les autres ne le passent."""
+        """The built-in profile stays on top: neither it nor the others move past it."""
         ordered = self.config.user_profiles()
         position = next(
             (i for i, p in enumerate(ordered) if p.name == profile.name), None
@@ -930,7 +926,7 @@ class SettingsWindow:
         self._place_profile(profile.name, position + step)
 
     def _place_profile(self, name: str, position: int) -> None:
-        """Met un profil utilisateur a ce rang et renumerote les autres."""
+        """Put a user profile at this rank and renumber the others."""
         ordered = self.config.user_profiles()
         moving = next((p for p in ordered if p.name == name), None)
         position = min(max(position, 0), len(ordered) - 1)
@@ -946,12 +942,12 @@ class SettingsWindow:
         self.set_status(t("Profile order saved"))
 
     def _drag_profile(self, event) -> None:
-        """Pendant le glisser : le profil suit la souris, rang par rang."""
+        """While dragging: the profile follows the mouse, row by row."""
         profile = self._selected_profile()
         if profile is None or profile.builtin:
             return
         row = self.profile_list.nearest(event.y)
-        # Les profils utilisateur commencent au rang 1, sous le profil integre.
+        # User profiles start at row 1, below the built-in profile.
         target = max(row, 1) - 1
         ordered = self.config.user_profiles()
         current = next(i for i, p in enumerate(ordered) if p.name == profile.name)
@@ -959,16 +955,16 @@ class SettingsWindow:
             self._place_profile(profile.name, target)
 
     def _draw_screen_map(self) -> None:
-        """Redessine le plan d'apres les cases du profil affiche."""
+        """Redraw the map from the checkboxes of the displayed profile."""
         selected = self._selected_profile()
 
         def lit(ref: str) -> bool | None:
             if selected is None:
-                return None  # aucun profil affiche : rien a dire des prises
+                return None  # no profile displayed: nothing to say about outlets
             variable = self.profile_outlet_vars.get(ref)
             return variable is not None and variable.get()
 
-        # Un clic sur un ecran modifie le profil : pas le profil integre.
+        # A click on a screen edits the profile: not the built-in one.
         tiles = screen_map.build_tiles(
             self.config, lit,
             editable=selected is not None and not selected.builtin,
@@ -980,11 +976,11 @@ class SettingsWindow:
         self._update_layout_state()
 
     def _update_layout_state(self) -> None:
-        """Date du releve, echec du dernier releve demande, ecrans fantomes.
+        """Capture date, failure of the last requested capture, ghost screens.
 
-        Les refus du releve continu n'y figurent pas : qu'il ne puisse rien
-        relever pendant que des ecrans sont eteints est la regle, pas un
-        echec -- le plan garde simplement la derniere disposition valide.
+        Refusals from the continuous capture are not listed: that it cannot
+        capture anything while screens are off is the rule, not a failure --
+        the map simply keeps the last valid layout.
         """
         controller = self.app.controller
         lines = []
@@ -1005,12 +1001,13 @@ class SettingsWindow:
         self.layout_state.set("\n".join(lines))
 
     def _capture_layout(self) -> None:
-        """Etablit la disposition, en la montrant se construire.
+        """Establish the layout, showing it being built.
 
-        Le plan s'efface, puis chaque ecran y apparait a mesure que Windows
-        le detecte. A la fin, on dit ce qui a ete appris et l'on demande s'il
-        faut rester ainsi -- tout allume -- ou revenir au profil d'avant :
-        revenir d'office donnait l'impression que rien ne s'etait passe.
+        The map is cleared, then each screen appears on it as Windows
+        detects it. At the end, we say what was learned and ask whether to
+        stay this way -- everything on -- or go back to the previous
+        profile: going back automatically made it look as if nothing had
+        happened.
         """
         linked = [o for o in self.config.outlets if o.monitor_key]
         if not linked:
@@ -1045,12 +1042,12 @@ class SettingsWindow:
             try:
                 self.root.after(0, lambda: self._capture_finished(capture))
             except (tk.TclError, RuntimeError):
-                pass  # fenetre fermee entre-temps
+                pass  # window closed in the meantime
 
         self.app.capture_screen_layout(on_done=done, progress=progress)
 
     def _draw_live_capture(self) -> None:
-        """Le plan tel que Windows le voit en ce moment, redessine en boucle."""
+        """The map as Windows sees it right now, redrawn in a loop."""
         if not self._capturing:
             return
         names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
@@ -1076,12 +1073,12 @@ class SettingsWindow:
         self.root.after(500, self._draw_live_capture)
 
     def _capture_finished(self, capture) -> None:
-        """Dit ce qui a ete appris, puis propose de rester ou de revenir."""
+        """Say what was learned, then offer to stay or go back."""
         self._capturing = False
         self._draw_screen_map()
         self.set_status(capture.message)
         if not capture.turned_on:
-            # Rien n'a ete allume pour l'occasion : il n'y a pas a choisir.
+            # Nothing was switched on for the occasion: there is nothing to choose.
             messagebox.showinfo(t("Capture screen layout"), capture.message,
                                 parent=self.root)
             return
@@ -1094,16 +1091,16 @@ class SettingsWindow:
                                   t("Keep '{all_on}'", all_on=all_on.label), back):
             self._when_idle(lambda: self.app.return_after_capture(capture))
         else:
-            # Tout est allume : c'est « All on » qui est en cours. On le
-            # selectionne, et le plan montre ce qui est allume.
+            # Everything is on: "All on" is the current profile. Select it,
+            # and the map shows what is on.
             self._when_idle(self.app.stay_after_capture)
             self._select_profile(all_on.name)
 
     def _ask_stay_or_back(self, message: str, stay_label: str, back_label: str) -> bool:
-        """Petite boite a deux choix ; vrai pour revenir en arriere.
+        """Small two-choice box; true to go back.
 
-        Fermer la boite laisse les choses en l'etat : ne rien commuter
-        est la reponse la plus sure a une question qu'on n'a pas tranchee.
+        Closing the box leaves things as they are: switching nothing is the
+        safest answer to a question that was not settled.
         """
         window = tk.Toplevel(self.root)
         window.title(t("Capture screen layout"))
@@ -1131,14 +1128,14 @@ class SettingsWindow:
         return choice["back"]
 
     def _when_idle(self, action) -> None:
-        """Lance l'action des que l'application n'a plus de manoeuvre en cours."""
+        """Run the action as soon as the application has no operation in progress."""
         if self.app.busy:
             self.root.after(300, lambda: self._when_idle(action))
         else:
             action()
 
     def _toggle_from_map(self, ref: str) -> None:
-        """Un clic sur un ecran vaut un clic sur la case de sa prise."""
+        """A click on a screen is worth a click on its outlet's checkbox."""
         variable = self.profile_outlet_vars.get(ref)
         if variable is None:
             return
@@ -1227,7 +1224,7 @@ class SettingsWindow:
         self.app.apply_profile(profile.name)
         self.set_status(f"Applying '{profile.name}'...")
 
-    # ------------------------------------------------- onglet detection PC
+    # ------------------------------------------------- PC detection tab
 
     def _build_sensing_tab(self) -> None:
         frame = self.sensing_tab
@@ -1300,9 +1297,9 @@ class SettingsWindow:
                 width=8, command=self._apply_sensing_edits,
             )
             spin.grid(row=index, column=1, padx=8)
-            # Le `command` d'un Spinbox ne repond qu'aux fleches. Une valeur
-            # tapee au clavier n'etait donc jamais validee : on croyait avoir
-            # change un seuil, et rien n'avait bouge.
+            # A Spinbox's `command` only responds to the arrows. A value typed
+            # on the keyboard was therefore never committed: one believed a
+            # threshold had changed, and nothing had moved.
             spin.bind("<FocusOut>", lambda _e: self._apply_sensing_edits())
             spin.bind("<Return>", lambda _e: self._apply_sensing_edits())
             ttk.Label(limits, text=unit).grid(row=index, column=2, sticky="w")
@@ -1352,8 +1349,8 @@ class SettingsWindow:
             textvariable=self.var_history_days, command=self._apply_history_days,
         )
         days.pack(side="left", padx=8)
-        # Comme pour les seuils : une valeur tapee au clavier doit etre
-        # validee a la sortie du champ, les fleches ne suffisent pas.
+        # As with the thresholds: a value typed on the keyboard must be
+        # committed when leaving the field, the arrows are not enough.
         days.bind("<FocusOut>", lambda _e: self._apply_history_days())
         days.bind("<Return>", lambda _e: self._apply_history_days())
         ttk.Label(history_row, text=t("days")).pack(side="left")
@@ -1365,7 +1362,7 @@ class SettingsWindow:
         try:
             days = int(self.var_history_days.get())
         except (tk.TclError, ValueError):
-            return  # saisie en cours
+            return  # input in progress
         days = min(max(days, 1), 365)
         if days != self.config.settings.history_days:
             self.config.settings.history_days = days
@@ -1377,10 +1374,10 @@ class SettingsWindow:
         open_history(self.app)
 
     def refresh_sensing(self) -> None:
-        """Met a jour l'onglet de detection.
+        """Update the detection tab.
 
-        La partie locale est immediate ; l'etat du script et du releveur
-        demande d'interroger l'appareil, et part donc en tache de fond.
+        The local part is immediate; the state of the script and of the power
+        logger requires querying the device, so it runs in the background.
         """
         outlet = self.config.host_pc_outlet()
         if outlet is None:
@@ -1415,8 +1412,8 @@ class SettingsWindow:
                 self.script_state.set(f"Cannot reach the device: {error}")
                 return
             status, probing, levels, fresh = result
-            # Le KVS ne contient que des index : on les retraduit en noms,
-            # seuls parlants pour verifier ce qui reviendra au demarrage.
+            # The KVS only holds indexes: map them back to names, the only
+            # meaningful way to check what will come back at boot.
             table = sensing.controlled_outlets(self.config)
             names = [
                 table[i].label for i in status[1] if 0 <= i < len(table)
@@ -1458,7 +1455,7 @@ class SettingsWindow:
             sensing_config.on_delay_s = max(1.0, float(self.var_on_s.get()))
             sensing_config.off_delay_s = max(5.0, float(self.var_off_s.get()))
         except (tk.TclError, ValueError):
-            return  # saisie en cours
+            return  # input in progress
         self._save()
         self.refresh_sensing()
 
@@ -1501,11 +1498,11 @@ class SettingsWindow:
         )
 
     def _show_levels(self, levels, probing: bool = False) -> None:
-        """Affiche l'etat du releve, qu'il soit en cours ou termine.
+        """Show the state of the power log, whether running or finished.
 
-        L'etat est dit explicitement : un releve avance tout seul sur
-        l'appareil, et rien ne le signalerait si l'interface se contentait
-        d'afficher les chiffres au moment ou on les demande.
+        The state is stated explicitly: a power log advances on its own on
+        the device, and nothing would signal it if the UI merely showed the
+        figures at the moment they are requested.
         """
         if not levels.samples:
             self.probe_result.set(
@@ -1542,7 +1539,7 @@ class SettingsWindow:
         self.probe_result.set(text)
 
     def _show_chart(self) -> None:
-        """Ouvre la courbe, ou les seuils se placent a la souris."""
+        """Open the curve, where the thresholds are placed with the mouse."""
         if not self._require_pc_outlet():
             return
         from .power_chart import PowerChartDialog
@@ -1610,7 +1607,7 @@ class SettingsWindow:
             done,
         )
 
-    # ------------------------------------------------ onglet comportement
+    # ------------------------------------------------ behaviour tab
 
     def _build_behaviour_tab(self) -> None:
         frame = self.behaviour_tab
@@ -1737,11 +1734,11 @@ class SettingsWindow:
         ).grid(row=1, column=1, padx=8, pady=(6, 0))
 
     def _build_hotkey_box(self, frame) -> None:
-        """Raccourci global qui affiche les boutons des profils.
+        """Global hotkey that shows the profile buttons.
 
-        Cases a cocher et liste plutot que saisie au clavier : Tk ne voit
-        pas la touche Windows comme un modificateur, et une combinaison
-        qu'on ne peut pas taper ne se capture pas.
+        Checkboxes and a list rather than keyboard entry: Tk does not see
+        the Windows key as a modifier, and a combination that cannot be
+        typed cannot be captured.
         """
         box = ttk.LabelFrame(frame, text=t("Profile shortcut"), padding=10)
         box.pack(fill="x", pady=(0, 12))
@@ -1784,7 +1781,7 @@ class SettingsWindow:
         return hotkey_module.Hotkey(modifiers, self.hotkey_key.get())
 
     def _check_hotkey(self) -> None:
-        """Dit, a chaque retouche, si la combinaison peut servir."""
+        """Tell, on every change, whether the combination can be used."""
         wanted = self._chosen_hotkey()
         active = self.app.tray.hotkey
         ready = False
@@ -1828,7 +1825,7 @@ class SettingsWindow:
         self._check_hotkey()
 
     def _change_theme(self) -> None:
-        """Bascule de theme, immediatement et sans rouvrir la fenetre."""
+        """Switch theme, immediately and without reopening the window."""
         self.config.settings.theme = self.var_theme.get()
         self._save()
         self.apply_theme()
@@ -1836,13 +1833,13 @@ class SettingsWindow:
         self.set_status(f"Theme set to {self.config.settings.theme}")
 
     def _change_language(self) -> None:
-        """Change la langue et reconstruit la fenetre.
+        """Change the language and rebuild the window.
 
-        Les widgets Tk lisent leur texte a la construction : les traduire
-        apres coup demanderait de tenir un registre de chacun. Rouvrir la
-        fenetre est plus simple, et garantit qu'aucun libelle ne reste dans
-        l'ancienne langue -- un ecran a moitie traduit etant pire que pas
-        de traduction du tout.
+        Tk widgets read their text at construction time: translating them
+        afterwards would require keeping a registry of each one. Reopening
+        the window is simpler, and guarantees that no label stays in the
+        old language -- a half-translated screen being worse than no
+        translation at all.
         """
         chosen = self.var_language.get()
         if chosen == self.config.settings.language:
@@ -1852,7 +1849,7 @@ class SettingsWindow:
         i18n.set_language(chosen)
         application = self.app
         self.root.destroy()
-        # Laisser le thread de la fenetre se terminer avant de rouvrir.
+        # Let the window's thread finish before reopening.
         threading.Timer(0.4, lambda: open_settings(application)).start()
 
     def _update_theme_hint(self) -> None:
@@ -1888,17 +1885,17 @@ class SettingsWindow:
             settings.switch_delay_ms = max(0, int(self.var_switch_delay.get()))
             settings.display_settle_timeout_s = max(1.0, float(self.var_settle.get()))
         except (tk.TclError, ValueError):
-            pass  # saisie en cours, on garde la valeur precedente
+            pass  # input in progress, keep the previous value
         self._save()
         self.set_status("Settings saved")
 
-    # ------------------------------------------------------------ rafraichissement
+    # ------------------------------------------------------------ refresh
 
     def refresh(self) -> None:
-        """Reconstruit les listes a partir de la configuration."""
+        """Rebuild the lists from the configuration."""
         online = self.app.controller.online_keys
 
-        # --- appareils
+        # --- devices
         selected_device = self._selected_device_key()
         self.device_tree.delete(*self.device_tree.get_children())
         for device in self.config.devices:
@@ -1922,7 +1919,7 @@ class SettingsWindow:
             self.device_tree.selection_set(selected_device)
         self._update_auth_banner()
 
-        # --- prises, groupees par appareil des qu'il y en a plusieurs
+        # --- outlets, grouped by device as soon as there are several
         selected_ref = self._selected_ref()
         self.outlet_tree.delete(*self.outlet_tree.get_children())
         monitors_by_key = {m.key: m for m in monitors.list_monitors()}
@@ -1944,16 +1941,16 @@ class SettingsWindow:
                 if monitor is not None:
                     display = monitor.describe()
                 elif outlet.monitor_key:
-                    # Association devenue caduque : on la montre plutot que
-                    # de la taire, meme si la prise a change de type depuis.
+                    # Stale association: show it rather than hide it, even
+                    # if the outlet has changed type since.
                     display = t("{key} (not connected)", key=outlet.monitor_key)
                 elif outlet.is_screen:
                     display = t("not identified")
                 else:
-                    # La prise du PC, un concentrateur USB ou une prise non
-                    # declaree ne portent aucun ecran : annoncer qu'aucun
-                    # n'est identifie laisserait croire a un reglage oublie,
-                    # alors qu'il n'y a rien a regler.
+                    # The PC outlet, a USB hub or an undeclared outlet carry
+                    # no screen: announcing that none is identified would
+                    # suggest a forgotten setting, when there is nothing to
+                    # set.
                     display = ""
                 roles = []
                 if outlet.host_pc:
@@ -1962,8 +1959,8 @@ class SettingsWindow:
                     roles.append(t("critical"))
                 if outlet.boot_screen:
                     roles.append(t("boot"))
-                # Seuls les accessoires le portent : pour un ecran, suivre
-                # la veille va de soi et l'afficher n'apprendrait rien.
+                # Only accessories show it: for a screen, following sleep
+                # goes without saying and displaying it would tell nothing.
                 if outlet.cuts_on_sleep and not outlet.is_screen:
                     roles.append(t("sleeps"))
                 self.outlet_tree.insert(
@@ -1983,7 +1980,7 @@ class SettingsWindow:
         if selected_ref and self.outlet_tree.exists(selected_ref):
             self.outlet_tree.selection_set(selected_ref)
 
-        # --- profils
+        # --- profiles
         selected_profile = self._selected_profile()
         self._rebuild_profile_outlets()
         self.profile_list.delete(0, "end")
@@ -1996,7 +1993,7 @@ class SettingsWindow:
         else:
             self._draw_screen_map()
 
-        # --- resume de ce qui reste allume a l'arret
+        # --- summary of what stays on at shutdown
         kept = [
             self.config.outlet(ref).label  # type: ignore[union-attr]
             for ref in self.config.shutdown_refs_on()
@@ -2015,7 +2012,7 @@ class SettingsWindow:
         )
 
     def refresh_readings(self) -> None:
-        """Met a jour les seules valeurs qui bougent, sans reconstruire la liste."""
+        """Update only the values that move, without rebuilding the list."""
         for outlet in self.config.outlets:
             state = self.app.states.get(outlet.ref)
             if not self.outlet_tree.exists(outlet.ref):
@@ -2042,15 +2039,14 @@ class SettingsWindow:
                 )
         self._update_auth_banner()
 
-    # ------------------------------------------------ assistant d'identification
+    # ------------------------------------------------ identification wizard
 
     def _run_identify_wizard(self) -> None:
-        """Associe chaque prise a son ecran, en observant Windows.
+        """Link each outlet to its screen, by watching Windows.
 
-        Le principe : toutes les prises allumees, on en coupe une, on regarde
-        quel ecran Windows retire, puis on la rallume. Il reste ainsi toujours
-        les autres ecrans allumes -- l'assistant ne se coupe jamais l'herbe
-        sous le pied.
+        The principle: with every outlet on, switch one off, see which screen
+        Windows drops, then switch it back on. The other screens thus always
+        stay on -- the wizard never pulls the rug out from under itself.
         """
         if not self.app.online:
             messagebox.showerror("Shelly Screens", "No Shelly device is reachable.")
@@ -2058,11 +2054,11 @@ class SettingsWindow:
         online = self.app.controller.online_keys
         states = self.app.states
 
-        # Trois filtres successifs, du plus explicite au plus physique. Le
-        # dernier ne depend d'aucun marquage : une prise qui tire beaucoup
-        # n'est pas un ecran, et la couper reviendrait sans doute a arreter
-        # l'unite centrale. Il protege donc meme si le role « Powers the
-        # PC » n'a pas ete attribue, ou a ete perdu.
+        # Three successive filters, from the most explicit to the most
+        # physical. The last one does not depend on any labelling: an outlet
+        # that draws a lot is not a screen, and cutting it would most likely
+        # shut down the PC. It therefore protects even if the "Powers the
+        # PC" role was not assigned, or was lost.
         candidates: list[OutletConfig] = []
         refused: list[str] = []
         for outlet in self.config.outlets:
@@ -2073,9 +2069,9 @@ class SettingsWindow:
                 refused.append(f"{outlet.label} ({outlet.ref}) - {role}")
                 continue
             if not outlet.is_screen:
-                # Un accessoire ne fera disparaitre aucun ecran, et une
-                # prise non renseignee ne doit rien subir : on ne coupe pas
-                # ce dont on ignore ce qu'il alimente.
+                # An accessory will make no screen disappear, and an outlet
+                # with no type set must not be touched: we do not cut what we
+                # do not know it powers.
                 why = (
                     "accessory"
                     if outlet.kind
@@ -2129,17 +2125,17 @@ class SettingsWindow:
 
 
 def _theme_dialog(window: tk.Toplevel, palette: "theme_module.Palette") -> None:
-    """Accorde une boite de dialogue au theme de la fenetre principale.
+    """Match a dialog box to the main window's theme.
 
-    Les styles ttk sont partages par tout le processus, mais le fond d'un
-    Toplevel et sa barre de titre lui appartiennent en propre.
+    ttk styles are shared by the whole process, but a Toplevel's background
+    and its title bar belong to it alone.
     """
     window.configure(background=palette.bg)
     theme_module.apply_titlebar(window, palette.dark)
 
 
 class IdentifyDialog:
-    """Petite fenetre de progression pilotant la sequence d'identification."""
+    """Small progress window driving the identification sequence."""
 
     SETTLE_TIMEOUT_S = 12.0
     POLL_S = 0.4
@@ -2178,7 +2174,7 @@ class IdentifyDialog:
         self.message.set("Cancelling, restoring outlets...")
 
     def _say(self, text: str, step: int | None = None) -> None:
-        # Tkinter n'aime que son propre thread : on repasse par la boucle.
+        # Tkinter only likes its own thread: go back through the loop.
         def update() -> None:
             self.message.set(text)
             if step is not None:
@@ -2187,13 +2183,13 @@ class IdentifyDialog:
         try:
             self.window.after(0, update)
         except tk.TclError:
-            pass  # fenetre deja fermee
+            pass  # window already closed
 
     def _why_not_cut(self, outlet) -> str:
-        """Raison de ne pas couper cette prise maintenant, sinon vide.
+        """Reason not to cut this outlet now, otherwise empty.
 
-        Relu a chaque etape : le role a pu changer depuis le lancement, et
-        la consommation, elle, dit la verite quel que soit le marquage.
+        Re-read at each step: the role may have changed since the start, and
+        the power draw tells the truth whatever the labelling.
         """
         current = self.app.config.outlet(outlet.ref)
         if current is None:
@@ -2210,14 +2206,14 @@ class IdentifyDialog:
         return ""
 
     def _wait_for_change(self, before: set[str], appearing: bool) -> set[str]:
-        """Attend qu'un ecran disparaisse (ou apparaisse) et renvoie l'ecart."""
+        """Wait for a screen to disappear (or appear) and return the difference."""
         deadline = time.monotonic() + self.SETTLE_TIMEOUT_S
         while time.monotonic() < deadline:
             time.sleep(self.POLL_S)
             now = monitors.monitor_keys()
             difference = (now - before) if appearing else (before - now)
             if difference:
-                time.sleep(0.8)  # laisser la configuration se stabiliser
+                time.sleep(0.8)  # let the configuration settle
                 return difference
         return set()
 
@@ -2230,22 +2226,22 @@ class IdentifyDialog:
             return
 
         try:
-            # 1. Tout allumer, pour partir d'un bureau complet.
+            # 1. Switch everything on, to start from a complete desktop.
             self._say("Switching every outlet on...", 0)
             for outlet in self.outlets:
                 if not initial.get(outlet.ref):
                     controller.set_outlet(outlet.ref, True)
                     time.sleep(0.3)
-            # L'allumage ne fait courir aucun risque ; la coupure, si.
-            time.sleep(4.0)  # laisser les dalles s'initialiser
+            # Switching on carries no risk; switching off does.
+            time.sleep(4.0)  # let the panels initialise
 
-            # 2. Couper chaque prise a tour de role et regarder qui s'en va.
+            # 2. Cut each outlet in turn and watch which one goes away.
             for index, outlet in enumerate(self.outlets, start=1):
                 if self.cancelled:
                     break
-                # La liste a ete arretee au clic, mais la sequence dure une
-                # minute ou deux : on revalide juste avant de couper, sur
-                # l'etat courant et non sur une photo perimee.
+                # The list was fixed at the click, but the sequence lasts a
+                # minute or two: re-validate just before cutting, against the
+                # current state and not a stale snapshot.
                 blocked = self._why_not_cut(outlet)
                 if blocked:
                     self._say(f"{outlet.label}: skipped, {blocked}", index)
@@ -2272,11 +2268,11 @@ class IdentifyDialog:
                 else:
                     time.sleep(1.5)
 
-            # Tout est rallume : c'est le moment de relever la disposition.
+            # Everything is back on: this is the time to capture the layout.
             if not self.cancelled:
                 self._capture_layout(controller)
 
-            # 3. Revenir a l'etat de depart.
+            # 3. Return to the initial state.
             self._say("Restoring outlets...", len(self.outlets) + 1)
             for outlet in self.outlets:
                 controller.set_outlet(outlet.ref, initial.get(outlet.ref, True))
@@ -2288,13 +2284,12 @@ class IdentifyDialog:
         self._finish()
 
     def _capture_layout(self, controller) -> None:
-        """Releve la disposition avec les associations qu'on vient de trouver.
+        """Capture the layout with the associations just found.
 
-        C'est aussi le seul moment ou l'on peut prouver qu'un ecran ne depend
-        d'aucune prise : si chaque prise d'ecran a trouve le sien, ceux qui
-        restent sont restes allumes pendant toutes les coupures. Ils sont
-        retenus comme tels. La preuve n'est faite que si aucune prise
-        d'ecran n'a ete sautee.
+        It is also the only moment when we can prove that a screen depends
+        on no outlet: if every screen outlet found its own, the remaining
+        ones stayed on through every cut. They are recorded as such. The
+        proof only holds if no screen outlet was skipped.
         """
         links = {
             o.ref: o.monitor_key for o in self.app.config.outlets if o.monitor_key
@@ -2314,15 +2309,15 @@ class IdentifyDialog:
         self.layout_message = message
 
     def _deduce_last_pair(self) -> str | None:
-        """Apparie le dernier couple restant, quand il n'y a plus d'ambiguite.
+        """Pair up the last remaining couple, once there is no ambiguity left.
 
-        La mesure echoue parfois sur un ecran : deux dalles identiques
-        peuvent broncher ensemble, ou Windows tarder a retirer celle qu'on
-        vient d'eteindre, et la regle « un seul ecran disparu » rejette
-        alors un resultat pourtant juste. Mais s'il ne reste qu'une prise
-        sans ecran et qu'un seul ecran sans prise, le couple est le seul
-        possible : refaire toute la sequence pour le retrouver serait
-        absurde. On le deduit, et on le dit.
+        The measurement sometimes fails on a screen: two identical panels
+        may flicker together, or Windows may be slow to drop the one just
+        switched off, and the "a single screen disappeared" rule then
+        rejects a result that is actually right. But if only one outlet is
+        left without a screen and only one screen without an outlet, the
+        pair is the only possible one: rerunning the whole sequence to find
+        it would be absurd. We deduce it, and say so.
         """
         claimed = set(self.results.values())
         for outlet in self.app.config.outlets:
@@ -2388,7 +2383,7 @@ class IdentifyDialog:
 
 
 class AddDeviceDialog:
-    """Recherche les Shelly du reseau et permet d'en adopter un."""
+    """Search the network for Shelly devices and allow adopting one."""
 
     def __init__(self, parent: tk.Tk, owner: SettingsWindow) -> None:
         self.owner = owner
@@ -2424,11 +2419,11 @@ class AddDeviceDialog:
         entry.bind("<Return>", lambda _e: self._probe_host())
         ttk.Button(manual, text=t("Check"), command=self._probe_host).pack(side="left")
 
-        # Le bas se reserve avant l'arbre extensible. Tk distribue l'espace
-        # dans l'ordre d'empaquetage : un arbre en `expand=True` pose en
-        # premier prend tout ce qui reste, et les boutons poses ensuite se
-        # font rogner des que la fenetre manque de hauteur. Ils etaient
-        # invisibles depuis le premier jour.
+        # The bottom is reserved before the expanding tree. Tk distributes
+        # space in packing order: an `expand=True` tree packed first takes
+        # everything left, and the buttons packed afterwards get clipped as
+        # soon as the window lacks height. They had been invisible since
+        # day one.
         self.message = tk.StringVar(self.window, value="")
         buttons = ttk.Frame(self.window, padding=12)
         buttons.pack(fill="x", side="bottom")
@@ -2454,9 +2449,9 @@ class AddDeviceDialog:
         self.tree.column("app", width=85)
         self.tree.column("id", width=230)
         self.tree.pack(fill="both", expand=True, padx=12, pady=12)
-        # Le scan ne part pas tout seul : vingt secondes a balayer le reseau,
-        # c'est a l'utilisateur de les decider -- l'adresse saisie suffit
-        # souvent. Seule la premiere mise en service le lance, a sa fin.
+        # The scan does not start on its own: twenty seconds sweeping the
+        # network is for the user to decide -- the typed address is often
+        # enough. Only the first setup starts it, when it finishes.
         self._expected_mac = ""
         self._expected_ip = ""
 
@@ -2507,16 +2502,16 @@ class AddDeviceDialog:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # ------------------------------------------------------ mise en service
+    # ------------------------------------------------------ first setup
 
     def _first_setup(self) -> None:
         from .first_setup import FirstSetupDialog
 
-        self.window.grab_release()  # l'assistant prend la main
+        self.window.grab_release()  # the assistant takes over
         FirstSetupDialog(self.window, self.owner.palette, _theme_dialog, self._found_new)
 
     def _found_new(self, mac: str, ip: str) -> None:
-        """L'appareil a rejoint le Wi-Fi : on le cherche, et on le presente."""
+        """The device has joined the Wi-Fi: look for it, and present it."""
         try:
             self.window.grab_set()
         except tk.TclError:
@@ -2526,10 +2521,10 @@ class AddDeviceDialog:
         self._scan()
 
     def _select_expected(self) -> None:
-        """Selectionne l'appareil qu'on vient de mettre en service.
+        """Select the device that was just set up.
 
-        Pas trouve par le scan -- le reseau met parfois quelques secondes a
-        le connaitre --, on l'interroge a l'adresse qu'il a annoncee.
+        If the scan did not find it -- the network sometimes takes a few
+        seconds to learn about it -- query it at the address it announced.
         """
         mac = self._expected_mac
         for index, identity in enumerate(self.found):
@@ -2587,36 +2582,36 @@ class AddDeviceDialog:
 
 
 def _run_off_thread(window: tk.Misc, work, done) -> None:
-    """Execute un appel reseau hors du thread de l'interface.
+    """Run a network call off the UI thread.
 
-    Tkinter ne tolere que son propre thread : le resultat repasse donc par
-    la boucle d'evenements avec `after`.
+    Tkinter only tolerates its own thread: the result therefore goes back
+    through the event loop with `after`.
     """
 
     def worker() -> None:
         try:
             result = work()
             error = None
-        except Exception as exc:  # noqa: BLE001 - remonte tel quel a l'interface
+        except Exception as exc:  # noqa: BLE001 - passed as-is to the UI
             result, error = None, exc
         try:
             window.after(0, lambda: done(result, error))
         except (tk.TclError, RuntimeError):
-            # Fenetre fermee pendant l'appel. Tkinter signale le cas de deux
-            # facons selon l'instant : `TclError` quand le widget est detruit,
-            # `RuntimeError: main thread is not in main loop` quand c'est
-            # l'interpreteur entier qui est parti. Seule la premiere etait
-            # rattrapee, et la seconde deversait une trace dans le journal --
-            # celui-la meme qu'on relit pour comprendre un incident.
+            # Window closed during the call. Tkinter reports this in two ways
+            # depending on timing: `TclError` when the widget is destroyed,
+            # `RuntimeError: main thread is not in main loop` when the whole
+            # interpreter is gone. Only the first was caught, and the second
+            # dumped a traceback into the log -- the very one we reread to
+            # understand an incident.
             pass
 
     threading.Thread(target=worker, daemon=True).start()
 
 
-# Procedure de reinitialisation, verifiee dans la base de connaissances de
-# Shelly. La distinction entre cinq et dix secondes compte : relacher trop
-# tot ne fait qu'une remise a zero reseau, qui rallume le point d'acces WiFi
-# -- ouvert sur ce modele.
+# Reset procedure, checked against Shelly's knowledge base. The difference
+# between five and ten seconds matters: releasing too early only performs a
+# network reset, which turns the Wi-Fi access point back on -- an open one
+# on this model.
 FACTORY_RESET_STEPS = (
     "If the password is lost, only the buttons can unlock the device.\n\n"
     "1. Unplug the power strip, then plug it back in.\n"
@@ -2632,12 +2627,12 @@ FACTORY_RESET_STEPS = (
 
 
 class DeviceNamingDialog:
-    """Nom lisible et cle courte d'un appareil, edites ensemble.
+    """Readable name and short key of a device, edited together.
 
-    Les deux allaient par deux boutons distincts, alors qu'on les change
-    d'un meme mouvement en decouvrant un appareil. Les reunir evite surtout
-    de renommer l'un en oubliant l'autre, et de se retrouver devant une
-    liste ou la cle ne dit plus ce que l'etiquette annonce.
+    The two used to have two separate buttons, whereas they are changed in
+    one go when discovering a device. Bringing them together above all
+    avoids renaming one while forgetting the other, and ending up with a
+    list where the key no longer says what the label announces.
     """
 
     def __init__(self, parent: tk.Tk, owner: SettingsWindow, device) -> None:
@@ -2716,17 +2711,16 @@ class DeviceNamingDialog:
 
 
 class DeviceServicesDialog:
-    """Services optionnels d'un appareil, et ce qu'ils coutent.
+    """Optional services of a device, and what they cost.
 
-    Un Shelly sort d'usine avec tout allume. Rien de cela ne sert au
-    pilotage des prises, mais chaque service garde sa pile reseau et sa part
-    de memoire -- assez pour que la multiprise qui porte les scripts frole
-    la panne seche et se fasse reinitialiser par son chien de garde.
+    A Shelly leaves the factory with everything on. None of it is needed to
+    drive the outlets, but each service keeps its network stack and its
+    share of memory -- enough for the power strip carrying the scripts to
+    come close to running dry and get reset by its watchdog.
 
-    Le dialogue dit a quoi chaque service sert vraiment avant de dire
-    pourquoi il ne sert pas ici : couper ce qu'on ne comprend pas est une
-    mauvaise habitude, et l'on branchera peut-etre demain ce qui est
-    inutile aujourd'hui.
+    The dialog says what each service is really for before saying why it
+    is not needed here: switching off what one does not understand is a
+    bad habit, and what is useless today may be plugged in tomorrow.
     """
 
     def __init__(self, parent: tk.Tk, owner: SettingsWindow, device) -> None:
@@ -2739,9 +2733,9 @@ class DeviceServicesDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("Services - {device}", device=device.label))
-        # Sept services de trois lignes chacun : la fenetre demande
-        # 900 pixels de haut. En deca, le pied reste visible -- il est
-        # reserve en premier -- mais la liste se comprime.
+        # Seven services of three lines each: the window needs 900 pixels
+        # of height. Below that, the footer stays visible -- it is reserved
+        # first -- but the list gets squeezed.
         self.window.geometry("800x900")
         self.window.minsize(700, 560)
         self.window.transient(parent)
@@ -2762,8 +2756,8 @@ class DeviceServicesDialog:
         ttk.Label(self.window, textvariable=self.memory, padding=(14, 0),
                   style="Hint.TLabel").pack(anchor="w")
 
-        # Meme precaution qu'ailleurs : le pied de fenetre est reserve
-        # avant la liste extensible, sinon il disparait sur un petit ecran.
+        # Same precaution as elsewhere: the window footer is reserved before
+        # the expanding list, otherwise it disappears on a small screen.
         footer = ttk.Frame(self.window, padding=14)
         footer.pack(fill="x", side="bottom")
         self.reboot_button = ttk.Button(
@@ -2795,9 +2789,9 @@ class DeviceServicesDialog:
                     block, text=t(wording), wraplength=700,
                     justify="left", style="Hint.TLabel",
                 ).grid(row=line, column=0, sticky="w", padx=(22, 0))
-            # Certains firmwares n'exposent pas le reglage. Une case grise
-            # et vide laisserait croire a un service eteint et verrouille :
-            # on dit plutot que l'appareil ne permet pas d'y toucher.
+            # Some firmwares do not expose the setting. A greyed-out empty
+            # checkbox would suggest a service that is off and locked: we
+            # say instead that the device does not allow touching it.
             note = tk.StringVar(self.window, value="")
             self.notes[service.key] = note
             ttk.Label(
@@ -2805,7 +2799,7 @@ class DeviceServicesDialog:
                 justify="left", style="Hint.TLabel",
             ).grid(row=3, column=0, sticky="w", padx=(22, 0))
 
-        # Deux absences qui interrogent, et meritent mieux qu'un silence.
+        # Two absences that raise questions, and deserve better than silence.
         ttk.Label(
             self.window,
             text=t("A greyed row means this firmware does not carry that "
@@ -2824,7 +2818,7 @@ class DeviceServicesDialog:
 
         self.reload()
 
-    # ------------------------------------------------------------- lecture
+    # ------------------------------------------------------------- reading
 
     def reload(self) -> None:
         self.message.set(t("Reading the device..."))
@@ -2843,9 +2837,9 @@ class DeviceServicesDialog:
                 return
             states, pending, (free, low, total) = result
             for key, value in states.items():
-                # Un service absent de la configuration ne se laisse pas
-                # regler sur ce firmware : mieux vaut griser la case que
-                # proposer un interrupteur qui ne commande rien.
+                # A service missing from the configuration cannot be set on
+                # this firmware: better to grey out the checkbox than offer a
+                # switch that controls nothing.
                 self.vars[key].set(bool(value))
                 self.boxes[key].configure(
                     state="disabled" if value is None else "normal"
@@ -2879,7 +2873,7 @@ class DeviceServicesDialog:
         def done(_pending, error) -> None:
             if error is not None:
                 self.message.set(t("Failed: {error}", error=error))
-                # La case doit refleter l'appareil, pas l'intention.
+                # The checkbox must reflect the device, not the intent.
                 self.vars[key].set(not wanted)
                 return
             self.reload()
@@ -2891,7 +2885,7 @@ class DeviceServicesDialog:
 
         def work():
             handle = self.app.controller.device_for(self.device.key)
-            # La reponse se perd avec la connexion : l'echec est attendu.
+            # The reply is lost with the connection: failure is expected.
             try:
                 handle.call("Shelly.Reboot")
             except Exception:  # noqa: BLE001
@@ -2919,15 +2913,16 @@ class DeviceServicesDialog:
 
 
 class DeviceLedsDialog:
-    """Anneaux lumineux, mode nuit et boutons des prises d'une Power Strip.
+    """Light rings, night mode and outlet buttons of a Power Strip.
 
-    Livres a pleine luminosite, les anneaux eclairent une piece dans le
-    noir. Le dialogue regle leur mode et leur intensite, et surtout le mode
-    nuit, qui les attenue de lui-meme aux heures choisies.
+    Shipped at full brightness, the rings light up a room in the dark. The
+    dialog sets their mode and intensity, and above all night mode, which
+    dims them on its own during the chosen hours.
 
-    Les boutons y figurent aussi : detacher celui d'une prise l'empeche de
-    la commuter. La prise du PC l'est d'office, et l'application le repose
-    a chaque connexion -- sa case reste cochee et grisee.
+    The buttons are here too: detaching an outlet's button prevents it from
+    switching that outlet. The PC outlet's is detached by default, and the
+    application reapplies it on every connection -- its checkbox stays
+    ticked and greyed out.
     """
 
     MODES = (
@@ -2942,8 +2937,8 @@ class DeviceLedsDialog:
         self.device = device
         self.on_rgb = (0, 100, 0)
         self.off_rgb = (100, 0, 0)
-        # Appareils dont les anneaux attendent un redemarrage : celui-ci,
-        # et les autres quand on a tout applique d'un coup.
+        # Devices whose rings are waiting for a restart: this one, and the
+        # others when everything was applied at once.
         self.pending: set[str] = set()
 
         self.window = tk.Toplevel(parent)
@@ -2964,7 +2959,7 @@ class DeviceLedsDialog:
             padding=14,
         ).pack(anchor="w")
 
-        # Pied de fenetre reserve avant le corps, comme partout ailleurs.
+        # Window footer reserved before the body, as everywhere else.
         footer = ttk.Frame(self.window, padding=14)
         footer.pack(fill="x", side="bottom")
         self.reboot_button = ttk.Button(
@@ -2989,7 +2984,7 @@ class DeviceLedsDialog:
         body = ttk.Frame(self.window, padding=(14, 0))
         body.pack(fill="both", expand=True)
 
-        # --- Anneaux
+        # --- Rings
         ring = ttk.LabelFrame(body, text=t("Light rings"), padding=10)
         ring.pack(fill="x")
         ring.columnconfigure(1, weight=1)
@@ -3010,7 +3005,7 @@ class DeviceLedsDialog:
         self.on_row += self.on_swatch
         self.off_row += self.off_swatch
 
-        # --- Mode nuit
+        # --- Night mode
         night = ttk.LabelFrame(body, text=t("Night mode"), padding=10)
         night.pack(fill="x", pady=(12, 0))
         night.columnconfigure(1, weight=1)
@@ -3036,7 +3031,7 @@ class DeviceLedsDialog:
                   style="Hint.TLabel").pack(side="left")
         self.night_row += [start, end]
 
-        # --- Boutons, remplis a la lecture : leur nombre vient de l'appareil.
+        # --- Buttons, filled on read: their number comes from the device.
         pushes = ttk.LabelFrame(body, text=t("Push buttons"), padding=10)
         pushes.pack(fill="x", pady=(12, 0))
         ttk.Label(
@@ -3054,14 +3049,14 @@ class DeviceLedsDialog:
     # ------------------------------------------------------------- widgets
 
     def _slider(self, parent, row: int, text: str, variable: tk.IntVar) -> list:
-        """Ligne libelle / curseur / valeur ; rend ses widgets reglables."""
+        """Label / slider / value row; returns its adjustable widgets."""
         label = ttk.Label(parent, text=text)
         label.grid(row=row, column=0, sticky="w", padx=(22, 12), pady=3)
         value = ttk.Label(parent, width=6, anchor="e")
         value.grid(row=row, column=2, sticky="e")
 
         def moved(_raw=None) -> None:
-            # Le curseur rend des decimales ; l'appareil veut des entiers.
+            # The slider returns decimals; the device wants integers.
             variable.set(int(round(variable.get())))
             value.configure(text=f"{variable.get()} %")
 
@@ -3074,7 +3069,7 @@ class DeviceLedsDialog:
         return [label, scale]
 
     def _swatch(self, parent, row: int, state: str) -> list:
-        """Pastille de couleur et bouton pour la changer."""
+        """Colour swatch and a button to change it."""
         swatch = tk.Label(parent, width=3, relief="solid", borderwidth=1)
         swatch.grid(row=row, column=3, padx=(12, 6))
         button = ttk.Button(parent, text=t("Colour..."),
@@ -3099,7 +3094,7 @@ class DeviceLedsDialog:
         )
         if chosen is None:
             return
-        # L'appareil compte ses canaux en pourcentages, pas en octets.
+        # The device counts its channels in percentages, not bytes.
         percent = tuple(int(round(channel * 100 / 255)) for channel in chosen)
         if state == "on":
             self.on_rgb = percent
@@ -3108,16 +3103,16 @@ class DeviceLedsDialog:
         self._paint_swatches()
 
     def _update_states(self) -> None:
-        """N'active que ce qui compte dans le mode choisi."""
+        """Enable only what matters in the chosen mode."""
         mode = self.mode.get()
 
         def enable(widgets, on: bool) -> None:
             for widget in widgets:
                 if isinstance(widget, tk.Label):
-                    continue  # la pastille reste visible, meme inactive
+                    continue  # the swatch stays visible, even when inactive
                 if isinstance(widget, ttk.Label):
-                    # Un libelle desactive prend un fond clair dans ce
-                    # theme : on se contente de l'estomper.
+                    # A disabled label gets a light background in this
+                    # theme: just fade it instead.
                     widget.configure(style="TLabel" if on else "Hint.TLabel")
                     continue
                 widget.state(["!disabled"] if on else ["disabled"])
@@ -3128,7 +3123,7 @@ class DeviceLedsDialog:
         enable([self.night_box], rings_lit)
         enable(self.night_row, rings_lit and self.night_enabled.get())
 
-    # ------------------------------------------------------------- lecture
+    # ------------------------------------------------------------- reading
 
     def reload(self) -> None:
         self.message.set(t("Reading the device..."))
@@ -3215,7 +3210,7 @@ class DeviceLedsDialog:
     # ------------------------------------------------------------- actions
 
     def _settings(self) -> "device_leds.LedSettings | None":
-        """Le reglage saisi, ou `None` apres avoir dit ce qui cloche."""
+        """The entered settings, or `None` after saying what is wrong."""
         start, end = self.night_start.get().strip(), self.night_end.get().strip()
         for clock in (start, end):
             if not device_leds.valid_clock(clock):
@@ -3258,7 +3253,7 @@ class DeviceLedsDialog:
         _run_off_thread(self.window, work, done)
 
     def _apply_all(self) -> None:
-        """Meme reglage sur toutes les Power Strips connues."""
+        """Same settings on every known Power Strip."""
         settings = self._settings()
         if settings is None:
             return
@@ -3271,11 +3266,11 @@ class DeviceLedsDialog:
                 try:
                     handle = self.app.controller.device_for(key)
                     if device_leds.read(handle) is None:
-                        continue  # pas une Power Strip : rien a regler
+                        continue  # not a Power Strip: nothing to set
                     if device_leds.apply(handle, settings):
                         pending.append(key)
                     applied += 1
-                except Exception as exc:  # noqa: BLE001 - on poursuit avec les autres
+                except Exception as exc:  # noqa: BLE001 - carry on with the others
                     skipped.append(f"{key} ({exc})")
             return pending, skipped, applied
 
@@ -3308,15 +3303,15 @@ class DeviceLedsDialog:
         def done(_result, error) -> None:
             if error is not None:
                 self.message.set(t("Failed: {error}", error=error))
-                variable.set(not wanted)  # la case suit l'appareil
+                variable.set(not wanted)  # the checkbox follows the device
                 return
             self._show_pending()
 
         _run_off_thread(self.window, work, done)
 
     def _reboot(self) -> None:
-        """Redemarre les appareils en attente. Aucune sortie ne bascule :
-        relais bistables, et la prise du PC repart allumee de toute facon."""
+        """Restart the pending devices. No output toggles: latching relays,
+        and the PC outlet comes back on anyway."""
         keys = sorted(self.pending)
         self.message.set(t("Restarting..."))
         self.reboot_button.state(["disabled"])
@@ -3324,7 +3319,7 @@ class DeviceLedsDialog:
         def work():
             for key in keys:
                 handle = self.app.controller.device_for(key)
-                # La reponse se perd avec la connexion : l'echec est attendu.
+                # The reply is lost with the connection: failure is expected.
                 try:
                     handle.call("Shelly.Reboot")
                 except Exception:  # noqa: BLE001
@@ -3353,19 +3348,19 @@ class DeviceLedsDialog:
 
 
 def _hex_colour(rgb) -> str:
-    """Couleur de l'appareil (0-100 par canal) en notation Tk."""
+    """Device colour (0-100 per channel) in Tk notation."""
     return "#" + "".join(
         f"{max(0, min(255, int(round(channel * 255 / 100)))):02x}" for channel in rgb
     )
 
 
 def _grouped(value: int) -> str:
-    """Nombre d'octets avec des espaces tous les trois chiffres."""
+    """Byte count with a space every three digits."""
     return f"{value:,}".replace(",", " ")
 
 
 class PasswordDialog:
-    """Saisie du mot de passe d'un appareil, et pose sur l'appareil."""
+    """Entry of a device's password, and setting it on the device."""
 
     def __init__(self, parent: tk.Tk, owner: SettingsWindow, device) -> None:
         self.owner = owner
@@ -3374,8 +3369,8 @@ class PasswordDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title(f"Password - {device.label}")
-        # Cinq boutons, dont « Mot de passe perdu ? » : a 680 pixels le
-        # dernier arrive etait comprime.
+        # Five buttons, including "Mot de passe perdu ?": at 680 pixels the
+        # last one in got squeezed.
         self.window.geometry("780x430")
         self.window.minsize(760, 400)
         self.window.transient(parent)
@@ -3474,7 +3469,7 @@ class PasswordDialog:
             )
 
     def _typed(self) -> str | None:
-        """Mot de passe saisi, apres verification de la confirmation."""
+        """Typed password, after checking the confirmation."""
         first, second = self.first.get(), self.second.get()
         if not first:
             self.message.set("Enter a password first.")
@@ -3492,7 +3487,7 @@ class PasswordDialog:
         self.window.update_idletasks()
 
     def _apply(self) -> None:
-        """Pose le mot de passe sur l'appareil et le memorise."""
+        """Set the password on the device and store it."""
         password = self._typed()
         if password is None:
             return
@@ -3501,9 +3496,9 @@ class PasswordDialog:
         def done(_result, error):
             if error is not None:
                 self.message.set(f"Failed: {error}")
-                # Un echec a ce stade laisse souvent l'appareil inchange,
-                # mais si le mot de passe a ete pose sans qu'on puisse le
-                # relire, seule la remise a zero materielle en sort.
+                # A failure at this stage often leaves the device unchanged,
+                # but if the password was set without us being able to read
+                # it back, only a hardware reset gets out of it.
                 self.show_reset_help(self.window)
             else:
                 self.message.set("Password set on the device and stored.")
@@ -3519,7 +3514,7 @@ class PasswordDialog:
         )
 
     def _remember(self) -> None:
-        """Memorise un mot de passe deja pose sur l'appareil, sans le changer."""
+        """Store a password already set on the device, without changing it."""
         password = self._typed()
         if password is None:
             return
@@ -3547,7 +3542,7 @@ class PasswordDialog:
         _run_off_thread(self.window, work, done)
 
     def _remove(self) -> None:
-        """Retire l'authentification de l'appareil."""
+        """Remove authentication from the device."""
         if not messagebox.askyesno(
             "Shelly Screens",
             "Remove the password from the device?\n\n"

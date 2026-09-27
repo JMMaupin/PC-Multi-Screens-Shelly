@@ -1,13 +1,13 @@
-"""Traduction de l'interface.
+"""User interface translation.
 
-Le texte anglais sert de cle : il reste lisible dans le code, et une
-traduction manquante retombe dessus au lieu d'afficher un identifiant. Pas
-de fichiers de catalogue a compiler, pas de dependance -- l'application en
-compte deux langues, pas trente.
+The English text serves as the key: it stays readable in the code, and a
+missing translation falls back to it instead of showing an identifier. No
+catalog files to compile, no dependency -- the application has two
+languages, not thirty.
 
-Le melange est le seul cas a eviter : une fenetre mi-francaise mi-anglaise
-oblige a traduire mentalement a chaque coup d'oeil. Changer de langue
-reconstruit donc la fenetre entiere.
+Mixing is the only case to avoid: a window half in French, half in English
+forces the reader to translate mentally at every glance. Switching language
+therefore rebuilds the whole window.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ LANGUAGE_LABELS = {
 }
 DEFAULT = "en"
 
-# Identifiant de langue principale attribue au francais par Windows.
+# Primary language identifier Windows assigns to French.
 LANG_FRENCH = 0x0C
 
 _current = DEFAULT
@@ -30,7 +30,7 @@ _catalog: dict[str, str] = {}
 
 
 def system_language() -> str:
-    """Langue de l'interface de Windows, ramenee a ce qu'on sait traduire."""
+    """Windows UI language, narrowed down to what we can translate."""
     try:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         langid = kernel32.GetUserDefaultUILanguage()
@@ -40,14 +40,14 @@ def system_language() -> str:
 
 
 def resolve(setting: str) -> str:
-    """Langue effective pour un reglage donne."""
+    """Effective language for a given setting."""
     if setting == "system":
         return system_language()
     return setting if setting in LANGUAGES else DEFAULT
 
 
 def set_language(setting: str) -> str:
-    """Choisit la langue courante et charge son catalogue."""
+    """Selects the current language and loads its catalog."""
     global _current, _catalog
     _current = resolve(setting)
     if _current == "fr":
@@ -64,11 +64,11 @@ def current() -> str:
 
 
 def t(text: str, **fields: object) -> str:
-    """Traduit un texte, et y insere les valeurs nommees s'il y en a.
+    """Translates a text, and fills in the named values if there are any.
 
-    Les valeurs passent par `format` plutot que par une f-string : une
-    f-string serait evaluee avant la traduction, et la chaine traduite ne
-    servirait alors plus de cle.
+    The values go through `format` rather than an f-string: an f-string
+    would be evaluated before translation, and the resulting string would
+    then no longer work as a key.
     """
     translated = _catalog.get(text, text)
     if not fields:
@@ -76,8 +76,8 @@ def t(text: str, **fields: object) -> str:
     try:
         return translated.format(**fields)
     except (KeyError, IndexError, ValueError):
-        # Traduction dont les champs ne correspondent pas : mieux vaut la
-        # phrase anglaise juste qu'une francaise cassee.
+        # Translation whose fields don't match: a correct English sentence
+        # beats a broken French one.
         try:
             return text.format(**fields)
         except (KeyError, IndexError, ValueError):
@@ -85,7 +85,7 @@ def t(text: str, **fields: object) -> str:
 
 
 def missing(texts: list[str]) -> list[str]:
-    """Textes sans traduction dans le catalogue courant, pour verification."""
+    """Texts with no translation in the current catalog, for checking."""
     if not _catalog:
         return []
     return [text for text in texts if text not in _catalog]
