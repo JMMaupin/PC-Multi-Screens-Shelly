@@ -14,4 +14,4 @@ a day something breaks: *which version is running in front of me?* A log
 that does not say which code it is about wastes more time than it saves.
 """
 
-__version__ = "2.0"
+__version__ = "2.1"

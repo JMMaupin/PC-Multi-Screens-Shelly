@@ -600,6 +600,40 @@ CATALOG: dict[str, str] = {
         "Veille et arret et Temporisation valent pour tous les comptes de ce PC : les "
         "enregistrer demande un administrateur. Le reste ne concerne que vous.",
     "Profiles and windows": "Profils et fenetres",
+    # --- installation, update, removal
+    "Install {app} {version}": "Installer {app} {version}",
+    "It is installed for every account on this PC, since it drives screens they "
+    "all share. Windows will ask for an administrator.":
+        "Elle s'installe pour tous les comptes de ce PC, puisqu'elle pilote des "
+        "ecrans qu'ils partagent. Windows demandera un administrateur.",
+    "Install": "Installer",
+    "Run without installing": "Lancer sans installer",
+    "Update {app} {old} to {new}": "Mettre a jour {app} {old} vers {new}",
+    "The running application closes during the update, in every session, and "
+    "starts again afterwards. Your configuration and history are kept. Windows "
+    "will ask for an administrator.":
+        "L'application se ferme pendant la mise a jour, dans toutes les sessions, "
+        "puis redemarre. La configuration et l'historique sont conserves. Windows "
+        "demandera un administrateur.",
+    "Update": "Mettre a jour",
+    "{app} {version} is already installed": "{app} {version} est deja installee",
+    "Open the installed copy, or reinstall it to repair it.":
+        "Ouvrir la copie installee, ou la reinstaller pour la reparer.",
+    "Reinstall": "Reinstaller",
+    "This file is version {version}. Open the installed copy instead?":
+        "Ce fichier est en version {version}. Ouvrir plutot la copie installee ?",
+    "Open": "Ouvrir",
+    "Run this file anyway": "Lancer ce fichier quand meme",
+    "Uninstall {app}?": "Desinstaller {app} ?",
+    "The application stops in every session and is removed for every account.":
+        "L'application s'arrete dans toutes les sessions et est retiree pour tous "
+        "les comptes.",
+    "Keep the configuration and the consumption history":
+        "Conserver la configuration et l'historique de consommation",
+    "Uninstall": "Desinstaller",
+    "The installation failed (code {code}). The log is in {folder}.":
+        "L'installation a echoue (code {code}). Le journal est dans {folder}.",
+    "{app} has been uninstalled.": "{app} a ete desinstallee.",
     # --- several sessions open
     "{user}'s session": "la session de {user}",
     "another session": "une autre session",

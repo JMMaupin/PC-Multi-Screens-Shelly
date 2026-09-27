@@ -47,7 +47,8 @@ def ask_setup(installed: str | None) -> str:
 
     - nothing installed: install, or run it as it is;
     - an older version installed: update it;
-    - the same or a newer one: open the installed copy.
+    - the same one: open it, or reinstall it;
+    - a newer one: open the installed copy.
     """
     from ..installer import version_tuple
 
@@ -64,6 +65,12 @@ def ask_setup(installed: str | None) -> str:
                  "session, and starts again afterwards. Your configuration and "
                  "history are kept. Windows will ask for an administrator.")
         buttons = [("install", t("Update")), ("run", t("Run without installing"))]
+    elif version_tuple(installed) == version_tuple(__version__):
+        heading = t("{app} {version} is already installed",
+                    app=product.APP_NAME, version=installed)
+        # Reinstalling the same version repairs a damaged installation.
+        text = t("Open the installed copy, or reinstall it to repair it.")
+        buttons = [("open", t("Open")), ("install", t("Reinstall"))]
     else:
         heading = t("{app} {version} is already installed",
                     app=product.APP_NAME, version=installed)
