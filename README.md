@@ -66,6 +66,16 @@ dedicated environment, `.venv-build`, pinned to one version: the system
 Python is left untouched. To sign, set `SHELLY_SIGN_CERT` to a `.pfx` file
 (and `SHELLY_SIGN_PASSWORD` if needed) with `signtool.exe` on the PATH.
 
+### Publishing a release
+
+Raise the version in `shelly_screens/__init__.py`, write
+`release-notes/<version>.md` (`{version}` and `{sha256}` are filled in),
+commit and push, then run `push-release.cmd`. It refuses to go on unless
+`main` is clean and matches GitHub and the tag is new, rebuilds the
+executable from these sources, shows what it is about to publish, and
+creates the tag and the release page — with the GitHub CLI (`gh`) — only
+once confirmed.
+
 ## Where the data lives
 
 | File | Contents | Who writes it |
@@ -763,6 +773,8 @@ are left as they are and flagged in the menu.
 ```
 main.py                      entry point
 build.cmd, build.py          builds the executable (PyInstaller)
+push-release.cmd, release.py publishes a GitHub release
+release-notes/               notes of each release
 windows-icons/               icon set, produced by icongen_windows.py
 install-startup.ps1          console-free shortcuts, when running from the sources
 run-console.cmd              diagnostic launch, with a console
