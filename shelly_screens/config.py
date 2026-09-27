@@ -15,6 +15,7 @@ referencent.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -748,21 +749,55 @@ class AppConfig:
                 profile.name = name
 
     def save(self, path: Path | None = None) -> None:
-        """Ecrit la configuration de facon atomique (fichier temporaire puis remplacement)."""
+        """Ecrit la configuration de facon atomique et durable.
+
+        La version precedente, si elle est lisible, part d'abord dans
+        `config.json.bak` : `load` s'y rabat si le fichier principal est
+        abime.
+        """
         target = Path(path or self.path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
-        handle, temp_name = tempfile.mkstemp(
-            dir=str(target.parent), prefix=target.name, suffix=".tmp"
-        )
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                stream.write(payload)
-                stream.write("\n")
-            os.replace(temp_name, target)
-        except BaseException:
-            Path(temp_name).unlink(missing_ok=True)
-            raise
+        payload = json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n"
+        previous = _read_valid(target)
+        if previous is not None and previous != payload:
+            _write_durable(backup_path(target), previous)
+        _write_durable(target, payload)
+
+
+def backup_path(target: Path) -> Path:
+    """Copie de secours : la version precedant le dernier enregistrement."""
+    return target.with_name(target.name + ".bak")
+
+
+def _read_valid(target: Path) -> str | None:
+    """Contenu du fichier s'il se lit comme du JSON, sinon None."""
+    try:
+        text = target.read_text(encoding="utf-8")
+        json.loads(text)
+    except (OSError, ValueError):
+        return None
+    return text
+
+
+def _write_durable(target: Path, text: str) -> None:
+    """Fichier temporaire, `fsync`, puis remplacement.
+
+    Sans `fsync`, le renommage peut atteindre le disque avant les donnees :
+    une coupure de courant pendant une mise en veille a ainsi laisse un
+    `config.json` de la bonne taille, mais rempli d'octets nuls.
+    """
+    handle, temp_name = tempfile.mkstemp(
+        dir=str(target.parent), prefix=target.name, suffix=".tmp"
+    )
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, target)
+    except BaseException:
+        Path(temp_name).unlink(missing_ok=True)
+        raise
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
@@ -830,8 +865,19 @@ def load(path: Path | None = None) -> AppConfig:
         return AppConfig(path=target)
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Configuration illisible ({target}): {exc}") from exc
+    except (OSError, ValueError) as exc:
+        # Fichier abime : on repart de la copie de secours. Le fichier
+        # principal sera reecrit au prochain enregistrement ; celui-ci ne
+        # touchera pas la copie, puisque l'original ne se lit plus.
+        backup = _read_valid(backup_path(target))
+        if backup is None:
+            raise RuntimeError(f"Configuration illisible ({target}): {exc}") from exc
+        logging.getLogger("shelly_screens").warning(
+            "Configuration unreadable (%s), restored from %s",
+            exc,
+            backup_path(target).name,
+        )
+        data = json.loads(backup)
     return AppConfig.from_dict(data, path=target)
 
 

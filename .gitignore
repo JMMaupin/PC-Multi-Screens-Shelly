@@ -6,6 +6,7 @@
 # porte surtout les adresses MAC des appareils, leurs adresses IP et
 # l'identifiant materiel de chaque ecran : l'inventaire d'un reseau prive.
 config.json
+config.json.*
 
 # Journal d'execution.
 #
@@ -43,5 +44,5 @@ dist/
 Thumbs.db
 desktop.ini
 
-tools/
+
 
