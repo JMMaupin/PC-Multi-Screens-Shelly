@@ -816,9 +816,6 @@ class SettingsWindow:
         row = ttk.Frame(frame)
         row.pack(anchor="w", padx=(12, 0))
         self._link(row, product.RELEASES_URL, product.RELEASES_URL).pack(side="left")
-        ttk.Label(row, text="   " + t("(coming soon)"), style="Hint.TLabel").pack(
-            side="left"
-        )
 
     def _link(self, parent: tk.Misc, text: str, url: str) -> ttk.Label:
         """A label that opens an address in the browser."""

@@ -386,7 +386,6 @@ CATALOG: dict[str, str] = {
     "Other Shelly devices with switchable outputs may work, but have not been tested.":
         "D'autres appareils Shelly a sorties commandables peuvent fonctionner, mais n'ont pas ete testes.",
     "Releases": "Versions publiees",
-    "(coming soon)": "(bientot disponible)",
     "Enter or Apply to switch the screens, Esc to cancel":
         "Entree ou Appliquer pour commuter les ecrans, Echap pour annuler",
     "At least one screen must stay on": "Au moins un ecran doit rester allume",
