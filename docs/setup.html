@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Setup guide — Shelly PC Screens</title>
+<title>Setup guide · Shelly PC Screens</title>
 <meta name="description" content="Step-by-step setup of Shelly PC Screens: wiring, installation, power strips, displays, roles, power detection and profiles.">
 <link rel="icon" href="assets/icon-32.png">
 <link rel="stylesheet" href="assets/style.css">
@@ -46,7 +46,7 @@
 <section>
   <h2>Before you start</h2>
   <ul class="check">
-    <li>One or more <strong>Shelly Power Strip 4 Gen4</strong> — the device the app is validated on.</li>
+    <li>One or more <strong>Shelly Power Strip 4 Gen4</strong>, the device the app is validated on.</li>
     <li>Your home Wi-Fi in <strong>2.4 GHz</strong>: the power strips have no 5 GHz radio.</li>
     <li>A Windows PC (64-bit) and an administrator's password, once, for the installation.</li>
     <li>Screens powered by their own power cord. A screen powered by the PC's USB-C cannot be cut by an outlet.</li>
@@ -145,7 +145,7 @@
   <p>Click <strong>First setup of a new device...</strong> and follow the five steps:</p>
   <ol class="do">
     <li>Choose the model.</li>
-    <li>Open its access point: press <strong>buttons 1 and 4 together for 5 seconds</strong> — all four outlets blink red. <em>Not 10 seconds</em>: that is a factory reset.</li>
+    <li>Open its access point: press <strong>buttons 1 and 4 together for 5 seconds</strong>: all four outlets blink red. <em>Not 10 seconds</em>: that is a factory reset.</li>
     <li>The wizard connects the PC to it by itself, and shows the device and its firmware.</li>
     <li>Pick your home Wi-Fi from the networks the PC sees. Below −60 dBm the wizard warns you: move the strip, or the router, closer.</li>
     <li>The strip joins your network; the PC gets its Wi-Fi back and the new device is preselected.</li>
@@ -165,8 +165,8 @@
 
 <section class="step" id="identify">
   <h2><span class="step-number">4</span>Identify the screens</h2>
-  <p><strong>Outlets</strong> tab: first set the <strong>Type</strong> of each outlet that carries a screen to <em>Screen</em> — the assistant only tests those. Then click <strong>Identify displays...</strong></p>
-  <p>It first tells you what it will cut and what it leaves alone — the PC, critical outlets, outlets without a type:</p>
+  <p><strong>Outlets</strong> tab: first set the <strong>Type</strong> of each outlet that carries a screen to <em>Screen</em>, since the assistant only tests those. Then click <strong>Identify displays...</strong></p>
+  <p>It first tells you what it will cut and what it leaves alone (the PC, critical outlets, outlets without a type):</p>
   <figure class="shot">
     <img src="screenshots/identify-confirm.png" alt="Identify displays confirmation: four screen outlets will be switched off in turn; the PC, critical hubs and an unset outlet are left alone" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/identify-confirm.png</code></div>
@@ -181,12 +181,12 @@
   <figure class="shot">
     <img src="screenshots/identify-result.png" alt="Identify displays result: 4 of 4 outlets matched, one ghost screen whose link is kept" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/identify-result.png</code></div>
-    <figcaption>All four matched — one of them a ghost screen.</figcaption>
+    <figcaption>All four matched, one of them a ghost screen.</figcaption>
   </figure>
   <div class="callout">
-    <p><strong>A "ghost screen" is not a failure.</strong> Some screens stay listed by Windows once their outlet is cut — HDMI commonly does this. If the screen is already linked, the assistant keeps the link and says so. If it is not linked yet, link every other screen first: running the assistant again then deduces the last pair. <a href="features.html#identify">More on ghost screens</a>.</p>
+    <p><strong>A "ghost screen" is not a failure.</strong> Some screens stay listed by Windows once their outlet is cut, as HDMI commonly does. If the screen is already linked, the assistant keeps the link and says so. If it is not linked yet, link every other screen first: running the assistant again then deduces the last pair. <a href="features.html#identify">More on ghost screens</a>.</p>
   </div>
-  <p class="muted">An outlet carrying no screen — a hub, the PC — is simply not identified: that is normal.</p>
+  <p class="muted">An outlet carrying no screen (a hub, the PC) is simply not identified: that is normal.</p>
 </section>
 
 <section class="step" id="roles">
@@ -194,10 +194,10 @@
   <p>Still in <strong>Outlets</strong>, select each outlet and set what it carries and how to treat it. The type says <em>what is at the end of the cord</em>; the roles say <em>what must never happen to it</em>.</p>
   <div class="table-wrap"><table>
     <tr><th>Outlet</th><th>Type</th><th>Tick</th></tr>
-    <tr><td>PC tower</td><td>—</td><td><strong>Powers the PC itself</strong> — never switched off, and measured</td></tr>
-    <tr><td>Main screen</td><td>Screen</td><td><strong>Boot screen</strong> — the one that comes on if the last profile cannot</td></tr>
+    <tr><td>PC tower</td><td>—</td><td><strong>Powers the PC itself</strong>: never switched off, and measured</td></tr>
+    <tr><td>Main screen</td><td>Screen</td><td><strong>Boot screen</strong>: the one that comes on if the last profile cannot</td></tr>
     <tr><td>Other screens</td><td>Screen</td><td><em>Follows the PC</em> is ticked for you</td></tr>
-    <tr><td>Keyboard's USB hub</td><td>Accessory</td><td><strong>Critical</strong> — never switched off</td></tr>
+    <tr><td>Keyboard's USB hub</td><td>Accessory</td><td><strong>Critical</strong>: never switched off</td></tr>
     <tr><td>Other hubs, speakers</td><td>Accessory</td><td><em>Follows the PC</em> only if you want them off while the PC sleeps</td></tr>
   </table></div>
   <figure class="shot">
@@ -212,16 +212,16 @@
 
 <section class="step" id="power">
   <h2><span class="step-number">6</span>Let the strip follow the PC</h2>
-  <p><strong>PC power</strong> tab. This is what switches everything off when the PC sleeps, and back on when it boots — even with the app closed.</p>
+  <p><strong>PC power</strong> tab. This is what switches everything off when the PC sleeps, and back on when it boots, even with the app closed.</p>
   <ol class="do">
     <li>Click <strong>Start measuring</strong>, then use the PC normally for a while: let it idle, put it to sleep, shut it down, turn it back on.</li>
-    <li>Click <strong>Read now</strong>: the app shows the levels it saw and suggests thresholds. Click <strong>Use suggested thresholds</strong> — or drag the lines on the curve.</li>
+    <li>Click <strong>Read now</strong>: the app shows the levels it saw and suggests thresholds. Click <strong>Use suggested thresholds</strong>, or drag the lines on the curve.</li>
     <li>Click <strong>Install / update</strong> to send the script to the power strip.</li>
   </ol>
   <figure class="shot">
     <img src="screenshots/power-chart.png" alt="Power over time window with the running and off threshold lines" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/power-chart.png</code></div>
-    <figcaption><strong>Show curve...</strong> — place the upper line above sleep, the lower one below running: the gap between them is the margin.</figcaption>
+    <figcaption><strong>Show curve...</strong>: place the upper line above sleep, the lower one below running: the gap between them is the margin.</figcaption>
   </figure>
   <figure class="shot">
     <img src="screenshots/pc-power-tab.png" alt="PC power tab with measured levels and suggested thresholds" loading="lazy" onerror="this.parentElement.classList.add('missing')">
@@ -263,7 +263,7 @@
   <h3>Optional</h3>
   <ul>
     <li><strong>Password</strong> on the power strips: Devices → Password... → <em>Apply to device</em>.</li>
-    <li><strong>LED rings</strong>: Devices → LEDs... — dim them, or a night mode from 22:00 to 07:00.</li>
+    <li><strong>LED rings</strong>: Devices → LEDs..., to dim them or set a night mode from 22:00 to 07:00.</li>
     <li><strong>Shortcut, language, theme</strong>: Behaviour tab.</li>
   </ul>
 </section>
@@ -286,7 +286,7 @@
 
 <footer class="site-footer">
   <div class="inner">
-    <span>Shelly PC Screens — by JMMaupin</span>
+    <span>Shelly PC Screens, by JMMaupin</span>
     <span><a href="index.html">Overview</a> · <a href="features.html">Features</a> · <a href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly">Source code</a></span>
   </div>
 </footer>

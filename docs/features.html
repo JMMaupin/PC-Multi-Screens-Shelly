@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Features — Shelly PC Screens</title>
+<title>Features · Shelly PC Screens</title>
 <meta name="description" content="Everything Shelly PC Screens does: screen profiles, sleep and boot following, safeguards, window rescue, power history, several accounts.">
 <link rel="icon" href="assets/icon-32.png">
 <link rel="stylesheet" href="assets/style.css">
@@ -48,7 +48,7 @@
 
 <section id="profiles">
   <h2>Profiles and the screen map</h2>
-  <p>A <strong>profile</strong> says which outlets are powered — which screens are on. Nothing more: the same profile hosts CAD, trading or development in turn, each with its own windows.</p>
+  <p>A <strong>profile</strong> says which outlets are powered, and so which screens are on. Nothing more: the same profile hosts CAD, trading or development in turn, each with its own windows.</p>
   <ul>
     <li><strong>All on</strong> is built in and always first: it powers every outlet, including ones added later.</li>
     <li>Your own profiles are ticked outlet by outlet, or by clicking the screens on the map. Their order is the order of the menu and of keys <kbd>1</kbd>–<kbd>9</kbd> in the picker.</li>
@@ -67,18 +67,18 @@
     <figure class="shot">
       <img src="screenshots/capture-confirm.png" alt="Capture screen layout: the All on profile will be applied, then keep it or go back" loading="lazy" onerror="this.parentElement.classList.add('missing')">
       <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/capture-confirm.png</code></div>
-      <figcaption>1 — Everything will be switched on.</figcaption>
+      <figcaption>1. Everything will be switched on.</figcaption>
     </figure>
     <figure class="shot">
       <img src="screenshots/capture-done.png" alt="Screen layout captured (4 screens): keep All on, or go back to the previous profile" loading="lazy" onerror="this.parentElement.classList.add('missing')">
       <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/capture-done.png</code></div>
-      <figcaption>3 — Captured: keep <em>All on</em>, or go back to the profile you were on.</figcaption>
+      <figcaption>3. Captured: keep <em>All on</em>, or go back to the profile you were on.</figcaption>
     </figure>
   </div>
   <figure class="shot">
     <img src="screenshots/capture-building.png" alt="The screen map being built during a capture: two of four screens detected, the small screen shown left of the main one" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/capture-building.png</code></div>
-    <figcaption>2 — The map builds up live. With only two screens on, Windows puts the small one <em>left</em> of the main one; with all four, it sits <em>on top</em>. Only the full set tells where each screen really is.</figcaption>
+    <figcaption>2. The map builds up live. With only two screens on, Windows puts the small one <em>left</em> of the main one; with all four, it sits <em>on top</em>. Only the full set tells where each screen really is.</figcaption>
   </figure>
 </section>
 
@@ -120,7 +120,7 @@
       <!-- Power curve: running, sleep, running -->
       <path class="stroke-on" d="M70 62 C 110 54, 150 70, 190 58 S 250 64, 280 60 L 296 184 L 560 186 L 578 60 C 640 52, 700 70, 760 58 S 840 62, 870 60"/>
       <text x="170" y="48" text-anchor="middle" class="t-small">PC running</text>
-      <text x="430" y="176" text-anchor="middle" class="t-small">PC asleep — a few watts</text>
+      <text x="430" y="176" text-anchor="middle" class="t-small">PC asleep: a few watts</text>
       <!-- Screens bar -->
       <text x="60" y="252" text-anchor="end" class="t-muted t-small">screens</text>
       <rect class="fill-on" x="70" y="240" width="300" height="18" rx="4"/>
@@ -138,14 +138,14 @@
 
   <ul>
     <li><strong>Long off delay, short on delay.</strong> A Windows restart dips below the threshold for ten to fifteen seconds; ninety seconds lets it pass without a flicker. Three seconds on the way up is enough to see the BIOS.</li>
-    <li><strong>Calibrated from measurements.</strong> <em>Start measuring</em> records your PC's real levels — off, asleep, idle, busy — and suggests the thresholds from the largest gap between them.</li>
+    <li><strong>Calibrated from measurements.</strong> <em>Start measuring</em> records your PC's real levels (off, asleep, idle, busy) and suggests the thresholds from the largest gap between them.</li>
     <li><strong>The boot screen is a fallback.</strong> At boot the last profile comes back. If it is missing or unreadable, the boot screen alone comes on: one screen is better than booting blind.</li>
     <li><strong>Accessories choose.</strong> Screens follow the PC; a USB hub or speakers only if you tick it.</li>
   </ul>
   <figure class="shot">
     <img src="screenshots/power-chart.png" alt="Power over time: the PC running near 90 W, an hour asleep near 5 W, then waking; the running and off thresholds drawn as draggable lines" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/power-chart.png</code></div>
-    <figcaption>The PC's power over three hours — running, an hour asleep, awake again. Drag either threshold line to place it.</figcaption>
+    <figcaption>The PC's power over three hours: running, an hour asleep, awake again. Drag either threshold line to place it.</figcaption>
   </figure>
   <figure class="shot">
     <img src="screenshots/pc-power-tab.png" alt="PC power tab: thresholds, calibration and the power curve" loading="lazy" onerror="this.parentElement.classList.add('missing')">
@@ -191,7 +191,7 @@
   </figure>
 
   <div class="grid">
-    <div class="card"><h3>Critical outlets</h3><p>Never switched off, by a profile or at shutdown — the USB hub carrying the keyboard, so the BIOS and your PIN stay reachable.</p></div>
+    <div class="card"><h3>Critical outlets</h3><p>Never switched off, by a profile or at shutdown. That is where the keyboard's USB hub belongs, so the BIOS and your PIN stay reachable.</p></div>
     <div class="card"><h3>Never zero screens</h3><p>No profile, click or menu can leave every screen off: the boot screen is kept on, and the tray menu greys out the last lit screen.</p></div>
     <div class="card"><h3>On first, off next</h3><p>A profile change switches the new screens on, waits for Windows to see them, and only then cuts the others.</p></div>
     <div class="card"><h3>Unknown means untouched</h3><p>An outlet whose type is not set is left alone by every automation: what we don't know, we don't switch off.</p></div>
@@ -200,7 +200,7 @@
 
 <section id="windows">
   <h2>Windows brought back</h2>
-  <p>At the end of a profile change, a window left on a screen that went dark is moved to <strong>the nearest screen that is on</strong> — keeping its size, maximised again if it was, without stealing the focus. Windows straddling two screens, or deliberately parked off-screen by their program, are left alone.</p>
+  <p>At the end of a profile change, a window left on a screen that went dark is moved to <strong>the nearest screen that is on</strong>, keeping its size, maximised again if it was, without stealing the focus. Windows straddling two screens, or deliberately parked off-screen by their program, are left alone.</p>
 </section>
 
 <section id="identify">
@@ -213,7 +213,7 @@
   </figure>
 
   <h3>Ghost screens</h3>
-  <p>Some screens stay listed by Windows after their power is cut — HDMI commonly does this, keeping the screen's identity readable without power. The panel is dark, yet Windows still counts it on the desktop, so nothing disappears when its outlet is cut.</p>
+  <p>Some screens stay listed by Windows after their power is cut. HDMI commonly does this: the link keeps the screen's identity readable without power. The panel is dark, yet Windows still counts it on the desktop, so nothing disappears when its outlet is cut.</p>
   <div class="grid">
     <div class="card">
       <h3>Already linked</h3>
@@ -237,7 +237,7 @@
 
 <section id="history">
   <h2>Power history</h2>
-  <p>Every outlet, recorded from the readings the app already takes — nothing extra is asked of the devices. During sleep, the power strip keeps measuring the PC on its own, and the night fills in at wake-up.</p>
+  <p>Every outlet, recorded from the readings the app already takes: nothing extra is asked of the devices. During sleep, the power strip keeps measuring the PC on its own, and the night fills in at wake-up.</p>
   <ul>
     <li>Zoom with the wheel, drag through time, 1 hour to 30 days at a glance.</li>
     <li>Minimum, average, maximum and <strong>energy used</strong> over what you see.</li>
@@ -262,9 +262,9 @@
   <div class="grid">
     <div class="card"><h3>Found automatically</h3><p>By name on the network, then by known address, then by scan. Several power strips work side by side; one that stops answering never blocks the others.</p></div>
     <div class="card"><h3>New device wizard</h3><p>A brand-new power strip joins your Wi-Fi from the app, with the networks the PC sees and their signal quality.</p></div>
-    <div class="card"><h3>Signal in plain words</h3><p>Each strip's Wi-Fi link: excellent, good, fair or weak — before it starts dropping out.</p></div>
+    <div class="card"><h3>Signal in plain words</h3><p>Each strip's Wi-Fi link: excellent, good, fair or weak, so you know before it starts dropping out.</p></div>
     <div class="card"><h3>Optional password</h3><p>Set from the app, stored encrypted by Windows. If it is lost, the app says so and recalls the reset procedure.</p></div>
-    <div class="card"><h3>LED rings &amp; buttons</h3><p>Dim the outlet rings, switch them off, or add a night mode — and detach buttons that should not be pressed.</p></div>
+    <div class="card"><h3>LED rings &amp; buttons</h3><p>Dim the outlet rings, switch them off, or add a night mode, and detach buttons that should not be pressed.</p></div>
     <div class="card"><h3>Frozen meter detection</h3><p>A known firmware fault freezes the power reading; the app notices and offers a harmless restart.</p></div>
     <div class="card"><h3>Only the services you use</h3><p>Cloud, MQTT, Zigbee, KNX…: each one keeps a network stack and memory busy on the strip. Each is explained, and can be switched off.</p></div>
   </div>
@@ -303,7 +303,7 @@
   <figure class="shot">
     <img src="screenshots/tray-menu.png" alt="The tray icon menu with profiles, outlets and screens" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/tray-menu.png</code></div>
-    <figcaption>Right click: profiles, outlets, screens, history, settings — and, on top, what needs your attention, such as an on-device script to update.</figcaption>
+    <figcaption>Right click: profiles, outlets, screens, history, settings. On top, what needs your attention, such as an on-device script to update.</figcaption>
   </figure>
 </section>
 
@@ -313,7 +313,7 @@
   <div class="table-wrap"><table>
     <tr><th>Shared by the machine</th><th>Personal to each account</th></tr>
     <tr><td>Power strips, outlets, roles, sleep and power detection, history</td><td>Profiles, shortcut, theme, language</td></tr>
-    <tr><td>Changed by an <strong>administrator</strong> — one approval for a batch of changes</td><td>Changed freely</td></tr>
+    <tr><td>Changed by an <strong>administrator</strong>, with one approval for a batch of changes</td><td>Changed freely</td></tr>
   </table></div>
   <p>With several accounts signed in, only <strong>the session on the screen</strong> drives the power strips. The others turn their icon blue and wait; control follows the screen when you switch user, without switching anything.</p>
   <figure class="shot">
@@ -325,7 +325,7 @@
 
 <section id="appearance">
   <h2>Language and theme</h2>
-  <p>English or French, or follow Windows. Light, dark, or follow Windows — with your Windows accent colour, adjusted for contrast.</p>
+  <p>English or French, or follow Windows. Light, dark, or follow Windows, with your Windows accent colour, adjusted for contrast.</p>
   <figure class="shot">
     <img src="screenshots/behaviour-tab.png" alt="Behaviour tab: sleep settings, profiles and windows, profile shortcut, appearance and timing" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/behaviour-tab.png</code></div>
@@ -338,7 +338,7 @@
 
 <footer class="site-footer">
   <div class="inner">
-    <span>Shelly PC Screens — by JMMaupin</span>
+    <span>Shelly PC Screens, by JMMaupin</span>
     <span><a href="index.html">Overview</a> · <a href="setup.html">Setup guide</a> · <a href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly">Source code</a></span>
   </div>
 </footer>

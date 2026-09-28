@@ -108,6 +108,9 @@ kbd {
 }
 .site-header nav a { color: var(--muted); font-weight: 500; }
 .site-header nav a[aria-current="page"] { color: var(--ink); }
+/* The Download button sits in the nav: without this, the grey of the nav
+   links wins over the button's own text colour, grey on blue. */
+.site-header nav a.button { color: var(--accent-ink); font-weight: 600; }
 
 .button {
   display: inline-block;
