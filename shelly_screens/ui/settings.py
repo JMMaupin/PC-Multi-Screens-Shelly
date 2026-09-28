@@ -2261,6 +2261,10 @@ class IdentifyDialog:
         self.outlets = outlets
         self.cancelled = False
         self.results: dict[str, str] = {}
+        # Outlets whose linked screen stayed listed by Windows once cut: a
+        # ghost screen -- HDMI commonly keeps a powerless screen listed. Not
+        # a failure: the existing link is consistent, and kept.
+        self.ghosts: dict[str, str] = {}
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("Identifying displays"))
@@ -2372,6 +2376,12 @@ class IdentifyDialog:
                     self._say(f"{outlet.label} -> {key}", index)
                 elif len(lost) > 1:
                     self._say(f"{outlet.label}: several displays dropped, skipped", index)
+                elif outlet.monitor_key and outlet.monitor_key in before:
+                    # Its screen is linked already and Windows still lists
+                    # it with the power cut: the ghost behaviour the app
+                    # handles day to day, not a failed test.
+                    self.ghosts[outlet.ref] = outlet.monitor_key
+                    self._say(f"{outlet.label}: ghost screen, link kept", index)
                 else:
                     self._say(f"{outlet.label}: no display dropped", index)
 
@@ -2460,7 +2470,7 @@ class IdentifyDialog:
             if self.results or unswitched is not None:
                 self.owner._save()
             self.owner.refresh()
-            found = len(self.results)
+            found = len(self.results) + len(self.ghosts)
             self.owner.set_status(
                 f"{found} of {len(self.outlets)} outlet(s) matched to a display"
                 + (f" - {self.layout_message}" if getattr(self, "layout_message", "") else "")
@@ -2480,13 +2490,43 @@ class IdentifyDialog:
                     "outlet, so the pair was deduced. Clear its display link "
                     "if that guess looks wrong.",
                 )
-            elif found < len(self.outlets) and not self.cancelled:
+            elif (self.ghosts or found < len(self.outlets)) and not self.cancelled:
+                # Name them: "3 of 4" leaves one guessing which screen failed,
+                # and the log is not where anyone looks first. A ghost screen
+                # is reported as what it is -- expected, handled -- not as a
+                # failure that casts doubt on a setup that works.
+                parts = []
+                ghosts = [o.label for o in self.outlets if o.ref in self.ghosts]
+                if ghosts:
+                    parts.append(
+                        "Ghost screen, link kept:\n"
+                        + "\n".join(f"  - {label}" for label in ghosts)
+                        + "\nWindows keeps this screen listed once its outlet "
+                        "is cut, as HDMI commonly does. Its existing link is "
+                        "consistent, and the app handles it every day."
+                    )
+                unmatched = [
+                    o for o in self.outlets
+                    if o.ref not in self.results and o.ref not in self.ghosts
+                ]
+                if unmatched:
+                    parts.append(
+                        "Not matched:\n"
+                        + "\n".join(
+                            f"  - {o.label}"
+                            + (" (keeps its previous display link)" if o.monitor_key else "")
+                            for o in unmatched
+                        )
+                        + "\nWindows kept every screen when this outlet was cut. "
+                        "Either no screen is plugged into it, or its screen "
+                        "stays listed without power, as HDMI often does: once "
+                        "every other screen is linked, running the assistant "
+                        "again deduces the last pair."
+                    )
                 messagebox.showinfo(
                     "Identify displays",
-                    f"{found} of {len(self.outlets)} outlets were matched.\n\n"
-                    "An unmatched outlet either has no screen plugged in (a USB "
-                    "hub, the PC itself), or its screen did not disconnect "
-                    "quickly enough.",
+                    f"{found} of {len(self.outlets)} outlets matched to a display.\n\n"
+                    + "\n\n".join(parts),
                 )
 
         try:
@@ -3523,10 +3563,10 @@ class PasswordDialog:
         ttk.Label(
             self.window,
             text=(
-                t("The password is stored encrypted with Windows DPAPI: the key "
-                "comes from your Windows account, not from this program, and "
-                "the stored value cannot be read by another account or on "
-                "another machine.")
+                t("The password is stored encrypted with Windows DPAPI, with this "
+                "PC's key: every account on this PC can use it, since each one "
+                "drives the same power strips, but the stored value is useless "
+                "on another machine.")
             ),
             wraplength=640,
             justify="left",

@@ -15,6 +15,7 @@ is on.
 | Protocol | JSON-RPC over HTTP, optional SHA-256 Digest authentication |
 | Installation | one executable, installed for every account of the PC |
 | Dependencies | none — Python 3.12+ standard library (only to run from the sources) |
+| License | [MIT](LICENSE) |
 
 ## Installation
 
@@ -204,6 +205,23 @@ identified, which is normal.
 Identification relies on the monitor's interface path, which contains the
 UID of the graphics output. Two screens of the same model therefore remain
 distinct, and the match survives reboots.
+
+**Ghost screens.** Some screens stay listed by Windows after their power is
+cut — HDMI commonly does this: the link keeps the screen's identity readable
+without power. The panel is dark, but Windows still counts it on the
+desktop, so the wizard sees nothing disappear when its outlet is cut.
+
+* **Already linked** to its outlet: the wizard recognises the behaviour,
+  keeps the link and reports it as a *ghost screen, link kept* — counted as
+  matched, not as a failure.
+* **Not linked yet**, on a fresh setup: nothing can prove which outlet feeds
+  it. Once every other screen is linked, running the wizard again deduces
+  the last pair — the only outlet and the only screen left.
+
+Day to day, the app already treats such a screen as dark when its outlet is
+off: windows on it are brought back like on any switched-off screen, and
+the log names it (`Ghost screen: outlet off but still on the Windows
+desktop`).
 
 ### 4. Say what is plugged in
 
@@ -986,7 +1004,8 @@ tracked later, but only while the app is running.
 
 ## Version
 
-Two numbers, and nothing more. The number is in
+`major.minor`, with a third number for the smallest fixes: 2.2, 2.2.1,
+2.2.2, then 2.3. The number is in
 [shelly_screens/__init__.py](shelly_screens/__init__.py), shown in the
 settings window title and on the first line of the log.
 
@@ -995,11 +1014,17 @@ is: a file format that evolves, a setting whose meaning changes, an
 on-device script incompatible with the old one. In other words, when an
 update requires checking something rather than simply restarting.
 
-The **minor** changes on every iteration — fix, addition, robustness
-measure — even for a detail. Its role is not to summarise the extent of the
-work but to answer a single question, asked on a day something breaks:
-*which version is running in front of me?* A log that does not say which
-code it is about wastes more time than it saves.
+The **minor** changes with each iteration that adds or changes behaviour.
+
+The **third number** changes for a very minor fix — a wording, a misleading
+message, a threshold — even for a detail. Its role is not to summarise the
+extent of the work but to answer a single question, asked on a day something
+breaks: *which version is running in front of me?* A log that does not say
+which code it is about wastes more time than it saves.
+
+A third number rather than a second decimal: versions are compared number by
+number, so "2.21" would read as newer than "2.3", and the installer would
+refuse the update.
 
 ## Troubleshooting
 
@@ -1007,7 +1032,7 @@ code it is about wastes more time than it saves.
 | --- | --- |
 | Red icon | No device reachable. `Devices` → `Reconnect`, or check the power strips' power supply. |
 | A device "offline" | The others keep working. Its outlets show a `-` state and are not operated. |
-| An outlet stays "not identified" | Normal for a USB hub or the PC tower. For a screen: run the wizard again, the screen may have taken more than twelve seconds to disconnect. |
+| An outlet stays "not identified" | Normal for a USB hub or the PC tower. For a screen: it may be a *ghost screen* that Windows keeps listed once unpowered (common over HDMI) — link the other screens, then run the wizard again to deduce the last pair; or the screen took more than twelve seconds to disconnect. |
 | A window stays on a switched-off screen | Check *Behaviour* → *Windows*, and that this screen's outlet is matched to it (**Identify displays**): otherwise, a screen powered from the PC's USB-C is still counted as on. |
 | Very slow profile change | An expected screen does not come back: the wait runs to the maximum delay (20 s by default, adjustable in `Behaviour`). |
 | Nothing at PC boot | Check that an outlet carries the **Boot screen** role, and that the keyboard's USB hub is **Critical**. |
@@ -1059,3 +1084,8 @@ also redirected to this file.
 Each line is written **all the way to disk** (`fsync`), not just handed to
 the system. Without it, the last lines are lost when the machine stops
 abruptly — precisely the ones that would explain why.
+
+## License
+
+[MIT](LICENSE) — free to use, modify and redistribute, with the copyright
+notice kept. Not affiliated with Shelly.

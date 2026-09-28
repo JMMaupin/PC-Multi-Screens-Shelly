@@ -119,15 +119,19 @@ class SensingRealmMissing(RuntimeError):
 # is how ten resolutions were counted in ten seconds during a wake, at the
 # very moment the power strip was saturating.
 RESOLVE_COOLDOWN_S = 30.0
-# Mains voltage never stays perfectly constant: it always wobbles by a
-# tenth of a volt from one reading to the next. Several strictly identical
-# readings are therefore not a measurement but a frozen value -- the
-# firmware's metering channel has given out. The symptom is insidious: the
-# device answers, the outlets obey, and only sleep detection reasons on a
-# dead figure. It then no longer switches anything off, with nothing to
-# flag it. Six reads, i.e. half a minute, are enough to tell a freeze from
-# a coincidence.
-FROZEN_METER_READS = 6
+# Mains voltage never stays constant for long: it wobbles by a tenth of a
+# volt over minutes. A long run of strictly identical readings is therefore
+# not a measurement but a frozen value -- the firmware's metering channel
+# has given out. The symptom is insidious: the device answers, the outlets
+# obey, and only sleep detection reasons on a dead figure. It then no longer
+# switches anything off, with nothing to flag it.
+#
+# Five minutes of reads, not half a minute: on a quiet grid the voltage
+# holds to the tenth for three to five reads in a row, and six identical
+# ones out of twelve outlets watched came up by chance -- a false alarm
+# offering to restart a healthy device. A real freeze lasts until the
+# device restarts, hours later: waiting five minutes loses nothing.
+FROZEN_METER_READS = 60
 # The signal is read separately, and rarely. A Wi-Fi link does not change
 # in the blink of an eye, and every extra query weighs on a firmware whose
 # fragility we learned about tonight: once a minute is plenty to see a

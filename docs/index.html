@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shelly PC Screens</title>
+<meta name="description" content="Switch your PC's screens on and off by usage profile, through Shelly smart power strips, from the Windows notification area.">
+<link rel="icon" href="assets/icon-32.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="index.html"><img src="assets/icon-32.png" alt="">Shelly PC Screens</a>
+    <nav>
+      <a href="index.html" aria-current="page">Overview</a>
+      <a href="features.html">Features</a>
+      <a href="setup.html">Setup guide</a>
+      <a href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly">GitHub</a>
+      <a class="button" href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="hero">
+  <div>
+    <p class="eyebrow">For Windows PCs with several screens</p>
+    <h1>Your screens, on only when you use them.</h1>
+    <p class="lead">
+      Shelly PC Screens cuts and restores the power of each monitor by
+      <strong>usage profile</strong> — all of them for work, one for a long
+      render, the main one for a game — through Shelly smart power strips,
+      from an icon next to the clock.
+    </p>
+    <div class="actions">
+      <a class="button" href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly/releases/latest">Download for Windows</a>
+      <a class="button ghost" href="setup.html">See how to set it up</a>
+    </div>
+  </div>
+  <img class="logo" src="assets/icon-256.png" alt="Shelly PC Screens icon">
+</div>
+
+<section>
+  <h2>One desk, three ways to use it</h2>
+  <p class="lead">A profile says which screens are on. Switch with one keystroke; the others go really dark — not on standby, <em>off</em>.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 250" role="img" aria-labelledby="profilesTitle">
+      <title id="profilesTitle">Three profiles on the same four-screen desk: All on lights every screen, PC Work Alone only the small top one, Gaming only the main one.</title>
+      <!-- One panel per profile; same desk, different screens lit. -->
+      <g transform="translate(20,20)">
+        <rect class="screen-on" x="98" y="4" width="74" height="44" rx="4"/>
+        <rect class="screen-on" x="4" y="58" width="84" height="56" rx="4"/>
+        <rect class="screen-on" x="94" y="54" width="112" height="62" rx="4"/>
+        <rect class="screen-on" x="212" y="58" width="84" height="56" rx="4"/>
+        <path class="line" d="M150 116v18M46 114v20M254 114v20M20 136h260"/>
+        <text x="150" y="168" text-anchor="middle" class="t-strong">All on</text>
+        <text x="150" y="188" text-anchor="middle" class="t-muted t-small">CAD, trading, development…</text>
+      </g>
+      <g transform="translate(310,20)">
+        <rect class="screen-on" x="98" y="4" width="74" height="44" rx="4"/>
+        <rect class="screen-off" x="4" y="58" width="84" height="56" rx="4"/>
+        <rect class="screen-off" x="94" y="54" width="112" height="62" rx="4"/>
+        <rect class="screen-off" x="212" y="58" width="84" height="56" rx="4"/>
+        <path class="line" d="M150 116v18M46 114v20M254 114v20M20 136h260"/>
+        <text x="150" y="168" text-anchor="middle" class="t-strong">PC Work Alone</text>
+        <text x="150" y="188" text-anchor="middle" class="t-muted t-small">long AI jobs, video encoding</text>
+      </g>
+      <g transform="translate(600,20)">
+        <rect class="screen-off" x="98" y="4" width="74" height="44" rx="4"/>
+        <rect class="screen-off" x="4" y="58" width="84" height="56" rx="4"/>
+        <rect class="screen-on" x="94" y="54" width="112" height="62" rx="4"/>
+        <rect class="screen-off" x="212" y="58" width="84" height="56" rx="4"/>
+        <path class="line" d="M150 116v18M46 114v20M254 114v20M20 136h260"/>
+        <text x="150" y="168" text-anchor="middle" class="t-strong">Gaming</text>
+        <text x="150" y="188" text-anchor="middle" class="t-muted t-small">one game, one screen</text>
+      </g>
+      <g transform="translate(300,228)">
+        <rect class="screen-on" x="0" y="-10" width="16" height="11" rx="2"/>
+        <text x="24" y="0" class="t-small">powered</text>
+        <rect class="screen-off" x="110" y="-10" width="16" height="11" rx="2"/>
+        <text x="134" y="0" class="t-small">power cut at the outlet</text>
+      </g>
+    </svg>
+    <figcaption>The same desk, three profiles. You create as many as you like.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>Sound familiar?</h2>
+  <div class="grid">
+    <div class="card pain">
+      <h3>Four screens for one computer</h3>
+      <p>A long job runs overnight and needs one window. The other three screens stay lit, or sit in standby, for hours.</p>
+    </div>
+    <div class="card pain">
+      <h3>Screens that never really sleep</h3>
+      <p>Portable and USB-C monitors, docks, speakers and hubs keep drawing power while the PC sleeps — or keep waking it.</p>
+    </div>
+    <div class="card pain">
+      <h3>Reaching behind the desk</h3>
+      <p>Turning a monitor off by hand, one button at a time, then finding its windows stranded on a screen that is gone.</p>
+    </div>
+    <div class="card pain">
+      <h3>Smart plugs that know nothing</h3>
+      <p>A smart plug switches a socket. It does not know which screen is on it, that the PC is booting, or that the keyboard must stay on for the BIOS.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>What changes</h2>
+  <div class="grid">
+    <div class="card">
+      <span class="tag">One keystroke</span>
+      <h3>Pick a profile anywhere</h3>
+      <p><kbd>Ctrl</kbd>+<kbd>Win</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> opens the profile picker with a live map of your desk. Arrow, <kbd>Enter</kbd>, done.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Follows the PC</span>
+      <h3>Everything off when it sleeps</h3>
+      <p>A script on the power strip watches the PC's own power draw: screens go off when it sleeps or shuts down, and come back at boot — even with the app closed.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Knows your desk</span>
+      <h3>Each outlet knows its screen</h3>
+      <p>An assistant matches every outlet to the monitor it powers. The map shows your screens where Windows places them, at their real size.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Windows follow</span>
+      <h3>Nothing left on a dark screen</h3>
+      <p>After a profile change, windows stranded on a screen that went off are brought back to the nearest one that is on.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Safe by design</span>
+      <h3>Never cuts what must stay on</h3>
+      <p>The PC's own outlet is protected six times over; the keyboard's hub stays on for the BIOS; no command can leave you with every screen off.</p>
+    </div>
+    <div class="card">
+      <span class="tag">See it</span>
+      <h3>Measure what you save</h3>
+      <p>Power history outlet by outlet, day and night, with the energy used over any period and CSV export.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>How it fits together</h2>
+  <p>No cloud and no account: the app talks to the power strips over your local network.</p>
+  <figure class="diagram">
+    <svg viewBox="0 0 900 330" role="img" aria-labelledby="archTitle">
+      <title id="archTitle">A Shelly power strip plugged into the wall powers the PC tower, two screens and the keyboard's USB hub. The app on the PC commands it over Wi-Fi; the strip measures the PC's power draw.</title>
+      <!-- Wall socket -->
+      <rect class="box" x="30" y="240" width="54" height="64" rx="8"/>
+      <circle class="fill-off" cx="48" cy="272" r="4"/><circle class="fill-off" cx="66" cy="272" r="4"/>
+      <text x="57" y="322" text-anchor="middle" class="t-muted t-small">wall</text>
+      <path class="line" d="M84 272h96"/>
+      <!-- Power strip -->
+      <rect class="box" x="180" y="244" width="500" height="56" rx="10"/>
+      <text x="430" y="322" text-anchor="middle" class="t-strong">Shelly Power Strip 4 Gen4</text>
+      <g>
+        <circle class="fill-surface" cx="250" cy="272" r="17" stroke="var(--muted)" stroke-width="1.4"/>
+        <circle class="fill-surface" cx="370" cy="272" r="17" stroke="var(--muted)" stroke-width="1.4"/>
+        <circle class="fill-surface" cx="490" cy="272" r="17" stroke="var(--muted)" stroke-width="1.4"/>
+        <circle class="fill-surface" cx="610" cy="272" r="17" stroke="var(--muted)" stroke-width="1.4"/>
+        <text x="250" y="277" text-anchor="middle" class="t-small t-strong">1</text>
+        <text x="370" y="277" text-anchor="middle" class="t-small t-strong">2</text>
+        <text x="490" y="277" text-anchor="middle" class="t-small t-strong">3</text>
+        <text x="610" y="277" text-anchor="middle" class="t-small t-strong">4</text>
+      </g>
+      <!-- Cords up to each device -->
+      <path class="line" d="M250 255V170M370 255V150M490 255V150M610 255V190"/>
+      <!-- PC tower -->
+      <rect class="box" x="222" y="62" width="56" height="108" rx="6"/>
+      <circle class="fill-on" cx="250" cy="82" r="4"/>
+      <path class="line-soft" d="M234 100h32M234 110h32"/>
+      <text x="250" y="48" text-anchor="middle" class="t-strong">PC tower</text>
+      <text x="262" y="222" class="t-warn t-small">measured: is the PC on?</text>
+      <!-- Screens -->
+      <rect class="screen-on" x="318" y="72" width="104" height="66" rx="5"/>
+      <path class="line" d="M370 138v12"/>
+      <text x="370" y="58" text-anchor="middle" class="t-strong">Main screen</text>
+      <rect class="screen-on" x="438" y="72" width="104" height="66" rx="5"/>
+      <path class="line" d="M490 138v12"/>
+      <text x="490" y="58" text-anchor="middle" class="t-strong">Second screen</text>
+      <!-- USB hub -->
+      <rect class="box" x="580" y="160" width="60" height="30" rx="6"/>
+      <text x="610" y="148" text-anchor="middle" class="t-strong">USB hub</text>
+      <path class="line-soft" d="M640 175h40"/>
+      <rect class="box-plain" x="680" y="164" width="70" height="22" rx="4"/>
+      <text x="715" y="179" text-anchor="middle" class="t-small">keyboard</text>
+      <!-- Roles -->
+      <text x="250" y="190" text-anchor="middle" class="t-accent t-small">never switched off</text>
+      <text x="610" y="210" text-anchor="middle" class="t-accent t-small">kept on for the BIOS</text>
+      <!-- Wi-Fi link from the PC to the strip -->
+      <path class="stroke-accent dash" d="M278 90 C 760 40, 820 200, 680 262"/>
+      <text x="770" y="96" text-anchor="middle" class="t-accent">Wi-Fi, local network</text>
+      <text x="770" y="114" text-anchor="middle" class="t-muted t-small">the app commands the outlets</text>
+    </svg>
+    <figcaption>One power strip shown; the app drives as many as your desk needs.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>See it</h2>
+  <div class="grid">
+    <figure class="shot">
+      <img src="screenshots/profile-picker.png" alt="The profile picker opened by the keyboard shortcut, with the screen map" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+      <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/profile-picker.png</code></div>
+      <figcaption>The profile picker, opened by the shortcut.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="screenshots/profiles-tab.png" alt="The Profiles tab with the screen map" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+      <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/profiles-tab.png</code></div>
+      <figcaption>Profiles, drawn on the map of your desk.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <h2>What you need</h2>
+  <ul class="check">
+    <li>A Windows PC (64-bit, tested on Windows 11) with two screens or more.</li>
+    <li>One or more <strong>Shelly Power Strip 4 Gen4</strong> — the device the app is validated on — on your 2.4 GHz Wi-Fi.</li>
+    <li>Screens powered from the mains (their own power cord), so an outlet can cut them.</li>
+    <li>Fifteen minutes for the <a href="setup.html">setup guide</a>.</li>
+  </ul>
+  <p class="actions" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:18px">
+    <a class="button" href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly/releases/latest">Download for Windows</a>
+    <a class="button ghost" href="features.html">All the features</a>
+  </p>
+  <p class="muted">Free and open source, under the <a href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly/blob/main/LICENSE">MIT license</a>. Not affiliated with Shelly.</p>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>Shelly PC Screens — by JMMaupin</span>
+    <span><a href="features.html">Features</a> · <a href="setup.html">Setup guide</a> · <a href="https://github.com/JMMaupin/PC-Multi-Screens-Shelly">Source code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

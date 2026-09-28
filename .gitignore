@@ -47,3 +47,6 @@ desktop.ini
 
 
 
+
+# Raw screenshots, before cropping and masking: they show private data.
+captures/
