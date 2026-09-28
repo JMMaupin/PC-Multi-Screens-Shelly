@@ -600,6 +600,10 @@ CATALOG: dict[str, str] = {
         "Veille et arret et Temporisation valent pour tous les comptes de ce PC : les "
         "enregistrer demande un administrateur. Le reste ne concerne que vous.",
     "Profiles and windows": "Profils et fenetres",
+    # --- About tab
+    "Website": "Site web",
+    "overview, features, step-by-step setup guide":
+        "presentation, fonctions, guide de mise en service pas a pas",
     # --- installation, update, removal
     "Install {app} {version}": "Installer {app} {version}",
     "It is installed for every account on this PC, since it drives screens they "

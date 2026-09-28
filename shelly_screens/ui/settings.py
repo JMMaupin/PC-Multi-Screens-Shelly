@@ -792,8 +792,19 @@ class SettingsWindow:
             anchor="w"
         )
 
-        ttk.Label(frame, text=t("Validated devices"), style="Section.TLabel").pack(
+        ttk.Label(frame, text=t("Website"), style="Section.TLabel").pack(
             anchor="w", pady=(28, 4)
+        )
+        row = ttk.Frame(frame)
+        row.pack(anchor="w", padx=(12, 0))
+        self._link(row, product.WEBSITE_URL, product.WEBSITE_URL).pack(side="left")
+        ttk.Label(
+            row, style="Hint.TLabel",
+            text="   " + t("overview, features, step-by-step setup guide"),
+        ).pack(side="left")
+
+        ttk.Label(frame, text=t("Validated devices"), style="Section.TLabel").pack(
+            anchor="w", pady=(24, 4)
         )
         for device in product.VALIDATED_DEVICES:
             row = ttk.Frame(frame)

@@ -6,6 +6,10 @@ area. Screen profiles decide which outlets are powered; windows left on a
 screen that has just been switched off are brought back onto a screen that
 is on.
 
+**Website: [jmmaupin.github.io/PC-Multi-Screens-Shelly](https://jmmaupin.github.io/PC-Multi-Screens-Shelly/)**,
+with an illustrated overview, every feature explained, and a step-by-step
+setup guide. This README is the complete technical reference.
+
 ## At a glance
 
 | | |
@@ -14,7 +18,7 @@ is on.
 | Discovery | mDNS name `<device-id>.local`, then known address, then scan |
 | Protocol | JSON-RPC over HTTP, optional SHA-256 Digest authentication |
 | Installation | one executable, installed for every account of the PC |
-| Dependencies | none — Python 3.12+ standard library (only to run from the sources) |
+| Dependencies | none: Python 3.12+ standard library (only to run from the sources) |
 | License | [MIT](LICENSE) |
 
 ## Installation
@@ -26,7 +30,7 @@ and run it from anywhere. It offers to:
 | What is installed | Offered |
 | --- | --- |
 | Nothing | **Install**, or **Run without installing** |
-| An older version | **Update** — the running application closes in every session, is replaced, and starts again |
+| An older version | **Update**: the running application closes in every session, is replaced, and starts again |
 | The same or a newer version | **Open** the installed copy |
 
 Windows asks for an administrator once, through UAC. The application
@@ -36,13 +40,13 @@ itself never runs elevated.
 every account on the PC shares: one account cannot own them. It is
 therefore installed in `C:\Program Files\Shelly PC Screens`, starts at
 sign-in for every account, and appears in the common Start menu and in
-*Settings → Apps → Installed apps*, where it is uninstalled — optionally
+*Settings → Apps → Installed apps*, where it is uninstalled, optionally
 keeping the configuration and history.
 
 **Coming from version 1.x** (run from the sources with
 `install-startup.ps1`): the installation finds the old configuration
-through its startup shortcut, imports it — passwords included, re-encrypted
-for the machine — copies the power history, then removes the old shortcuts
+through its startup shortcut, imports it (passwords included, re-encrypted
+for the machine), copies the power history, then removes the old shortcuts
 so that both versions do not start side by side. The old files are left
 untouched.
 
@@ -73,9 +77,9 @@ Raise the version in `shelly_screens/__init__.py`, write
 `release-notes/<version>.md` (`{version}` and `{sha256}` are filled in),
 commit and push, then run `push-release.cmd`. It refuses to go on unless
 `main` is clean and matches GitHub and the tag is new, rebuilds the
-executable from these sources, shows what it is about to publish, and
-creates the tag and the release page — with the GitHub CLI (`gh`) — only
-once confirmed.
+executable from these sources, shows what it is about to publish, and only
+once confirmed creates the tag and the release page with the GitHub CLI
+(`gh`).
 
 ## Where the data lives
 
@@ -92,17 +96,17 @@ profiles, and a new account starts from the default ones. Each file is
 written atomically, forced to disk, with the previous version kept as
 `.bak` and used if the file is ever damaged.
 
-`SHELLY_SCREENS_DATA` points everything at one folder instead — a sandbox
+`SHELLY_SCREENS_DATA` points everything at one folder instead: a sandbox
 for development or tests.
 
 ### Hardware settings need an administrator
 
 Devices, outlets, roles, power sensing and the sleep settings apply to every
-account, and include the safeguards — the PC's outlet, critical outlets.
+account, and include the safeguards (the PC's outlet, critical outlets).
 An ordinary account cannot change them by mistake: a change applies at
-once, but a banner then offers **Save changes (administrator)** — one UAC
-prompt for all of them — or **Discard**. Closing the window asks the same
-question, so that nothing unapproved stays in force.
+once, but a banner then offers **Save changes (administrator)**, with one
+UAC prompt for all of them, or **Discard**. Closing the window asks the
+same question, so that nothing unapproved stays in force.
 
 This protects against mistakes, not against a determined user: every
 account's instance must be able to decrypt the power strips' password to
@@ -115,7 +119,7 @@ Each account runs its own instance, but only **the session shown on the
 screen drives the power strips**. The others turn their icon blue, keep the
 consumption history and the log, and explain who drives when asked for a
 profile or the settings. When the screen switches to another session
-(fast user switching, unlocking), control follows — without switching
+(fast user switching, unlocking), control follows, without switching
 anything: the screens stay as the previous account left them. A Remote
 Desktop session is not in front of these screens, so it never drives.
 
@@ -146,25 +150,25 @@ the address directly is instant.
 **New or factory-reset device**: the **First setup of a new device...**
 button opens a five-step wizard.
 
-1. **The model** — for now, the Shelly Power Strip 4 Gen4.
+1. **The model**: for now, the Shelly Power Strip 4 Gen4.
 2. **Open its access point**: buttons 1 and 4 together, 5 seconds; all four
    outlets blink red. Not 10 seconds: that would be a factory reset.
 3. **Connect the PC to it**: the wizard lists the visible
    `ShellyPStripG4-…` access points and connects by itself (`netsh`, no
-   administrator rights) — or you go through the Windows Wi-Fi menu, and it
+   administrator rights), or you go through the Windows Wi-Fi menu, and it
    notices. *Next* only becomes active once the device answers at
    `192.168.33.1`, with its identity and firmware shown.
-4. **The home Wi-Fi**: the 2.4 GHz networks the PC can see — the device's
-   only band —, with their signal in dBm and its quality; below
+4. **The home Wi-Fi**: the 2.4 GHz networks the PC can see (the device's
+   only band), with their signal in dBm and its quality; below
    **-60 dBm**, the wizard flags it. Editable SSID (hidden network),
    maskable password.
-5. **Sending**: `WiFi.SetConfig`, then waiting for real confirmation — the
+5. **Sending**: `WiFi.SetConfig`, then waiting for real confirmation: the
    device must report an address (`got ip`); an accepted configuration
    proves nothing, since a wrong password is accepted too. On failure, the
    last status is shown and *Back* returns to the password.
    The PC then leaves the access point and gets its previous Wi-Fi back; the
-   scan starts and **preselects the new device**, recognised by its MAC — or,
-   failing that, queries it at the reported address.
+   scan starts and **preselects the new device**, recognised by its MAC or,
+   failing that, queried at the reported address.
 
 **The device is never asked to scan for networks.** It has a single radio:
 to scan, it leaves its access point's channel, and some units shut the
@@ -173,7 +177,7 @@ network list comes from the PC: the signal is an indication, all the more
 accurate the closer the PC is to where the device will stay.
 
 Each device gets a **short key** (`strip`, `strip2`, `plug`), and that is
-what profiles refer to — an outlet is written `strip2:1`. The key can be
+what profiles refer to: an outlet is written `strip2:1`. The key can be
 renamed at any time; references follow.
 
 The **Signal** column gives the strength of the device's Wi-Fi link, along
@@ -187,7 +191,7 @@ the blink of an eye, and every query puts load on the device.
 
 Two columns separate **Reached via** and **IP address**. The app prefers to
 reach the device by its mDNS name, which is more stable than its DHCP lease,
-but the address is what you want to read — to open its web interface, or to
+but the address is what you want to read, to open its web interface or to
 notice that it changed. **Clicking the address opens the device's web
 interface** in the browser; the cursor turns into a hand on hover. The
 *Open web UI* button does the same for the selected device.
@@ -207,16 +211,16 @@ UID of the graphics output. Two screens of the same model therefore remain
 distinct, and the match survives reboots.
 
 **Ghost screens.** Some screens stay listed by Windows after their power is
-cut — HDMI commonly does this: the link keeps the screen's identity readable
+cut. HDMI commonly does this: the link keeps the screen's identity readable
 without power. The panel is dark, but Windows still counts it on the
 desktop, so the wizard sees nothing disappear when its outlet is cut.
 
 * **Already linked** to its outlet: the wizard recognises the behaviour,
-  keeps the link and reports it as a *ghost screen, link kept* — counted as
+  keeps the link and reports it as a *ghost screen, link kept*; it counts as
   matched, not as a failure.
 * **Not linked yet**, on a fresh setup: nothing can prove which outlet feeds
   it. Once every other screen is linked, running the wizard again deduces
-  the last pair — the only outlet and the only screen left.
+  the last pair: the only outlet and the only screen left.
 
 Day to day, the app already treats such a screen as dark when its outlet is
 off: windows on it are brought back like on any switched-off screen, and
@@ -260,13 +264,13 @@ treat the outlet*. The two are independent.
 | **Follows the PC** | Switched off while the PC sleeps | Screens; an accessory only if asked |
 
 The *Follows the PC* box is ticked automatically as soon as an outlet is
-declared *Screen* — that is the whole point of the setup. Accessories keep
+declared *Screen*: that is the whole point of the setup. Accessories keep
 it empty: switching off a USB hub or speakers is anything but obvious, and
 doing it automatically has already caught people by surprise.
 
 **Why these roles exist.** During POST, the BIOS and the sign-in screen,
 nothing runs on the PC to control the outlets. A screen therefore cannot be
-switched on at boot: it must already be on. Same for the keyboard — without
+switched on at boot: it must already be on. Same for the keyboard: without
 its USB hub powered, there is no way to enter the BIOS or type your PIN.
 
 The **Behaviour** tab sums up in plain words what will stay powered at
@@ -281,7 +285,7 @@ The **order** of profiles is set with **▲ Move up / ▼ Move down**, or by
 **dragging** a profile in the list. It is the order of the icon menu and of
 keys **1** to **9** in the shortcut window.
 
-**All on** — *Tous en marche* in French — is a **built-in** profile, always
+**All on** (*Tous en marche* in French) is a **built-in** profile, always
 first: in the settings, the icon menu and the shortcut window, where it
 answers key **1**. It switches on **every outlet**, including ones added
 later, since it is recomputed on every use and never saved. It cannot be
@@ -291,7 +295,7 @@ already switched on every screen, and renamed "All on (custom)" otherwise.
 
 A profile says **which screens are on**, not what you do on them. *All on*
 hosts CAD, trading, development and accounting in turn, each with its own
-windows; the app therefore remembers no window layout per profile — that
+windows; the app therefore remembers no window layout per profile; that
 would be the job of an activity profile, which it does not handle. It simply
 brings back windows left on a switched-off screen (see *Lost windows are
 brought back*).
@@ -303,8 +307,8 @@ a dotted outline. **Clicking a screen** switches its outlet on or off in the
 profile, exactly like its checkbox.
 
 Each screen is drawn at its **physical size**: the **diagonal** its **EDID**
-reports — the VESA-standard identification block the screen sends over the
-cable —, in the proportions of its resolution. A 27″ 4K and a 27″ QHD are the
+reports (the VESA-standard identification block the screen sends over the
+cable), in the proportions of its resolution. A 27″ 4K and a 27″ QHD are the
 same size on the map, as on the desk. Under the name: diagonal, resolution
 and the scaling set in Windows.
 
@@ -312,7 +316,7 @@ and the scaling set in Windows.
   (`HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\…\Device Parameters\EDID`),
   without administrator rights, and it stays there when the screen is off.
 * It carries the size twice: in millimetres in the first timing descriptor,
-  in centimetres in the header — or `0×0`, "undefined". The more precise of
+  in centimetres in the header (or `0×0`, "undefined"). The more precise of
   the two that is filled in wins.
 * Only the **diagonal** is kept: some screens fill width and height from a
   template that does not even match their aspect ratio (609×355 mm for a
@@ -320,8 +324,8 @@ and the scaling set in Windows.
 * **The EDID can lie.** Portable screens with a generic controller often
   share the same one: two UPerfect screens of different sizes both report
   27.8″ here. The map draws what is reported.
-* A screen without a usable EDID keeps its **effective size** — its
-  resolution divided by the Windows scaling —, converted at 96 dots per
+* A screen without a usable EDID keeps its **effective size** (its
+  resolution divided by the Windows scaling), converted at 96 dots per
   inch, the density Windows assumes at 100 %.
 
 Since Windows coordinates are in pixels, they no longer fit together once
@@ -329,8 +333,8 @@ each screen is brought back to its real size: the map is rebuilt step by
 step from the main screen, following shared edges.
 
 Screen positions are the ones **Windows** defines. But Windows forgets a
-screen as soon as its outlet is switched off, and may then shift the others
-— with the main screen off, another one takes its place at 0,0. The app
+screen as soon as its outlet is switched off, and may then shift the others:
+with the main screen off, another one takes its place at 0,0. The app
 therefore **remembers the layout** in `state.json` (`screens` section), and
 only updates it when **every screen matched to an outlet is on**: that is the
 only combination that places them all relative to each other.
@@ -339,9 +343,9 @@ Three occasions capture it:
 
 | When | How |
 | --- | --- |
-| **On demand** | **Capture layout...** button under the map. The capture switches to **All on**: the map clears, the outlets that are off switch on, and each screen **appears on the map as Windows detects it**. Once the layout is captured, a dialog says what was learned and offers **Keep 'All on'** — which becomes the current profile, selected in the list so the map shows it lit; closing the dialog does the same — or **Back to '&lt;profile&gt;'**, which reapplies the previous profile, windows included. From the icon menu → *Screens* → *Capture screen layout*, with no window to ask the question in, everything goes straight back. A screen that Windows does not see come back makes the capture fail, naming it: an incomplete layout is never kept. |
+| **On demand** | **Capture layout...** button under the map. The capture switches to **All on**: the map clears, the outlets that are off switch on, and each screen **appears on the map as Windows detects it**. Once the layout is captured, a dialog says what was learned and offers **Keep 'All on'** or **Back to '&lt;profile&gt;'**. The first makes *All on* the current profile, selected in the list so the map shows it lit; closing the dialog does the same. The second reapplies the previous profile, windows included. From the icon menu → *Screens* → *Capture screen layout*, with no window to ask the question in, everything goes straight back. A screen that Windows does not see come back makes the capture fail, naming it: an incomplete layout is never kept. |
 | **Identify displays** | The wizard switches everything on for its tests: it captures the layout along the way, before putting the outlets back as they were. |
-| **Continuously** | At launch, on every refresh and on every display change reported by Windows, as soon as everything is on — a profile such as *All on* is enough. Two successive readings must agree. |
+| **Continuously** | At launch, on every refresh and on every display change reported by Windows, as soon as everything is on: a profile such as *All on* is enough. Two successive readings must agree. |
 
 **No capture without agreement.** Before each one, what the outlets say and
 what Windows sees must match exactly; otherwise the capture is refused, and
@@ -351,7 +355,7 @@ the reason is shown under the map:
 | --- | --- |
 | a *Screen* outlet is not linked to any screen | its screen could not be checked |
 | the device of a screen outlet does not respond | its state is unknown |
-| **a screen outlet is off** | Windows removed its screen and may have shifted the others — even if it still sees it, as with a screen powered from the PC's USB-C |
+| **a screen outlet is off** | Windows removed its screen and may have shifted the others; this holds even if it still sees it, as with a screen powered from the PC's USB-C |
 | **a screen outlet is on but Windows sees no screen** | screen asleep, cable, screen replaced |
 | **the count does not add up**: screen outlets on ≠ physical screens detected | sums up everything else at a glance |
 | an unknown physical screen is connected | see below |
@@ -363,7 +367,7 @@ set aside before counting: the output technology reported by
 `QueryDisplayConfig` identifies them. A USB dock (DisplayLink), on the other
 hand, counts as a real screen.
 
-**A screen plugged into the wall cannot be recognised by anything** —
+**A screen plugged into the wall cannot be recognised by anything**:
 neither the output technology nor the EDID say where its power comes from.
 Only the **Identify displays** test proves it: once each screen outlet has
 found its screen, those that stayed on through every power cut depend on
@@ -377,11 +381,11 @@ settings, **Capture layout...** updates the map right away.
 
 Why switch everything on: Windows keeps **one layout per combination of
 connected screens**. With only the LG and one UPerfect, it may place the
-latter on the left, whereas it sits on top when all four are there — the
+latter on the left, whereas it sits on top when all four are there; the
 live map shows it during the capture. Only the full combination tells where
 each screen is.
 
-The icon menu → **Screens** gives the current layout in plain words —
+The icon menu → **Screens** gives the current layout in plain words:
 *UPerfect 27 — left*, *UPerfect 24 — top, shifted right, above LG Ultra and
 Acer QHD*.
 
@@ -414,8 +418,8 @@ therefore protects even if the role was never assigned, or was lost.
 to *refuse* a switch-off command: it can only be corrected after the fact.
 Measured at about **180 ms**, while an ATX power supply only holds for 16 to
 20 ms without mains. The guard restores power, **it does not prevent the
-shutdown**. It is there against commands coming from elsewhere — mobile app,
-cloud, another tool — not to catch a software bug. The real protection is
+shutdown**. It is there against commands coming from elsewhere (mobile app,
+cloud, another tool), not to catch a software bug. The real protection is
 upstream.
 
 Moving the role to another outlet moves the guard with it and updates the
@@ -425,8 +429,8 @@ locks immediately, without a restart.
 
 Each output has an `initial_state` setting that decides its fate **when the
 device boots**, out of reach of both the script and the app. Shipped as
-`off`, it opens every output at the slightest reboot — firmware update,
-brief power dip, watchdog — the PC's outlet included.
+`off`, it opens every output at the slightest reboot (firmware update,
+brief power dip, watchdog), the PC's outlet included.
 
 It has happened: a firmware crash switched off the PC tower mid-session,
 without any of the software protections getting a say. They all refuse
@@ -439,13 +443,13 @@ thus regains its guarantees without anyone having to think about it.
 
 Screens use `restore_last` rather than `off` for a specific reason: if their
 power strip rebooted while the PC is running, `off` would leave them off
-indefinitely — the script only reacts to changes in the PC's state, and that
+indefinitely: the script only reacts to changes in the PC's state, and that
 would not have moved.
 
 ### The sixth: the outlet button
 
 Each outlet on the Power Strip has its own button, which toggles it at the
-slightest press — bypassing every protection above. A sweep of the broom, a
+slightest press, bypassing every protection above. A sweep of the broom, a
 cable being tidied, and the PC goes off instantly.
 
 The app therefore **detaches** the button of the PC's outlet (`in_mode:
@@ -477,7 +481,7 @@ list of outlets to switch back on at the next boot.
 
 Two thresholds rather than one: between them lies a dead band where the
 current state holds. Without it, a power draw hovering around a single value
-would make the relay click in a loop — relays are rated for about 100,000
+would make the relay click in a loop. Relays are rated for about 100,000
 cycles.
 
 The switch-off delay is deliberately long. When Windows restarts, the PC
@@ -488,12 +492,12 @@ lets a restart go by without a flinch.
 ### Calibrate from measurements, not guesswork
 
 **Start measuring** installs a second script that samples the outlet and
-summarises what it sees — minimum, maximum, histogram — in the KVS. Use the
+summarises what it sees (minimum, maximum, histogram) in the KVS. Use the
 PC normally: leave it idle, put it to sleep, shut it down, turn it back on.
 **Read now** reads the results back and suggests thresholds.
 
 The levels are separated at the largest gap in the histogram. A PC produces
-four levels — off, asleep, idle, under load — and what matters is the gap
+four levels (off, asleep, idle, under load), and what matters is the gap
 between "off or asleep" and "on". The wizard refuses to suggest thresholds
 if it has seen only one level, or if the gap is too small to be reliable.
 
@@ -509,7 +513,7 @@ with the PC off, the app closed, or even uninstalled.
 
 ### The boot screen is a fallback, not a privilege
 
-When the remembered profile is usable, this outlet switches on — or not —
+When the remembered profile is usable, this outlet switches on (or not)
 **along with the others**, like any other: if the profile does not include
 it, it stays off.
 
@@ -556,7 +560,7 @@ screens, it would not be enumerated early enough to enter the BIOS.
 
 **Devices** tab → **Password...**. Protection is **optional** and is set
 from the app: enter it, confirm it, then *Apply to device*. The user is
-always `admin` — only the password is chosen.
+always `admin`; only the password is chosen.
 
 Without it, any device on the local network can control the outlets, run a
 script on the power strip or change its Wi-Fi configuration, without having
@@ -616,7 +620,7 @@ profile, without confirmation, and the window closes.
 | Key | Effect |
 | --- | --- |
 | ↑ ↓ (or ← →) | moves the selection, wrapping around |
-| Enter | applies the selected profile — or, if screens were toggled on the map, that selection |
+| Enter | applies the selected profile or, if screens were toggled on the map, that selection |
 | 1 to 9 | directly applies one of the first nine profiles |
 | Esc, or the shortcut again | closes without changing anything |
 
@@ -625,15 +629,15 @@ Hovering with the mouse moves that same selection: there are never two
 highlights. The window also closes by itself as soon as you click elsewhere.
 
 Below the buttons, **the screen map**, drawn as in the settings. On opening,
-it shows what is on right now; **as soon as the selection moves** — arrows,
-Home, End, hover —, it shows **what the selected profile would give**.
+it shows what is on right now; **as soon as the selection moves** (arrows,
+Home, End, hover), it shows **what the selected profile would give**.
 **Clicking a screen** starts from what is displayed and toggles its planned
 state, **without switching anything**: you can start from a profile and
 adjust it for this one time. **Enter** or **Apply** carries out the
 selection, Esc discards it; changing the selection discards the clicks, and
 the map always shows what will happen if you confirm.
 
-It is always a **one-off configuration, outside the profiles** — even if it
+It is always a **one-off configuration, outside the profiles**, even if it
 looks like one of them: the clicks **modify no profile**, and none becomes
 "current". Only the toggled screens are switched, with the same sequence as
 a profile (switch on first, switch off next, bring windows back). On wake,
@@ -662,14 +666,14 @@ or on all Power Strips at once:
 | *Power* | the colour follows the power drawn; one brightness |
 | *State* | one colour when on, another when off, each with its own brightness |
 | *Off* | rings off |
-| *Night mode* | dims the rings between two times — suggested at 5 % from 22:00 to 07:00 |
+| *Night mode* | dims the rings between two times (suggested: 5 % from 22:00 to 07:00) |
 | *Push buttons* | detaches an outlet's button, which no longer toggles it |
 
 The firmware has **only one set of colours**, shared by all outlets: it
 refuses any per-outlet colour. Night mode times follow the device's clock.
 
-Settings apply live. If the device still asks for a restart — seen only
-once, the very first time night mode was enabled — the *Restart to apply*
+Settings apply live. If the device still asks for a restart (seen only
+once, the very first time night mode was enabled), the *Restart to apply*
 button takes care of it; since the relays are bistable, no outlet toggles.
 
 The button checkbox for the PC's outlet is ticked and greyed out: the app
@@ -678,17 +682,17 @@ enforces it (see *The sixth: the outlet button*).
 ## Icon
 
 The icon set is in `windows-icons/`, at the root, exactly as produced by the
-`icongen_windows.py` generator from the `App web ico` project — the folder
+`icongen_windows.py` generator from the `App web ico` project. The folder
 is copied without being reorganised, so that regenerating it comes down to
 a replacement.
 
-Nine sizes — 16, 20, 24, 32, 40, 48, 64, 96 and 256 — bundled in
+Nine sizes (16, 20, 24, 32, 40, 48, 64, 96 and 256) bundled in
 `icon.ico`, as BMP up to 48 px and PNG above, all with an alpha channel.
 The PNGs alongside are used to compose the notification icon and the window
 icon.
 
 In the notification area, the icon is not static: the image carries a
-**status dot** in the bottom right — green when screens are powered, grey
+**status dot** in the bottom right: green when screens are powered, grey
 when everything is off, orange when a device is missing or refuses its
 password, red when nothing responds any more. The outlet count and the
 power fit in the tooltip: at sixteen pixels square, a dot can be read, a
@@ -742,18 +746,18 @@ already stands out.
 The interface uses the ttk `clam` theme in all three cases. The native
 `vista` theme looks nicer in light mode, but it draws its widgets with
 system images: their backgrounds cannot be coloured and dark mode would stay
-white in places. The title bar, for its part, does not belong to Tk — it
+white in places. The title bar, for its part, does not belong to Tk: it
 switches via `DwmSetWindowAttribute`.
 
 ## What the app does on its own
 
-* **Windows sleep and shutdown** — switches off every outlet except the boot
+* **Windows sleep and shutdown**: switches off every outlet except the boot
   screen, critical outlets and the PC's. The switch-off is synchronous and
   without delay: Windows only grants a few moments before suspending the
   process.
-* **Wake** — waits three seconds for the network to come back, then
+* **Wake**: waits three seconds for the network to come back, then
   reapplies the last profile.
-* **Profile change** — **switches on** the missing screens, waits for
+* **Profile change**: **switches on** the missing screens, waits for
   Windows to see them, **and only then** switches off the rest, and brings
   back windows left on a switched-off screen.
 
@@ -764,8 +768,8 @@ initialisation.
 ### Lost windows are brought back
 
 At the end of a profile change, any window left outside the screens that are
-on is moved to **the nearest screen that is on** — option *Behaviour* →
-*Windows*, enabled by default.
+on is moved to **the nearest screen that is on** (option *Behaviour* →
+*Windows*, enabled by default).
 
 * **Screen that is on** means listed by Windows **and** whose outlet is not
   switched off by the profile. A monitor powered from the PC's USB-C stays
@@ -773,7 +777,7 @@ on is moved to **the nearest screen that is on** — option *Behaviour* →
   Windows does not see it that way.
 * **Lost** means its title bar cannot be grabbed on any screen that is on. A
   window straddling two screens, still grabbable, is left alone.
-* The window keeps its size — shrunk only if it does not fit — and is placed
+* The window keeps its size (shrunk only if it does not fit) and is placed
   as close as possible to where it was, without coming to the foreground.
   Minimised, it stays minimised and will come back in the right place;
   maximised, it is maximised again on its new screen.
@@ -850,8 +854,8 @@ identical screens apart. We use the interface path returned by
 **Authentication.** SHA-256 Digest, with the user forced to `admin`. The
 computation is the RFC 7616 one, with `ha2` derived from the method and the
 URI. Shelly's documentation describes, for other firmwares, a constant `ha2`
-computed over `dummy_method:dummy_uri`; **this firmware rejects it** —
-verified on the device, only the standard computation works. The difference
+computed over `dummy_method:dummy_uri`; **this firmware rejects it**.
+Verified on the device: only the standard computation works. The difference
 matters: a constant `ha2` would make the response independent of the
 request, and therefore replayable to trigger another command.
 
@@ -877,7 +881,7 @@ scope identifier.
 **Throttled reconnections.** A failed read no longer triggers a full
 resolution: the device is left alone for 15 s, then 30, then 60, and the
 counter resets as soon as it responds. The same resolution is not retried
-more than once every half-minute. The old behaviour did the opposite — it
+more than once every half-minute. The old behaviour did the opposite: it
 flooded an already struggling device with requests, which preceded two
 watchdog resets.
 
@@ -898,7 +902,7 @@ remembers the last choice.
 **Every configured outlet** is tracked, each under its name, in a single
 database. Nothing extra is queried: the history feeds on the readings the
 app already takes every five seconds. It only keeps what tells something
-new — a change of at least 3 % or 1 W, plus one anchor point per minute. The
+new: a change of at least 3 % or 1 W, plus one anchor point per minute. The
 points from a single reading are written in one transaction. Allow roughly
 1 to 4 MB per outlet per month.
 
@@ -917,8 +921,8 @@ locates a sleep period to the second rather than to the quarter hour.
 
 Retrieval waits for the PC's power strip to respond, and keeps retrying as
 long as it fails: on wake, the network often comes back in several stages.
-Each logger reading is kept if it falls in a gap in the live readings —
-none in the three minutes before it — whatever its date: the first readings
+Each logger reading is kept if it falls in a gap in the live readings
+(none in the three minutes before it), whatever its date: the first readings
 taken after wake therefore do not hide the night before them.
 
 The measurements are stored in a **SQLite** database, a standard format
@@ -926,8 +930,8 @@ included with Python: `history\power_history.sqlite3`, in the machine's
 data folder. How far back it goes is set in **PC power** → *Keep history
 for*, from 1 to 365 days; beyond that, the oldest points are pruned.
 
-The database can be read without the app — *DB Browser for SQLite*, Excel,
-Grafana or any language — and describes itself:
+The database can be read without the app (*DB Browser for SQLite*, Excel,
+Grafana or any language) and describes itself:
 
 | Object | Content |
 | --- | --- |
@@ -974,7 +978,7 @@ what you see is what you export. Two variants:
 
 | Variant | Separators | For |
 | --- | --- | --- |
-| **CSV, standard** | comma, decimal point, ISO 8601 time | any tool — the RFC 4180 standard |
+| **CSV, standard** | comma, decimal point, ISO 8601 time | any tool (the RFC 4180 standard) |
 | **CSV for Excel** | those from the Windows regional settings | a double-click in Excel |
 
 French-locale Excel expects semicolons and decimal commas; a standard CSV
@@ -982,8 +986,8 @@ gets crammed into the first column there. The second variant reads the
 separators from the Windows settings so that opening it works.
 
 Each row carries `duration_s`, the time during which the value held. Energy
-in watt-hours follows from a single formula —
-`SUMPRODUCT(watts, duration_s) / 3600` —, without rebuilding the timeline.
+in watt-hours follows from a single formula,
+`SUMPRODUCT(watts, duration_s) / 3600`, without rebuilding the timeline.
 
 ### Log or linear
 
@@ -996,8 +1000,8 @@ is linear. Both are one click away.
 ### Limitations
 
 The on-device power logger keeps **84 readings**. Sleep is flat, one point
-per quarter hour is enough: that covers about 21 hours. A longer shutdown —
-a weekend — only keeps its last 21 hours.
+per quarter hour is enough: that covers about 21 hours. A longer shutdown,
+such as a weekend, only keeps its last 21 hours.
 
 Only the PC's outlet benefits from this logger. Other outlets could be
 tracked later, but only while the app is running.
@@ -1016,8 +1020,8 @@ update requires checking something rather than simply restarting.
 
 The **minor** changes with each iteration that adds or changes behaviour.
 
-The **third number** changes for a very minor fix — a wording, a misleading
-message, a threshold — even for a detail. Its role is not to summarise the
+The **third number** changes for a very minor fix (a wording, a misleading
+message, a threshold), even for a detail. Its role is not to summarise the
 extent of the work but to answer a single question, asked on a day something
 breaks: *which version is running in front of me?* A log that does not say
 which code it is about wastes more time than it saves.
@@ -1032,11 +1036,11 @@ refuse the update.
 | --- | --- |
 | Red icon | No device reachable. `Devices` → `Reconnect`, or check the power strips' power supply. |
 | A device "offline" | The others keep working. Its outlets show a `-` state and are not operated. |
-| An outlet stays "not identified" | Normal for a USB hub or the PC tower. For a screen: it may be a *ghost screen* that Windows keeps listed once unpowered (common over HDMI) — link the other screens, then run the wizard again to deduce the last pair; or the screen took more than twelve seconds to disconnect. |
+| An outlet stays "not identified" | Normal for a USB hub or the PC tower. For a screen: it may be a *ghost screen* that Windows keeps listed once unpowered (common over HDMI): link the other screens, then run the wizard again to deduce the last pair; or the screen took more than twelve seconds to disconnect. |
 | A window stays on a switched-off screen | Check *Behaviour* → *Windows*, and that this screen's outlet is matched to it (**Identify displays**): otherwise, a screen powered from the PC's USB-C is still counted as on. |
 | Very slow profile change | An expected screen does not come back: the wait runs to the maximum delay (20 s by default, adjustable in `Behaviour`). |
 | Nothing at PC boot | Check that an outlet carries the **Boot screen** role, and that the keyboard's USB hub is **Critical**. |
-| Sleep no longer switches anything off | The firmware's metering path can freeze: the app detects it and flags it in the icon menu, with a button to restart the power strip. A restart is harmless — bistable relays, and `initial_state` brings the PC's outlet back on. |
+| Sleep no longer switches anything off | The firmware's metering path can freeze: the app detects it and flags it in the icon menu, with a button to restart the power strip. A restart is harmless: bistable relays, and `initial_state` brings the PC's outlet back on. |
 | Screens switch off while the PC is running | Switch-off threshold too high. Run a new measurement, or lower it in `PC power`. |
 | Nothing switches back on at PC boot | Check in `PC power` that the script is `running`, and that an outlet carries the **Boot screen** role. |
 | The keyboard does not respond in the BIOS | Its USB hub must be marked **Critical**, not just driven by the script. |
@@ -1087,5 +1091,5 @@ abruptly — precisely the ones that would explain why.
 
 ## License
 
-[MIT](LICENSE) — free to use, modify and redistribute, with the copyright
+[MIT](LICENSE): free to use, modify and redistribute, with the copyright
 notice kept. Not affiliated with Shelly.

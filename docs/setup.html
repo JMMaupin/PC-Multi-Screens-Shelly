@@ -58,6 +58,7 @@
   <p>Spread the PC tower, the screens and the USB hubs across the power strips, and plug <strong>each power strip directly into the wall</strong>.</p>
 
   <figure class="diagram">
+    <figcaption>An example with two power strips. The roles in blue are set at step 5.</figcaption>
     <svg viewBox="0 0 900 360" role="img" aria-labelledby="wiringTitle">
       <title id="wiringTitle">Two power strips plugged straight into the wall. The first powers the PC tower, the main screen, the keyboard's USB hub and a desk hub; the second powers three more screens. No master power strip in between.</title>
       <rect class="fill-soft" x="20" y="90" width="26" height="250" rx="6"/>
@@ -104,7 +105,6 @@
       <text x="630" y="232" text-anchor="middle" class="t-muted t-small">spare</text>
       <text x="330" y="196" text-anchor="middle" class="t-small t-accent">Screen</text>
     </svg>
-    <figcaption>An example with two power strips. The roles in blue are set at step 5.</figcaption>
   </figure>
 
   <div class="callout warn">
@@ -124,9 +124,9 @@
     <li>Click <strong>Install</strong>, and approve the administrator prompt.</li>
   </ol>
   <figure class="shot">
+    <figcaption>Run from a download, the executable offers to install itself.</figcaption>
     <img src="screenshots/setup-install.png" alt="The installation dialog offering Install or Run without installing" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/setup-install.png</code></div>
-    <figcaption>Run from a download, the executable offers to install itself.</figcaption>
   </figure>
   <p>The app is installed for every account of the PC, starts at sign-in, and its icon appears next to the clock. <strong>Left click</strong> opens the settings; <strong>right click</strong> the menu.</p>
   <div class="callout">
@@ -151,15 +151,15 @@
     <li>The strip joins your network; the PC gets its Wi-Fi back and the new device is preselected.</li>
   </ol>
   <figure class="shot">
+    <figcaption>Step 4 of the wizard: the networks the PC sees, with their signal.</figcaption>
     <img src="screenshots/first-setup-wizard.png" alt="First setup wizard: choosing the home Wi-Fi network with signal quality" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/first-setup-wizard.png</code></div>
-    <figcaption>Step 4 of the wizard: the networks the PC sees, with their signal.</figcaption>
   </figure>
   <p>Repeat for each power strip. The <strong>Signal</strong> column should read <em>good</em> or <em>excellent</em>.</p>
   <figure class="shot">
+    <figcaption>Two power strips, online.</figcaption>
     <img src="screenshots/devices-tab.png" alt="Devices tab listing two power strips online" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/devices-tab.png</code></div>
-    <figcaption>Two power strips, online.</figcaption>
   </figure>
 </section>
 
@@ -168,20 +168,20 @@
   <p><strong>Outlets</strong> tab: first set the <strong>Type</strong> of each outlet that carries a screen to <em>Screen</em>, since the assistant only tests those. Then click <strong>Identify displays...</strong></p>
   <p>It first tells you what it will cut and what it leaves alone (the PC, critical outlets, outlets without a type):</p>
   <figure class="shot">
+    <figcaption>Nothing outside the screens is ever cut.</figcaption>
     <img src="screenshots/identify-confirm.png" alt="Identify displays confirmation: four screen outlets will be switched off in turn; the PC, critical hubs and an unset outlet are left alone" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/identify-confirm.png</code></div>
-    <figcaption>Nothing outside the screens is ever cut.</figcaption>
   </figure>
   <p>Each screen outlet is cut in turn for about twelve seconds while the app watches which monitor Windows loses, then powered back. The other screens stay on. At the end, each screen outlet knows its monitor, and the layout of your desk is recorded.</p>
   <figure class="shot">
+    <figcaption>The assistant at work.</figcaption>
     <img src="screenshots/identify-displays.png" alt="Identify displays assistant testing outlets one by one" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/identify-displays.png</code></div>
-    <figcaption>The assistant at work.</figcaption>
   </figure>
   <figure class="shot">
+    <figcaption>All four matched, one of them a ghost screen.</figcaption>
     <img src="screenshots/identify-result.png" alt="Identify displays result: 4 of 4 outlets matched, one ghost screen whose link is kept" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/identify-result.png</code></div>
-    <figcaption>All four matched, one of them a ghost screen.</figcaption>
   </figure>
   <div class="callout">
     <p><strong>A "ghost screen" is not a failure.</strong> Some screens stay listed by Windows once their outlet is cut, as HDMI commonly does. If the screen is already linked, the assistant keeps the link and says so. If it is not linked yet, link every other screen first: running the assistant again then deduces the last pair. <a href="features.html#identify">More on ghost screens</a>.</p>
@@ -201,9 +201,9 @@
     <tr><td>Other hubs, speakers</td><td>Accessory</td><td><em>Follows the PC</em> only if you want them off while the PC sleeps</td></tr>
   </table></div>
   <figure class="shot">
+    <figcaption>Types and roles set; each screen matched to its monitor.</figcaption>
     <img src="screenshots/outlets-tab.png" alt="Outlets tab with types and roles set" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/outlets-tab.png</code></div>
-    <figcaption>Types and roles set; each screen matched to its monitor.</figcaption>
   </figure>
   <div class="callout">
     <p>These settings are shared by every account. Changed from an account that is not allowed to save them, a banner asks for an administrator once: <strong>Save changes (administrator)</strong>.</p>
@@ -219,14 +219,14 @@
     <li>Click <strong>Install / update</strong> to send the script to the power strip.</li>
   </ol>
   <figure class="shot">
+    <figcaption><strong>Show curve...</strong>: place the upper line above sleep, the lower one below running: the gap between them is the margin.</figcaption>
     <img src="screenshots/power-chart.png" alt="Power over time window with the running and off threshold lines" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/power-chart.png</code></div>
-    <figcaption><strong>Show curve...</strong>: place the upper line above sleep, the lower one below running: the gap between them is the margin.</figcaption>
   </figure>
   <figure class="shot">
+    <figcaption>Measured levels, thresholds, and the script running on the strip.</figcaption>
     <img src="screenshots/pc-power-tab.png" alt="PC power tab with measured levels and suggested thresholds" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/pc-power-tab.png</code></div>
-    <figcaption>Measured levels, thresholds, and the script running on the strip.</figcaption>
   </figure>
   <p class="muted">Defaults if you skip the measurement: running above 25 W, off below 15 W, 3 s to switch on, 90 s to switch off. The <a href="features.html#sleep">features page</a> explains why.</p>
 </section>
@@ -240,9 +240,9 @@
     <li>If the map is empty, click <strong>Capture layout...</strong>: everything comes on while Windows shows where each screen is.</li>
   </ul>
   <figure class="shot">
+    <figcaption>A profile drawn on the map of the desk.</figcaption>
     <img src="screenshots/profiles-tab.png" alt="Profiles tab with a profile selected on the screen map" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/profiles-tab.png</code></div>
-    <figcaption>A profile drawn on the map of the desk.</figcaption>
   </figure>
 </section>
 
@@ -255,9 +255,9 @@
     <li>Right click the icon → <strong>Consumption history...</strong> the next morning, to see the night.</li>
   </ul>
   <figure class="shot">
+    <figcaption>The profile picker.</figcaption>
     <img src="screenshots/profile-picker.png" alt="The profile picker" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/profile-picker.png</code></div>
-    <figcaption>The profile picker.</figcaption>
   </figure>
 
   <h3>Optional</h3>

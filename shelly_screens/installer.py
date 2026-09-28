@@ -264,7 +264,7 @@ def _register(target: Path) -> None:
         "QuietUninstallString": (
             winreg.REG_SZ, f"{command} {UNINSTALL_ARGUMENT} {SILENT_ARGUMENT}"
         ),
-        "URLInfoAbout": (winreg.REG_SZ, product.REPOSITORY_URL),
+        "URLInfoAbout": (winreg.REG_SZ, product.WEBSITE_URL),
         "HelpLink": (winreg.REG_SZ, product.RELEASES_URL),
         "EstimatedSize": (winreg.REG_DWORD, max(1, target.stat().st_size // 1024)),
         "NoModify": (winreg.REG_DWORD, 1),

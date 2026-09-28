@@ -13,6 +13,8 @@ APP_NAME = "Shelly PC Screens"
 AUTHOR = "JMMaupin"
 
 REPOSITORY_URL = "https://github.com/JMMaupin/PC-Multi-Screens-Shelly"
+# The illustrated website: overview, features, step-by-step setup guide.
+WEBSITE_URL = "https://jmmaupin.github.io/PC-Multi-Screens-Shelly/"
 # The published releases page, where the executable is downloaded.
 RELEASES_URL = f"{REPOSITORY_URL}/releases"
 
