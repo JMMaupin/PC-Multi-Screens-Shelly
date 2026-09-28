@@ -34,8 +34,8 @@
       <li><a href="#wiring">Wire it</a></li>
       <li><a href="#install">Install</a></li>
       <li><a href="#strips">Add the strips</a></li>
-      <li><a href="#identify">Identify screens</a></li>
       <li><a href="#roles">Types &amp; roles</a></li>
+      <li><a href="#identify">Identify screens</a></li>
       <li><a href="#power">PC power</a></li>
       <li><a href="#profiles">Profiles</a></li>
       <li><a href="#try">Try it</a></li>
@@ -58,7 +58,7 @@
   <p>Spread the PC tower, the screens and the USB hubs across the power strips, and plug <strong>each power strip directly into the wall</strong>.</p>
 
   <figure class="diagram">
-    <figcaption>An example with two power strips. The roles in blue are set at step 5.</figcaption>
+    <figcaption>An example with two power strips. The types and roles in blue are set at step 4.</figcaption>
     <svg viewBox="0 0 900 360" role="img" aria-labelledby="wiringTitle">
       <title id="wiringTitle">Two power strips plugged straight into the wall. The first powers the PC tower, the main screen, the keyboard's USB hub and a desk hub; the second powers three more screens. No master power strip in between.</title>
       <rect class="fill-soft" x="20" y="90" width="26" height="250" rx="6"/>
@@ -163,9 +163,26 @@
   </figure>
 </section>
 
+<section class="step" id="roles">
+  <h2><span class="step-number">4</span>Types and roles</h2>
+  <p><strong>Outlets</strong> tab: select each outlet and set what it carries and how to treat it. The type says <em>what is at the end of the cord</em>; the roles say <em>what must never happen to it</em>.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Outlet</th><th>Type</th><th>Tick</th></tr>
+    <tr><td>PC tower</td><td>—</td><td><strong>Powers the PC itself</strong>: never switched off, and measured</td></tr>
+    <tr><td>Main screen</td><td>Screen</td><td><strong>Boot screen</strong>: the one that comes on if the last profile cannot</td></tr>
+    <tr><td>Other screens</td><td>Screen</td><td><em>Follows the PC</em> is ticked for you</td></tr>
+    <tr><td>Keyboard's USB hub</td><td>Accessory</td><td><strong>Critical</strong>: never switched off</td></tr>
+    <tr><td>Other hubs, speakers</td><td>Accessory</td><td><em>Follows the PC</em> only if you want them off while the PC sleeps</td></tr>
+  </table></div>
+  <p>Give every screen outlet the <em>Screen</em> type: the next step only tests those, and an outlet whose type is not set is left alone by every automation.</p>
+  <div class="callout">
+    <p>These settings are shared by every account. Changed from an account that is not allowed to save them, a banner asks for an administrator once: <strong>Save changes (administrator)</strong>.</p>
+  </div>
+</section>
+
 <section class="step" id="identify">
-  <h2><span class="step-number">4</span>Identify the screens</h2>
-  <p><strong>Outlets</strong> tab: first set the <strong>Type</strong> of each outlet that carries a screen to <em>Screen</em>, since the assistant only tests those. Then click <strong>Identify displays...</strong></p>
+  <h2><span class="step-number">5</span>Identify the screens</h2>
+  <p>Still in <strong>Outlets</strong>, click <strong>Identify displays...</strong> to match each screen outlet to its monitor.</p>
   <p>It first tells you what it will cut and what it leaves alone (the PC, critical outlets, outlets without a type):</p>
   <figure class="shot">
     <figcaption>Nothing outside the screens is ever cut.</figcaption>
@@ -187,27 +204,11 @@
     <p><strong>A "ghost screen" is not a failure.</strong> Some screens stay listed by Windows once their outlet is cut, as HDMI commonly does. If the screen is already linked, the assistant keeps the link and says so. If it is not linked yet, link every other screen first: running the assistant again then deduces the last pair. <a href="features.html#identify">More on ghost screens</a>.</p>
   </div>
   <p class="muted">An outlet carrying no screen (a hub, the PC) is simply not identified: that is normal.</p>
-</section>
-
-<section class="step" id="roles">
-  <h2><span class="step-number">5</span>Types and roles</h2>
-  <p>Still in <strong>Outlets</strong>, select each outlet and set what it carries and how to treat it. The type says <em>what is at the end of the cord</em>; the roles say <em>what must never happen to it</em>.</p>
-  <div class="table-wrap"><table>
-    <tr><th>Outlet</th><th>Type</th><th>Tick</th></tr>
-    <tr><td>PC tower</td><td>—</td><td><strong>Powers the PC itself</strong>: never switched off, and measured</td></tr>
-    <tr><td>Main screen</td><td>Screen</td><td><strong>Boot screen</strong>: the one that comes on if the last profile cannot</td></tr>
-    <tr><td>Other screens</td><td>Screen</td><td><em>Follows the PC</em> is ticked for you</td></tr>
-    <tr><td>Keyboard's USB hub</td><td>Accessory</td><td><strong>Critical</strong>: never switched off</td></tr>
-    <tr><td>Other hubs, speakers</td><td>Accessory</td><td><em>Follows the PC</em> only if you want them off while the PC sleeps</td></tr>
-  </table></div>
   <figure class="shot">
-    <figcaption>Types and roles set; each screen matched to its monitor.</figcaption>
+    <figcaption>Afterwards, the Outlets tab: types, roles, and each screen matched to its monitor.</figcaption>
     <img src="screenshots/outlets-tab.png" alt="Outlets tab with types and roles set" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/outlets-tab.png</code></div>
   </figure>
-  <div class="callout">
-    <p>These settings are shared by every account. Changed from an account that is not allowed to save them, a banner asks for an administrator once: <strong>Save changes (administrator)</strong>.</p>
-  </div>
 </section>
 
 <section class="step" id="power">

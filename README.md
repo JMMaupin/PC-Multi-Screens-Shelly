@@ -196,9 +196,59 @@ notice that it changed. **Clicking the address opens the device's web
 interface** in the browser; the cursor turns into a hand on hover. The
 *Open web UI* button does the same for the selected device.
 
-### 3. Match each outlet to its screen
+### 3. Say what is plugged in
 
-**Outlets** tab → **Identify displays**. The wizard switches each outlet off
+**Outlets** tab, **Type** column, in the editor below the list:
+
+| Type | For | Effect |
+| --- | --- | --- |
+| **Screen** | A screen | The only type included in the identification wizard |
+| **Accessory** | USB hub, speakers | Still controllable by profiles, but **outside the screen scope** |
+| **Not set** | Not filled in yet | **No automation touches it** |
+
+**Declaring the type of each screen is mandatory.** The wizard only operates
+what explicitly carries the *Screen* type; as long as an outlet stays *Not
+set*, it leaves it alone and says so.
+
+This is deliberately the opposite of a permissive choice: what we don't
+know, we don't touch. A forgotten outlet is precisely the one whose load is
+unknown — and that is the one you must not switch off just to see.
+
+An accessory, for its part, will never make a screen disappear: testing it
+would only waste time and cause a pointless power cut.
+
+### 4. Assign the roles
+
+Still in **Outlets**, four checkboxes decide what must never switch off at
+the wrong moment:
+
+The type says *what is at the end of the cord*; the roles below say *how to
+treat the outlet*. The two are independent.
+
+| Role | Effect | Tick it on |
+| --- | --- | --- |
+| **Boot screen** | Fallback when the remembered profile is unusable | The main screen |
+| **Critical** | Never switched off, neither by a profile nor at shutdown | The keyboard's USB hub |
+| **Powers the PC** | Same, and its power draw tells whether the PC is running | The PC tower |
+| **Follows the PC** | Switched off while the PC sleeps | Screens; an accessory only if asked |
+
+The *Follows the PC* box is ticked automatically as soon as an outlet is
+declared *Screen*: that is the whole point of the setup. Accessories keep
+it empty: switching off a USB hub or speakers is anything but obvious, and
+doing it automatically has already caught people by surprise.
+
+**Why these roles exist.** During POST, the BIOS and the sign-in screen,
+nothing runs on the PC to control the outlets. A screen therefore cannot be
+switched on at boot: it must already be on. Same for the keyboard: without
+its USB hub powered, there is no way to enter the BIOS or type your PIN.
+
+The **Behaviour** tab sums up in plain words what will stay powered at
+shutdown.
+
+### 5. Match each outlet to its screen
+
+Once every screen outlet carries the *Screen* type: **Outlets** tab →
+**Identify displays**. The wizard switches each outlet off
 in turn and watches which screen Windows removes, then switches it back on.
 The other screens stay on meanwhile: the wizard cannot pull the rug out from
 under itself. Allow about twelve seconds per outlet.
@@ -226,55 +276,6 @@ Day to day, the app already treats such a screen as dark when its outlet is
 off: windows on it are brought back like on any switched-off screen, and
 the log names it (`Ghost screen: outlet off but still on the Windows
 desktop`).
-
-### 4. Say what is plugged in
-
-**Type** column, in the editor below the list:
-
-| Type | For | Effect |
-| --- | --- | --- |
-| **Screen** | A screen | The only type included in the identification wizard |
-| **Accessory** | USB hub, speakers | Still controllable by profiles, but **outside the screen scope** |
-| **Not set** | Not filled in yet | **No automation touches it** |
-
-**Declaring the type of each screen is mandatory.** The wizard only operates
-what explicitly carries the *Screen* type; as long as an outlet stays *Not
-set*, it leaves it alone and says so.
-
-This is deliberately the opposite of a permissive choice: what we don't
-know, we don't touch. A forgotten outlet is precisely the one whose load is
-unknown — and that is the one you must not switch off just to see.
-
-An accessory, for its part, will never make a screen disappear: testing it
-would only waste time and cause a pointless power cut.
-
-### 5. Assign the roles
-
-Still in **Outlets**, three checkboxes decide what must never switch off at
-the wrong moment:
-
-The type says *what is at the end of the cord*; the roles below say *how to
-treat the outlet*. The two are independent.
-
-| Role | Effect | Tick it on |
-| --- | --- | --- |
-| **Boot screen** | Fallback when the remembered profile is unusable | The main screen |
-| **Critical** | Never switched off, neither by a profile nor at shutdown | The keyboard's USB hub |
-| **Powers the PC** | Same, and its power draw tells whether the PC is running | The PC tower |
-| **Follows the PC** | Switched off while the PC sleeps | Screens; an accessory only if asked |
-
-The *Follows the PC* box is ticked automatically as soon as an outlet is
-declared *Screen*: that is the whole point of the setup. Accessories keep
-it empty: switching off a USB hub or speakers is anything but obvious, and
-doing it automatically has already caught people by surprise.
-
-**Why these roles exist.** During POST, the BIOS and the sign-in screen,
-nothing runs on the PC to control the outlets. A screen therefore cannot be
-switched on at boot: it must already be on. Same for the keyboard: without
-its USB hub powered, there is no way to enter the BIOS or type your PIN.
-
-The **Behaviour** tab sums up in plain words what will stay powered at
-shutdown.
 
 ### 6. Build the profiles
 
