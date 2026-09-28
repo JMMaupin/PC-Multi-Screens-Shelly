@@ -50,3 +50,6 @@ desktop.ini
 
 # Raw screenshots, before cropping and masking: they show private data.
 captures/
+
+# Claude Code project context: kept on this PC, never published.
+.claude/
