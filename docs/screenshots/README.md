@@ -19,6 +19,7 @@ are replaced with example values.
 | `pc-power-tab.png` | Settings → PC power | done |
 | `power-chart.png` | PC power → Show curve...: running, sleep, wake, threshold lines | done (demo data) |
 | `outlets-tab.png` | Settings → Outlets: types, roles, matched displays | done |
+| `outlet-roles.png` | Outlets tab before identification: types and roles set, screens "not identified" (edited from outlets-tab) | done |
 | `devices-tab.png` | Settings → Devices: two power strips online | done, masked |
 | `admin-banner.png` | The "Hardware changes not saved yet" banner | done, masked |
 | `first-setup-wizard.png` | First setup of a new device, step 4 (Wi-Fi) | done, masked |
