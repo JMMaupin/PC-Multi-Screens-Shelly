@@ -48,6 +48,7 @@
   <ul class="check">
     <li>One or more <strong>Shelly Power Strip 4 Gen4</strong>, the device the app is validated on.</li>
     <li>Your home Wi-Fi in <strong>2.4 GHz</strong>: the power strips have no 5 GHz radio.</li>
+    <li>Wi-Fi on the PC, to set up a new power strip: the PC talks to it directly for a minute. A PC without Wi-Fi can use a power strip set up beforehand with the Shelly app on a phone.</li>
     <li>A Windows PC (64-bit) and an administrator's password, once, for the installation.</li>
     <li>Screens powered by their own power cord. A screen powered by the PC's USB-C cannot be cut by an outlet.</li>
   </ul>
@@ -136,26 +137,110 @@
 
 <section class="step" id="strips">
   <h2><span class="step-number">3</span>Add the power strips</h2>
-  <p>Settings → <strong>Devices</strong> → <strong>Add device...</strong></p>
+  <p>Settings → <strong>Devices</strong> → <strong>Add device...</strong> What comes next depends on the power strip:</p>
+  <ul>
+    <li><strong>New, straight out of the box</strong>, or reset to factory settings: the app sets it up for you. This is the usual case, <a href="#strips-new">follow it below</a>.</li>
+    <li><strong>Already on your Wi-Fi</strong>, because you set it up earlier with the Shelly app: <a href="#strips-existing">skip to it</a>.</li>
+  </ul>
 
-  <h3>A power strip already on your Wi-Fi</h3>
-  <p>Click <strong>Scan network</strong> (about twenty seconds), select it, add it. Typing its address is instant.</p>
+  <h3 id="strips-new">A new power strip</h3>
+  <p>No Shelly app, no account, no phone: the app puts the power strip on your Wi-Fi itself, in five short steps. Allow a few minutes per strip.</p>
+  <p>Have ready:</p>
+  <ul class="check">
+    <li>The <strong>password of your Wi-Fi</strong>.</li>
+    <li>The power strip <strong>plugged into the wall and within reach</strong>: you will press two of its buttons.</li>
+    <li>The <strong>PC's Wi-Fi turned on</strong>, even if the PC normally uses a network cable.</li>
+  </ul>
+  <div class="callout">
+    <p><strong>For about a minute, the PC leaves your Wi-Fi</strong> to talk to the power strip directly: no internet over Wi-Fi during that time. The wizard gives your Wi-Fi back at the end, and also if you click <strong>Cancel</strong>.</p>
+  </div>
+  <p>In the <em>Add a Shelly device</em> window, click <strong>First setup of a new device...</strong> at the bottom.</p>
 
-  <h3>A new or factory-reset power strip</h3>
-  <p>Click <strong>First setup of a new device...</strong> and follow the five steps:</p>
-  <ol class="do">
-    <li>Choose the model.</li>
-    <li>Open its access point: press <strong>buttons 1 and 4 together for 5 seconds</strong>: all four outlets blink red. <em>Not 10 seconds</em>: that is a factory reset.</li>
-    <li>The wizard connects the PC to it by itself, and shows the device and its firmware.</li>
-    <li>Pick your home Wi-Fi from the networks the PC sees. Below −60 dBm the wizard warns you: move the strip, or the router, closer.</li>
-    <li>The strip joins your network; the PC gets its Wi-Fi back and the new device is preselected.</li>
-  </ol>
+  <h4 class="substep"><span class="substep-number">1</span>Which device?</h4>
+  <p>The wizard opens on the choice of model.</p>
   <figure class="shot">
-    <figcaption>Step 4 of the wizard: the networks the PC sees, with their signal.</figcaption>
-    <img src="screenshots/first-setup-wizard.png" alt="First setup wizard: choosing the home Wi-Fi network with signal quality" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <figcaption>Step 1: the model.</figcaption>
+    <img src="screenshots/first-setup-model.png" alt="First setup wizard, step 1: Shelly Power Strip 4 Gen4 selected" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/first-setup-model.png</code></div>
+  </figure>
+  <p>Only one model is offered for now, the Shelly Power Strip 4 Gen4, already selected. Click <strong>Next</strong>.</p>
+
+  <h4 class="substep"><span class="substep-number">2</span>Open the power strip's access point</h4>
+  <p>The wizard tells you what to do on the power strip.</p>
+  <figure class="shot">
+    <figcaption>Step 2: which buttons to press, and for how long.</figcaption>
+    <img src="screenshots/first-setup-access-point.png" alt="First setup wizard, step 2: press buttons 1 and 4 together for 5 seconds until the four outlets blink red" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/first-setup-access-point.png</code></div>
+  </figure>
+  <p>On the power strip, press <strong>buttons 1 and 4 at the same time</strong>, hold them for <strong>5 seconds</strong>, then release. The four outlets <strong>blink red</strong>: the power strip now broadcasts its own small Wi-Fi network, named <code>ShellyPStripG4-</code> followed by a code.</p>
+  <div class="callout warn">
+    <p><strong>Count to five, not ten.</strong> Holding the buttons for 10 seconds resets the power strip to its factory settings. On a new strip nothing is lost: press again for 5 seconds.</p>
+  </div>
+  <p>Once the outlets blink red, click <strong>Next</strong>.</p>
+
+  <h4 class="substep"><span class="substep-number">3</span>Connect the PC to the power strip</h4>
+  <p>The wizard lists the power strip's network, <code>ShellyPStripG4-</code>…, with its signal in percent. If the list stays empty, check that the outlets still blink red and click <strong>Refresh</strong>; if they no longer blink, press buttons 1 and 4 again for 5 seconds.</p>
+  <p>Now connect the PC to that network, in one of two ways:</p>
+  <ul>
+    <li><strong>In the wizard</strong>: select the network and click <strong>Connect</strong>.</li>
+    <li><strong>From the Windows Wi-Fi menu</strong> (the network icon next to the clock): click the <code>ShellyPStripG4-</code> network, then <em>Connect</em>. Use this way if the wizard says <em>Windows refused the connection</em>.</li>
+  </ul>
+  <figure class="shot">
+    <figcaption>The power strip's network in the Windows Wi-Fi menu. It is open: no password is asked.</figcaption>
+    <img src="screenshots/windows-wifi-menu.png" alt="Windows Wi-Fi menu listing the power strip's network ShellyPStripG4 at the top, above the home networks" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/windows-wifi-menu.png</code></div>
+  </figure>
+  <p class="muted">Windows may show the power strip's network as <em>No internet</em>: that is normal, the power strip is not a router.</p>
+  <p>As soon as the PC is on the power strip's network, the wizard finds the power strip: the line under the list shows its model, its MAC address and its firmware, and <strong>Next</strong> becomes clickable.</p>
+  <figure class="shot">
+    <figcaption>Step 3, once the PC is connected: the line under the list names the power strip.</figcaption>
+    <img src="screenshots/first-setup-connect.png" alt="First setup wizard, step 3: the power strip's network selected, and the line Connected to S4PL-00416EU with its MAC address and firmware" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/first-setup-connect.png</code></div>
+  </figure>
+  <p>Click <strong>Next</strong>.</p>
+
+  <h4 class="substep"><span class="substep-number">4</span>Choose your Wi-Fi</h4>
+  <p>The wizard lists the networks this PC sees on <strong>2.4 GHz</strong>, the only band the power strip understands.</p>
+  <figure class="shot">
+    <figcaption>Step 4: your network, its signal, and the password.</figcaption>
+    <img src="screenshots/first-setup-wizard.png" alt="First setup wizard, step 4: choosing the home Wi-Fi network with signal quality" loading="lazy" onerror="this.parentElement.classList.add('missing')">
     <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/first-setup-wizard.png</code></div>
   </figure>
-  <p>Repeat for each power strip. The <strong>Signal</strong> column should read <em>good</em> or <em>excellent</em>.</p>
+  <p>Click your network: its name fills in below. Type its <strong>password</strong> (tick <strong>Show</strong> to check it), then click <strong>Send to the device</strong>.</p>
+  <ul>
+    <li><strong>Colours</strong>: green is excellent, orange is good, red is too weak and the power strip may lose the connection. The signal is measured by the PC, so it is only a good guide if the power strip sits near the PC.</li>
+    <li><strong>"5 GHz only"</strong>: this PC sees that network on 5 GHz only, which the power strip cannot use. Many routers give both bands the same name: pick it anyway, the next step will tell.</li>
+    <li><strong>Your network is not listed</strong> (hidden network): type its exact name in <em>Network (SSID)</em>.</li>
+  </ul>
+
+  <h4 class="substep"><span class="substep-number">5</span>Let the power strip join your Wi-Fi</h4>
+  <p>Nothing to do: the wizard sends the settings, waits for the power strip to join your network, gives the PC its Wi-Fi back, then closes by itself. It takes up to a minute.</p>
+  <figure class="shot">
+    <figcaption>Step 5: the power strip is joining your network.</figcaption>
+    <img src="screenshots/first-setup-send.png" alt="First setup wizard, step 5: Wi-Fi settings sent and accepted, waiting for the device to join the network" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/first-setup-send.png</code></div>
+  </figure>
+  <ul>
+    <li><em>The device's access point dropped: reconnecting this PC to it...</em> is normal: the power strip is switching networks.</li>
+    <li><em>The device did not join…</em>: the password is usually the cause. Click <strong>Back</strong>, retype it with <strong>Show</strong> ticked, and send again.</li>
+    <li><em>…was not found on your network</em>: it may still be joining. Close the wizard, wait a moment, and click <strong>Scan network</strong>.</li>
+  </ul>
+
+  <h4 class="substep"><span class="substep-number">✓</span>Add it</h4>
+  <p>Back in <em>Add a Shelly device</em>, the new power strip is found and already selected.</p>
+  <figure class="shot">
+    <figcaption>The new power strip, found and selected. Those already added are greyed out.</figcaption>
+    <img src="screenshots/add-device-found.png" alt="Add a Shelly device window: the new power strip selected at the top, two power strips already added greyed out, and the message New device found: check it, then Add selected" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+    <div class="placeholder"><strong>Screenshot to come</strong><code>screenshots/add-device-found.png</code></div>
+  </figure>
+  <p>Click <strong>Add selected</strong>.</p>
+  <p>Repeat for each power strip.</p>
+
+  <h3 id="strips-existing">A power strip already on your Wi-Fi</h3>
+  <p>Click <strong>Scan network</strong> (about twenty seconds), select it, click <strong>Add selected</strong>. Typing its address in <em>Address or mDNS name</em> and clicking <strong>Check</strong> is instant.</p>
+
+  <h3>Check the signal</h3>
+  <p>In the <strong>Devices</strong> tab, the <strong>Signal</strong> column should read <em>good</em> or <em>excellent</em> for every power strip.</p>
   <figure class="shot">
     <figcaption>Two power strips, online.</figcaption>
     <img src="screenshots/devices-tab.png" alt="Devices tab listing two power strips online" loading="lazy" onerror="this.parentElement.classList.add('missing')">

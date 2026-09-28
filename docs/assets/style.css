@@ -356,6 +356,27 @@ tr:last-child td { border-bottom: none; }
 }
 .step h2 { display: flex; align-items: center; }
 
+/* Sub-steps of a step, such as the pages of the first setup wizard. */
+.substep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.02rem;
+  margin: 30px 0 8px;
+}
+.substep-number {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: .8rem;
+  font-weight: 700;
+}
+
 ol.do, ul.check { padding-left: 1.3em; }
 ol.do li, ul.check li { margin: .35em 0; }
 ul.check { list-style: none; padding-left: 0; }

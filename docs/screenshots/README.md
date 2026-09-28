@@ -22,7 +22,13 @@ are replaced with example values.
 | `outlet-roles.png` | Outlets tab before identification: types and roles set, screens "not identified" (edited from outlets-tab) | done |
 | `devices-tab.png` | Settings → Devices: two power strips online | done, masked |
 | `admin-banner.png` | The "Hardware changes not saved yet" banner | done, masked |
-| `first-setup-wizard.png` | First setup of a new device, step 4 (Wi-Fi) | done, masked |
+| `first-setup-model.png` | First setup of a new device, step 1 (model) | done |
+| `first-setup-access-point.png` | First setup, step 2 (buttons 1 and 4) | done |
+| `first-setup-connect.png` | First setup, step 3: connected, Connect button hovered | done, masked |
+| `windows-wifi-menu.png` | Windows Wi-Fi menu showing the power strip's access point | done, masked |
+| `first-setup-wizard.png` | First setup, step 4 (Wi-Fi) | done, masked |
+| `first-setup-send.png` | First setup, step 5: settings sent, waiting for the join | done, masked |
+| `add-device-found.png` | Add a Shelly device: the new strip found and selected | done, masked |
 | `history-window.png` | Consumption history of the PC's outlet | done |
 | `history-export.png` | History, Export menu open | done |
 | `behaviour-tab.png` | Settings → Behaviour | done |
