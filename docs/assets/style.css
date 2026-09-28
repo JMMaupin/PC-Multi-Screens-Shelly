@@ -253,11 +253,16 @@ svg .fill-bg { fill: var(--bg); }
 
 /* -------------------------------------------------------- screenshots */
 
+/* Screenshots keep their own proportions: site.js sets each one to the
+   same fraction of its real size, so the app reads at one size everywhere.
+   They are never enlarged; on a narrow screen they shrink to fit. */
 .shot img {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
   display: block;
-  border-radius: var(--radius);
+  margin: 0 auto;
+  border-radius: 8px;
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
 }
@@ -279,7 +284,6 @@ svg .fill-bg { fill: var(--bg); }
   font-size: .92rem;
 }
 .shot.missing .placeholder code { background: transparent; }
-.shot.narrow { max-width: 520px; margin-left: auto; margin-right: auto; }
 
 /* ------------------------------------------------------------- tables */
 
