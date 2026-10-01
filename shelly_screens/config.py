@@ -55,7 +55,7 @@ MACHINE_SETTINGS = (
     "display_settle_timeout_s",
     "history_days",
 )
-STATE_SETTINGS = ("resume_refs",)
+STATE_SETTINGS = ("resume_refs", "detached_screens")
 USER_SETTINGS = (
     "last_profile",
     "apply_profile_on_start",
@@ -63,6 +63,7 @@ USER_SETTINGS = (
     "language",
     "profile_hotkey",
     "rescue_offscreen_windows",
+    "detach_ghost_screens",
 )
 # Device and sensing fields the application updates by itself: an address
 # changed by DHCP, the id and fingerprint of the script it installed.
@@ -481,6 +482,13 @@ class Settings:
     # After a profile change, bring windows left outside every screen
     # back onto the nearest screen that is on.
     rescue_offscreen_windows: bool = True
+    # Take ghost screens off the Windows desktop while their outlet is
+    # off: switched off, yet still listed by Windows, as HDMI often does.
+    detach_ghost_screens: bool = True
+    # Screens the application took off the desktop. Noted in the state so
+    # that they are put back once their outlet is on again, even by an
+    # instance started after the one that took them off.
+    detached_screens: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -509,6 +517,10 @@ class Settings:
             rescue_offscreen_windows=bool(
                 data.get("rescue_offscreen_windows", defaults.rescue_offscreen_windows)
             ),
+            detach_ghost_screens=bool(
+                data.get("detach_ghost_screens", defaults.detach_ghost_screens)
+            ),
+            detached_screens=[str(k) for k in data.get("detached_screens", [])],
         )
 
 

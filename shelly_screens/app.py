@@ -195,6 +195,12 @@ class Application:
 
     def stop(self) -> None:
         self.history.sync()
+        # A ghost screen taken off the desktop would stay so once its outlet
+        # is back on: nothing would be left to put it back.
+        try:
+            self.controller.release_screens()
+        except Exception as exc:  # noqa: BLE001 - quitting must go through
+            self.log(f"Screens not put back on the desktop: {exc}")
         self.tray.stop()
 
     # ----------------------------------------------------------------- state
@@ -208,7 +214,9 @@ class Application:
                 self.history.feed(self.states)
             except Exception as exc:  # noqa: BLE001 - never at the expense of control
                 self.log(f"History not recorded: {exc}")
-            # The layout is judged on the outlet states just read.
+            # Ghosts first: the layout is judged on the outlet states just
+            # read, and on the screens as they will stay.
+            self._settle_ghosts()
             self._remember_screens()
         except (NotConnected, OSError) as exc:
             self.online = False
@@ -631,6 +639,15 @@ class Application:
             self.apply_profile(name)
         else:
             self._run_async("Restore outlets", lambda: self.controller.undo_capture(capture))
+
+    def _settle_ghosts(self) -> None:
+        """Keeps ghost screens off the desktop, without ever getting in the way."""
+        if self.busy:
+            return  # the operation in progress settles them itself
+        try:
+            self.controller.settle_ghosts()
+        except Exception as exc:  # noqa: BLE001 - the screens stay as Windows has them
+            self.log(f"Ghost screens not handled: {exc}")
 
     def _remember_screens(self) -> None:
         """Records the screens' positions, without ever getting in the way."""

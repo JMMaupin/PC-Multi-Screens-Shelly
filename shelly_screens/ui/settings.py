@@ -1111,6 +1111,10 @@ class SettingsWindow:
         if controller.ghost_screens:
             lines.append(t("Ghost screen: {screens} switched off but kept on the "
                            "Windows desktop", screens=", ".join(controller.ghost_screens)))
+        detached = controller.detached_labels()
+        if detached:
+            lines.append(t("Ghost screen taken off the Windows desktop until switched "
+                           "on: {screens}", screens=", ".join(detached)))
         self.layout_state.set("\n".join(lines))
 
     def _capture_layout(self) -> None:
@@ -1783,6 +1787,14 @@ class SettingsWindow:
             variable=self.var_rescue,
             command=self._apply_behaviour,
         ).pack(anchor="w")
+        self.var_detach_ghosts = tk.BooleanVar(self.root, value=settings.detach_ghost_screens)
+        ttk.Checkbutton(
+            windows_box,
+            text=t("Take ghost screens off the Windows desktop: switched off, yet "
+                   "still listed by Windows, as HDMI often does"),
+            variable=self.var_detach_ghosts,
+            command=self._apply_behaviour,
+        ).pack(anchor="w")
 
         self._build_hotkey_box(frame)
 
@@ -2005,6 +2017,7 @@ class SettingsWindow:
         settings.restore_on_resume = self.var_restore_on_resume.get()
         settings.apply_profile_on_start = self.var_apply_on_start.get()
         settings.rescue_offscreen_windows = self.var_rescue.get()
+        settings.detach_ghost_screens = self.var_detach_ghosts.get()
         try:
             settings.switch_delay_ms = max(0, int(self.var_switch_delay.get()))
             settings.display_settle_timeout_s = max(1.0, float(self.var_settle.get()))
@@ -2353,6 +2366,9 @@ class IdentifyDialog:
             self._say(f"Cannot read the devices: {exc}")
             return
 
+        # Ghosts stay on the desktop for the whole test: it watches which
+        # screen goes away, and must see one that does not go away as such.
+        controller.identifying = True
         try:
             # 1. Switch everything on, to start from a complete desktop.
             self._say("Switching every outlet on...", 0)
@@ -2414,6 +2430,8 @@ class IdentifyDialog:
         except Exception as exc:  # noqa: BLE001
             self._say(f"Identification failed: {exc}")
             time.sleep(2.0)
+        finally:
+            controller.identifying = False
 
         self._finish()
 

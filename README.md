@@ -272,10 +272,28 @@ desktop, so the wizard sees nothing disappear when its outlet is cut.
   it. Once every other screen is linked, running the wizard again deduces
   the last pair: the only outlet and the only screen left.
 
-Day to day, the app already treats such a screen as dark when its outlet is
-off: windows on it are brought back like on any switched-off screen, and
-the log names it (`Ghost screen: outlet off but still on the Windows
-desktop`).
+Day to day, the app takes such a screen off the Windows desktop while its
+outlet is off, as *Disconnect this display* would: Windows moves its
+windows onto the lit screens, and nothing opens on the dark one any more.
+It comes back as soon as its outlet is on again, whoever switched it: a
+profile, the menu, the device's own app or its button.
+
+* Nothing is saved in Windows' own display configuration: after a crash or
+  a restart, Windows brings back the desktop as you arranged it, this
+  screen included. Quitting the app puts it back too.
+* When the primary screen goes dark on DisplayPort, it leaves Windows
+  altogether, and Windows picks another primary screen, often the ghost:
+  taskbar and windows then land on a dark screen. The ghost hands the role
+  over to a lit screen as it leaves: the primary screen of the captured
+  layout if it is lit, otherwise the boot screen, otherwise another lit one.
+  If Windows kept nothing but ghosts on the desktop, a lit screen is
+  brought back first.
+* Nothing is taken off while the identification wizard runs, nor when no
+  other screen on the desktop is known to be lit.
+* The log names each change (`Ghost screen taken off the Windows desktop:
+  ...`, `Back on the Windows desktop: ...`). To keep ghost screens on the
+  desktop instead, untick **Behaviour** → *Take ghost screens off the
+  Windows desktop*.
 
 ### 6. Build the profiles
 
@@ -1039,6 +1057,7 @@ refuse the update.
 | A device "offline" | The others keep working. Its outlets show a `-` state and are not operated. |
 | An outlet stays "not identified" | Normal for a USB hub or the PC tower. For a screen: it may be a *ghost screen* that Windows keeps listed once unpowered (common over HDMI): link the other screens, then run the wizard again to deduce the last pair; or the screen took more than twelve seconds to disconnect. |
 | A window stays on a switched-off screen | Check *Behaviour* → *Windows*, and that this screen's outlet is matched to it (**Identify displays**): otherwise, a screen powered from the PC's USB-C is still counted as on. |
+| A screen stays black once its outlet is back on | A ghost screen taken off the desktop while the app was not running to put it back: **Win+P** → *Extend*. |
 | Very slow profile change | An expected screen does not come back: the wait runs to the maximum delay (20 s by default, adjustable in `Behaviour`). |
 | Nothing at PC boot | Check that an outlet carries the **Boot screen** role, and that the keyboard's USB hub is **Critical**. |
 | Sleep no longer switches anything off | The firmware's metering path can freeze: the app detects it and flags it in the icon menu, with a button to restart the power strip. A restart is harmless: bistable relays, and `initial_state` brings the PC's outlet back on. |

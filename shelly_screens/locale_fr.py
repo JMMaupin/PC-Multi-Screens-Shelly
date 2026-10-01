@@ -84,6 +84,8 @@ CATALOG: dict[str, str] = {
     # --- checkboxes
     "Critical - never switched off": "Critique - jamais coupee",
     'After a profile change, bring windows left outside every lit screen back onto the nearest one': "Apres un changement de profil, ramener sur l'ecran allume le plus proche les fenetres restees hors de tout ecran",
+    "Take ghost screens off the Windows desktop: switched off, yet still listed by Windows, as HDMI often does":
+        "Retirer du bureau de Windows les ecrans fantomes : coupes, mais toujours listes par Windows, comme souvent en HDMI",
     'Profile shortcut': 'Raccourci des profils',
     'Disable': 'Desactiver',
     'Add Ctrl, Alt or Win: a shortcut without them would take the key away from every other program.': 'Ajouter Ctrl, Alt ou Win : sans eux, le raccourci volerait la touche a tous les autres programmes.',
@@ -397,6 +399,8 @@ CATALOG: dict[str, str] = {
         "{outlet} est coupee mais Windows garde son ecran sur le bureau (ecran fantome)",
     "Ghost screen: {screens} switched off but kept on the Windows desktop":
         "Ecran fantome : {screens} coupe(s) mais garde(s) sur le bureau de Windows",
+    "Ghost screen taken off the Windows desktop until switched on: {screens}":
+        "Ecran fantome retire du bureau de Windows jusqu'a son rallumage : {screens}",
     "Capturing the screen layout...": "Releve de la disposition des ecrans...",
     "{outlet} is a screen outlet not linked to a screen: run Identify displays":
         "{outlet} est une prise d'ecran liee a aucun ecran : lancez Identifier les ecrans",

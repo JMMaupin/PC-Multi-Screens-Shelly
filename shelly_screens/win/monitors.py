@@ -18,9 +18,11 @@ from __future__ import annotations
 import ctypes
 import math
 import re
+import struct
 import winreg
 from ctypes import wintypes
 from dataclasses import dataclass
+from typing import Sequence
 
 from ..i18n import t
 from .api import RECT, user32
@@ -39,6 +41,7 @@ MDT_EFFECTIVE_DPI = 0
 BASE_DPI = 96  # the 100 % scale
 
 EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001
+DISPLAY_DEVICE_ACTIVE = 0x00000001  # for a monitor: the one its output shows on
 MONITORINFOF_PRIMARY = 0x00000001
 CCHDEVICENAME = 32
 
@@ -163,18 +166,33 @@ def list_monitors() -> list[MonitorInfo]:
 
 
 def _identify(device_name: str) -> tuple[str, str]:
-    """Readable name and stable key of a given display adapter."""
-    device = DISPLAY_DEVICEW()
-    device.cb = ctypes.sizeof(DISPLAY_DEVICEW)
-    ok = user32.EnumDisplayDevicesW(
-        device_name, 0, ctypes.byref(device), EDD_GET_DEVICE_INTERFACE_NAME
-    )
-    if not ok:
+    """Readable name and stable key of the screen a display output shows on.
+
+    An output may list several monitors: those it has driven since boot
+    stay there, inactive. Once a ghost is taken off the desktop and its
+    output handed to another screen, the ghost even comes first. Only the
+    active one is the screen actually shown; the first one is a fallback.
+    """
+    found = None
+    index = 0
+    while True:
+        device = DISPLAY_DEVICEW()
+        device.cb = ctypes.sizeof(DISPLAY_DEVICEW)
+        if not user32.EnumDisplayDevicesW(
+            device_name, index, ctypes.byref(device), EDD_GET_DEVICE_INTERFACE_NAME
+        ):
+            break
+        if found is None or device.StateFlags & DISPLAY_DEVICE_ACTIVE:
+            found = device
+        if device.StateFlags & DISPLAY_DEVICE_ACTIVE:
+            break
+        index += 1
+    if found is None:
         # Without monitor information, fall back on the enumeration rank.
         # Less stable, but better than nothing.
         return ("Unknown display", f"device:{device_name}")
-    friendly = device.DeviceString.strip() or "Display"
-    return (friendly, monitor_key(device.DeviceID) or f"device:{device_name}")
+    friendly = found.DeviceString.strip() or "Display"
+    return (friendly, monitor_key(found.DeviceID) or f"device:{device_name}")
 
 
 def monitor_key(device_id: str) -> str:
@@ -286,8 +304,20 @@ TECHNOLOGY_MIRACAST = 15
 TECHNOLOGY_INDIRECT_VIRTUAL = 17
 VIRTUAL_TECHNOLOGIES = {TECHNOLOGY_MIRACAST, TECHNOLOGY_INDIRECT_VIRTUAL}
 
+QDC_ALL_PATHS = 1
 QDC_ONLY_ACTIVE_PATHS = 2
+QDC_DATABASE_CURRENT = 4
 DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2
+DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE = 1
+DISPLAYCONFIG_PATH_ACTIVE = 0x1
+DISPLAYCONFIG_PATH_MODE_IDX_INVALID = 0xFFFFFFFF
+SDC_TOPOLOGY_EXTEND = 0x4
+SDC_USE_SUPPLIED_DISPLAY_CONFIG = 0x20
+SDC_VALIDATE = 0x40
+SDC_APPLY = 0x80
+SDC_ALLOW_CHANGES = 0x400
+ERROR_ACCESS_DENIED = 5
+ERROR_INVALID_PARAMETER = 87
 
 
 class _LUID(ctypes.Structure):
@@ -336,6 +366,13 @@ class _TARGET_DEVICE_NAME(ctypes.Structure):
                 ("monitorDevicePath", ctypes.c_wchar * 128)]
 
 
+user32.SetDisplayConfig.argtypes = [
+    ctypes.c_uint32, ctypes.POINTER(_PATH_INFO), ctypes.c_uint32,
+    ctypes.POINTER(_MODE_INFO), ctypes.c_uint32,
+]
+user32.SetDisplayConfig.restype = ctypes.c_long
+
+
 @dataclass(frozen=True)
 class DisplayOutput:
     """A screen plugged into an active output, as seen by QueryDisplayConfig."""
@@ -350,6 +387,67 @@ class DisplayOutput:
         return self.technology in VIRTUAL_TECHNOLOGIES
 
 
+@dataclass
+class _DisplayConfig:
+    """A display configuration: its paths (one per lit output), and their modes."""
+
+    paths: list[_PATH_INFO]
+    modes: list[_MODE_INFO]
+    keys: list[str]  # the screen on each path, "" if unknown
+    names: list[str]  # its model, read from the EDID
+
+
+def _raw_query(flags: int) -> tuple[list[_PATH_INFO], list[_MODE_INFO]] | None:
+    """Paths and modes from QueryDisplayConfig; None if Windows doesn't answer."""
+    try:
+        paths_count, modes_count = ctypes.c_uint32(), ctypes.c_uint32()
+        if user32.GetDisplayConfigBufferSizes(
+            flags, ctypes.byref(paths_count), ctypes.byref(modes_count)
+        ):
+            return None
+        paths = (_PATH_INFO * paths_count.value)()
+        modes = (_MODE_INFO * modes_count.value)()
+        topology = ctypes.c_uint32()
+        if user32.QueryDisplayConfig(
+            flags, ctypes.byref(paths_count), paths, ctypes.byref(modes_count), modes,
+            ctypes.byref(topology) if flags & QDC_DATABASE_CURRENT else None,
+        ):
+            return None
+    except (AttributeError, OSError):
+        return None  # before Windows 7
+    return list(paths[: paths_count.value]), list(modes[: modes_count.value])
+
+
+def _query(flags: int) -> _DisplayConfig | None:
+    """The active display configuration, or the one Windows saved for the
+    screens connected (QDC_DATABASE_CURRENT); None if Windows doesn't answer.
+    """
+    found = _raw_query(flags)
+    if found is None:
+        return None
+    paths, modes = found
+    kept = [path for path in paths if path.flags & DISPLAYCONFIG_PATH_ACTIVE]
+    names = [_target_name(path.targetInfo) for path in kept]
+    return _DisplayConfig(
+        paths=kept,
+        modes=modes,
+        keys=[key for key, _name in names],
+        names=[name for _key, name in names],
+    )
+
+
+def _target_name(target: _PATH_TARGET) -> tuple[str, str]:
+    """Stable key and EDID model of the screen on an output; ("", "") if unknown."""
+    name = _TARGET_DEVICE_NAME()
+    name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME
+    name.header.size = ctypes.sizeof(_TARGET_DEVICE_NAME)
+    name.header.adapterId = target.adapterId
+    name.header.id = target.id
+    if user32.DisplayConfigGetDeviceInfo(ctypes.byref(name)):
+        return "", ""
+    return monitor_key(name.monitorDevicePath), name.monitorFriendlyDeviceName.strip()
+
+
 def list_outputs() -> dict[str, DisplayOutput] | None:
     """Screens on the active outputs, by key; None if Windows doesn't answer.
 
@@ -358,41 +456,20 @@ def list_outputs() -> dict[str, DisplayOutput] | None:
     of them. The display configuration, on the other hand, details every
     output.
     """
-    try:
-        paths_count, modes_count = ctypes.c_uint32(), ctypes.c_uint32()
-        if user32.GetDisplayConfigBufferSizes(
-            QDC_ONLY_ACTIVE_PATHS, ctypes.byref(paths_count), ctypes.byref(modes_count)
-        ):
-            return None
-        paths = (_PATH_INFO * paths_count.value)()
-        modes = (_MODE_INFO * modes_count.value)()
-        if user32.QueryDisplayConfig(
-            QDC_ONLY_ACTIVE_PATHS, ctypes.byref(paths_count), paths,
-            ctypes.byref(modes_count), modes, None,
-        ):
-            return None
-    except (AttributeError, OSError):
-        return None  # before Windows 7
+    config = _query(QDC_ONLY_ACTIVE_PATHS)
+    if config is None:
+        return None
     outputs: dict[str, DisplayOutput] = {}
-    for path in paths[: paths_count.value]:
-        target = path.targetInfo
-        name = _TARGET_DEVICE_NAME()
-        name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME
-        name.header.size = ctypes.sizeof(_TARGET_DEVICE_NAME)
-        name.header.adapterId = target.adapterId
-        name.header.id = target.id
-        if user32.DisplayConfigGetDeviceInfo(ctypes.byref(name)):
-            continue
-        key = monitor_key(name.monitorDevicePath)
+    for path, key, edid_name in zip(config.paths, config.keys, config.names):
         if not key:
             continue
         source = path.sourceInfo
         outputs[key] = DisplayOutput(
             key=key,
-            technology=int(target.outputTechnology),
+            technology=int(path.targetInfo.outputTechnology),
             source=(int(source.adapterId.LowPart), int(source.adapterId.HighPart),
                     int(source.id)),
-            edid_name=name.monitorFriendlyDeviceName.strip(),
+            edid_name=edid_name,
         )
     return outputs
 
@@ -412,6 +489,199 @@ def physical_monitors(outputs: dict[str, DisplayOutput] | None) -> list[MonitorI
 def monitor_keys() -> set[str]:
     """Keys of the currently active screens."""
     return {monitor.key for monitor in list_monitors()}
+
+
+# ------------------------------------------------------------ ghost screens
+
+
+class DisplayConfigError(OSError):
+    """Windows refused a display configuration."""
+
+    def __init__(self, code: int, what: str = "") -> None:
+        if code == ERROR_ACCESS_DENIED:
+            reason = "access denied (locked screen, or another session on the console)"
+        else:
+            reason = f"error {code}"
+        super().__init__(f"{what}: {reason}" if what else reason)
+        self.code = code
+
+
+def connected_keys() -> set[str] | None:
+    """Screens Windows sees plugged in, on the desktop or not; None if unknown.
+
+    A ghost is among them: its cable keeps its detection alive. A screen
+    whose power cut also cut its detection -- most DisplayPort screens --
+    is not, and cannot be put back on the desktop before it returns.
+    """
+    found = _raw_query(QDC_ALL_PATHS)
+    if found is None:
+        return None
+    keys: set[str] = set()
+    seen: set[tuple[int, int, int]] = set()
+    for path in found[0]:
+        target = path.targetInfo
+        ident = (int(target.adapterId.LowPart), int(target.adapterId.HighPart), int(target.id))
+        if not target.targetAvailable or ident in seen:
+            continue
+        seen.add(ident)
+        key, _name = _target_name(target)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def desktop_screens() -> dict[str, bool] | None:
+    """Screens on the desktop, as the display configuration has them: for
+    each key, whether it is the primary screen. None if Windows doesn't answer.
+
+    Read from the same source as `detach` and `reattach`, unlike
+    `list_monitors`: right after a change, the two may not agree yet.
+    """
+    config = _query(QDC_ONLY_ACTIVE_PATHS)
+    if config is None:
+        return None
+    screens: dict[str, bool] = {}
+    for path, key in zip(config.paths, config.keys):
+        if key:
+            screens[key] = screens.get(key, False) or _is_primary(config, path)
+    return screens
+
+
+def _source_position(mode: _MODE_INFO) -> tuple[int, int] | None:
+    """Top-left corner on the desktop of a source mode; None for another mode."""
+    if mode.infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE:
+        return None
+    # DISPLAYCONFIG_SOURCE_MODE: width, height, pixel format, then the position.
+    _width, _height, _format, x, y = struct.unpack_from("<IIIii", bytes(mode.data))
+    return x, y
+
+
+def _move_source(mode: _MODE_INFO, dx: int, dy: int) -> None:
+    """Shift a source mode on the desktop."""
+    position = _source_position(mode)
+    if position is None:
+        return
+    data = bytearray(bytes(mode.data))
+    struct.pack_into("<ii", data, 12, position[0] + dx, position[1] + dy)
+    ctypes.memmove(ctypes.addressof(mode.data), bytes(data), len(data))
+
+
+def _position_of(config: _DisplayConfig, path: _PATH_INFO) -> tuple[int, int] | None:
+    index = path.sourceInfo.modeInfoIdx
+    if index >= len(config.modes):
+        return None
+    return _source_position(config.modes[index])
+
+
+def _is_primary(config: _DisplayConfig, path: _PATH_INFO) -> bool:
+    """The primary screen is the one whose source sits at 0,0."""
+    return _position_of(config, path) == (0, 0)
+
+
+def _apply_without(
+    config: _DisplayConfig, off: set[str], prefer: Sequence[str] = (), validate: bool = False
+) -> int:
+    """Apply a configuration minus the screens `off`; Windows' error code, 0 if done.
+
+    The modes are renumbered: only those of the outputs kept are passed on.
+    If the primary screen is among those going, another one takes its
+    place -- the first of `prefer` that stays, failing that any of them --:
+    every screen is shifted so that it lands at 0,0, which is how Windows
+    names its primary screen. Left to itself, Windows had picked a dark
+    ghost, taskbar and windows included. A desktop with no screen left is
+    refused without asking Windows.
+    """
+    kept = [(p, key) for p, key in zip(config.paths, config.keys) if key not in off]
+    if not kept:
+        return ERROR_INVALID_PARAMETER
+    shift = (0, 0)
+    if not any(_is_primary(config, p) for p, _key in kept):
+        placed = {key: _position_of(config, p) for p, key in kept}
+        heir = next((k for k in prefer if placed.get(k) is not None), None)
+        heir = heir or next((k for k, at in placed.items() if at is not None), None)
+        if heir is None:
+            return ERROR_INVALID_PARAMETER
+        shift = placed[heir]
+    paths = (_PATH_INFO * len(kept))(*(p for p, _key in kept))
+    used: list[_MODE_INFO] = []
+    renumbered: dict[int, int] = {}
+    for path in paths:
+        for end in (path.sourceInfo, path.targetInfo):
+            index = end.modeInfoIdx
+            if index == DISPLAYCONFIG_PATH_MODE_IDX_INVALID or index >= len(config.modes):
+                end.modeInfoIdx = DISPLAYCONFIG_PATH_MODE_IDX_INVALID
+                continue
+            if index not in renumbered:
+                renumbered[index] = len(used)
+                used.append(config.modes[index])
+            end.modeInfoIdx = renumbered[index]
+    modes = (_MODE_INFO * len(used))(*used)
+    if shift != (0, 0):
+        for mode in modes:
+            _move_source(mode, -shift[0], -shift[1])
+    # Never SDC_SAVE_TO_DATABASE: the change stays out of what Windows
+    # restores at the next boot or hot plug.
+    flags = SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES
+    flags |= SDC_VALIDATE if validate else SDC_APPLY
+    return int(user32.SetDisplayConfig(len(kept), paths, len(used), modes, flags))
+
+
+def detach(keys: set[str], prefer: Sequence[str] = ()) -> set[str]:
+    """Take screens off the Windows desktop; return those taken off.
+
+    What "Disconnect this display" does in the display settings: the
+    screen stays connected but no longer holds any part of the desktop,
+    and Windows moves its windows onto the others. The change is not
+    saved: after a restart, or a screen plugged in, Windows brings back
+    the desktop as it was saved, these screens included. `prefer` orders
+    the screens that may take over as primary, should it be going.
+    """
+    config = _query(QDC_ONLY_ACTIVE_PATHS)
+    if config is None:
+        raise DisplayConfigError(0, "display configuration unreadable")
+    wanted = keys & set(config.keys)
+    if not wanted:
+        return set()
+    code = _apply_without(config, wanted, prefer)
+    if code:
+        raise DisplayConfigError(code, "taking off " + ", ".join(sorted(wanted)))
+    # Windows said yes; check that it did it.
+    return wanted - set(desktop_screens() or {})
+
+
+def reattach(keys: set[str], keep_off: set[str], prefer: Sequence[str] = ()) -> set[str]:
+    """Put screens back on the desktop; return those back.
+
+    The configuration Windows saved for the screens connected is applied
+    again -- positions, resolutions, primary screen as the user arranged
+    them --, minus the screens that must stay off (`keep_off`). If it no
+    longer holds a screen to bring back, because the layout was saved in
+    the meantime without it, every connected screen is extended, as Win+P
+    > Extend does, and those to keep off are taken off again. `prefer`
+    orders the screens that may take over as primary, should the saved
+    primary be among those kept off.
+    """
+    keys = keys & (connected_keys() or set())
+    if not keys:
+        return set()
+    saved = _query(QDC_DATABASE_CURRENT)
+    code = 0
+    if saved is not None and keys & set(saved.keys):
+        code = _apply_without(saved, keep_off, prefer)
+    active = set(desktop_screens() or {})
+    if not keys <= active:
+        code = int(user32.SetDisplayConfig(0, None, 0, None, SDC_APPLY | SDC_TOPOLOGY_EXTEND))
+        active = set(desktop_screens() or {})
+        if keep_off & active:
+            try:
+                detach(keep_off & active, prefer)
+            except DisplayConfigError:
+                pass  # what is wanted back is back; the next pass retries the rest
+            active = set(desktop_screens() or {})
+    back = keys & active
+    if not back and code:
+        raise DisplayConfigError(code, "putting back " + ", ".join(sorted(keys)))
+    return back
 
 
 # Two edges less than this many pixels apart are considered adjacent:

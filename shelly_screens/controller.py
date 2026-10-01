@@ -47,6 +47,14 @@ DISPLAY_GRACE_S = 1.2
 POLL_INTERVAL_S = 0.4
 # Gap between two layout readings that must agree.
 LAYOUT_STABLE_S = 2.0
+# A screen that would not come back on the desktop is tried again after
+# this long, not on every refresh.
+REATTACH_RETRY_S = 60.0
+# Taking the same ghost off more often than this, within this window,
+# means something keeps putting it back: windows would jump from screen
+# to screen at every refresh. It is then left alone until the window passes.
+DETACH_MAX = 10
+DETACH_WINDOW_S = 600.0
 
 LogFn = Callable[[str], None]
 
@@ -182,6 +190,26 @@ class ScreenController:
         self.capture_attempted_at = 0.0
         # Outlets switched off whose screen remains on the Windows desktop.
         self.ghost_screens: list[str] = []
+        # Last known output of each outlet, by reference: read from the
+        # devices, then updated by every switching. Absent when unknown.
+        self._outputs: dict[str, bool] = {}
+        # True while the identification assistant runs: it cuts each outlet
+        # in turn and watches the screens, ghosts staying listed included.
+        # Taking them off the desktop then would distort its measurement.
+        self.identifying = False
+        # Times each ghost was taken off the desktop, and when a screen that
+        # would not come back may be tried again.
+        self._detach_times: dict[str, list[float]] = {}
+        self._reattach_retry: dict[str, float] = {}
+        # Last display message logged, so as not to repeat it on every refresh.
+        self._display_note = ""
+        # Display changes go one at a time, under their own lock rather
+        # than the sequence lock: quitting, from the main thread, must not
+        # wait for a profile being applied. Nor for a thread changing the
+        # display, which may be waiting for the main thread's windows to
+        # take note of the change -- whether Windows waits for them is not
+        # documented, so the main thread never takes this lock blocking.
+        self._display_lock = threading.RLock()
         # False while another Windows session drives the devices. The
         # application stops asking anything of them then; this flag is the
         # last line: whatever path gets here, no outlet is switched.
@@ -503,6 +531,7 @@ class ScreenController:
             # the only one where we are sure not to bother it for nothing.
             if now >= self._signal_due.get(key, 0.0):
                 self._refresh_signal(key, now)
+        self._outputs = {ref: state.output for ref, state in states.items()}
         return states
 
     def _refresh_signal(self, key: str, now: float) -> None:
@@ -608,7 +637,12 @@ class ScreenController:
                 )
         key, switch_id = parse_ref(ref)
         self.device_for(key).set_switch(switch_id, on)
+        self._outputs[ref] = on
         self._log(f"{ref} -> {'on' if on else 'off'}")
+        if outlet is not None and outlet.monitor_key:
+            if not on and not self.identifying:
+                time.sleep(DISPLAY_GRACE_S)  # let Windows drop the screens that do go
+            self.settle_ghosts()
 
     def apply_profile(self, name: str) -> ApplyReport:
         """Apply a profile: the outlets, then the windows to rescue."""
@@ -755,20 +789,28 @@ class ScreenController:
             if missing:
                 report.errors.append(f"unreachable: {', '.join(sorted(missing))}")
 
-            # 1. Switch on first, then let Windows discover the screens.
+            # 1. Switch on first, then let Windows discover the screens. A
+            #    ghost taken off the desktop does not come back by itself:
+            #    its detection never went away, Windows saw nothing change.
             expected_keys = self._expected_monitor_keys(targets)
             report.turned_on = self._switch_many(to_turn_on, True, report, urgent)
+            if not urgent:
+                self.settle_ghosts()
             if report.turned_on and not urgent:
                 report.displays_waited_s = self._wait_for_displays(expected_keys)
 
             # 2. Switch off whatever remains to be switched off.
             report.turned_off = self._switch_many(to_turn_off, False, report, urgent)
 
-            # 3. Bring back whatever was left outside every lit screen. The
-            #    pause gives Windows time to remove the switched-off screens.
+            # 3. Take off the desktop the screens Windows keeps although
+            #    switched off, then bring back whatever was left outside
+            #    every lit screen. The pause gives Windows time to remove
+            #    the switched-off screens that do go.
+            if report.turned_off and not urgent:
+                time.sleep(DISPLAY_GRACE_S)
+            if not urgent:
+                self.settle_ghosts()
             if (profile is not None or rescue) and self.config.settings.rescue_offscreen_windows:
-                if report.turned_off:
-                    time.sleep(DISPLAY_GRACE_S)
                 report.windows_rescued = self._rescue_windows(targets, screens_before)
 
             if profile is not None:
@@ -970,6 +1012,9 @@ class ScreenController:
             if to_turn_on:
                 say(t("Switching the screens on..."))
             capture.turned_on = self._switch_many(to_turn_on, True, report)
+            # Every screen must be on the desktop to be measured, a ghost
+            # taken off earlier included.
+            self.settle_ghosts()
             if capture.turned_on:
                 say(t("Waiting for Windows to detect every screen..."))
                 self._wait_for_displays({o.monitor_key for o in screens})
@@ -1006,9 +1051,11 @@ class ScreenController:
         with self._lock:
             screens_before = [m.rect for m in monitors.list_monitors()]
             turned_off = self._switch_many(capture.turned_on, False, report)
-            if turned_off and self.config.settings.rescue_offscreen_windows:
+            if turned_off:
                 time.sleep(DISPLAY_GRACE_S)
-                self._rescue_windows(capture.states_before, screens_before)
+                self.settle_ghosts()
+                if self.config.settings.rescue_offscreen_windows:
+                    self._rescue_windows(capture.states_before, screens_before)
         capture.turned_on = []
 
     def _rescue_windows(self, targets: dict[str, bool], screens_before: list) -> int:
@@ -1045,6 +1092,240 @@ class ScreenController:
             )
         return len(moved)
 
+    # --------------------------------------------------------- ghost screens
+
+    def settle_ghosts(self) -> None:
+        """Keep ghost screens off the Windows desktop; put them back once lit.
+
+        A screen on HDMI whose outlet is cut stays on the desktop (see
+        screen_layout.ghosts): windows open on it, the mouse gets lost on
+        it. It is taken off the desktop, as "Disconnect this display"
+        would, and put back as soon as its outlet is on again -- switched
+        by a profile, the menu, the device's own app or its button.
+
+        When the primary screen goes dark on DisplayPort, it leaves Windows
+        altogether, and Windows picks another primary screen among those
+        still connected: the ghost, as likely as not. The ghost then hands
+        the role over to a lit screen as it leaves (see `_heirs`). Should
+        Windows have kept nothing but ghosts, a lit screen is brought onto
+        the desktop first.
+
+        Nothing is saved in Windows' configuration: should the PC or the
+        application stop now, Windows restores the desktop as it was saved,
+        the screen included. Only screens whose outlet state is known are
+        taken off, never the last lit one, and none while the
+        identification assistant runs.
+        """
+        if not self.drives_devices:
+            return
+        with self._display_lock:
+            settings = self.config.settings
+            desktop = monitors.desktop_screens()
+            if desktop is None:
+                return  # Windows does not answer: next pass
+            detached = set(settings.detached_screens)
+            lit = self._screens_lit()
+            now = time.monotonic()
+
+            # 1. Put back what is lit again or no longer linked to an
+            #    outlet -- everything, once the option is turned off.
+            back = {
+                key for key in detached - set(desktop)
+                if (not settings.detach_ghost_screens or lit.get(key, True))
+                and now >= self._reattach_retry.get(key, 0.0)
+            }
+            if back:
+                heirs = self._heirs(back | self._lit_among(desktop, lit))
+                returned = self._reattach(back, detached - back - set(desktop), heirs, now)
+                detached -= returned
+                desktop = monitors.desktop_screens() or desktop
+
+            # 2. Take off the ghosts: outlet off, screen on the desktop --
+            #    still, or again, when Windows restored its saved layout on
+            #    another screen's arrival.
+            if settings.detach_ghost_screens and not self.identifying:
+                ghosts = {key for key in desktop if lit.get(key) is False}
+                if ghosts and not self._lit_among(desktop, lit):
+                    # Only ghosts on the desktop: bring a lit screen first.
+                    waiting = {
+                        key for key, on in lit.items()
+                        if on and key not in desktop
+                        and now >= self._reattach_retry.get(key, 0.0)
+                    }
+                    if waiting:
+                        self._reattach(waiting, ghosts, self._heirs(waiting), now)
+                        desktop = monitors.desktop_screens() or desktop
+                        # The ghosts kept off on the way are noted, to come back with their outlet.
+                        gone = ghosts - set(desktop)
+                        if gone:
+                            self._log("Ghost screen taken off the Windows desktop: "
+                                      + self._screen_names(gone))
+                        detached |= gone
+                        ghosts = {key for key in desktop if lit.get(key) is False}
+                heirs = self._heirs(self._lit_among(desktop, lit))
+                if ghosts and not heirs:
+                    self._note_display(
+                        f"Ghost screen {self._screen_names(ghosts)} left on the desktop: "
+                        "no other screen there is known to be lit"
+                    )
+                    ghosts = set()
+                ghosts = {key for key in ghosts if self._may_detach(key, now)}
+                if ghosts:
+                    try:
+                        taken = monitors.detach(ghosts, heirs)
+                    except monitors.DisplayConfigError as exc:
+                        taken = set()
+                        self._note_display(
+                            f"Could not take ghost screen {self._screen_names(ghosts)} "
+                            f"off the desktop: {exc}"
+                        )
+                    if taken:
+                        self._display_note = ""
+                        primary = next(
+                            (k for k, first in (monitors.desktop_screens() or {}).items() if first),
+                            "",
+                        )
+                        handed = any(desktop.get(key) for key in taken) and primary
+                        self._log(
+                            "Ghost screen taken off the Windows desktop: "
+                            + self._screen_names(taken)
+                            + (f" (primary screen now {self._screen_names({primary})})"
+                               if handed else "")
+                        )
+                        for key in taken:
+                            self._detach_times.setdefault(key, []).append(now)
+                    elif ghosts:
+                        self._note_display(
+                            f"Windows kept ghost screen {self._screen_names(ghosts)} on the desktop"
+                        )
+                    detached |= taken
+
+            # 3. What stays noted: off the desktop, yet still plugged in. A
+            #    screen whose detection went away with its power comes back
+            #    by itself when it returns; Windows needs no help there.
+            connected = monitors.connected_keys()
+            desktop = monitors.desktop_screens() or {}
+            remaining = sorted(
+                key for key in detached
+                if key not in desktop and (connected is None or key in connected)
+            )
+            if remaining != settings.detached_screens:
+                settings.detached_screens = remaining
+                self._save()
+
+    def _reattach(
+        self, keys: set[str], keep_off: set[str], heirs: list[str], now: float
+    ) -> set[str]:
+        """Put screens back on the desktop, log it, and space out the retries."""
+        try:
+            returned = monitors.reattach(keys, keep_off, heirs)
+        except monitors.DisplayConfigError as exc:
+            returned = set()
+            self._note_display(
+                f"Could not put {self._screen_names(keys)} back on the desktop: {exc}"
+            )
+        if returned:
+            self._display_note = ""
+            self._log(f"Back on the Windows desktop: {self._screen_names(returned)}")
+        for key in keys - returned:
+            self._reattach_retry[key] = now + REATTACH_RETRY_S
+        return returned
+
+    @staticmethod
+    def _lit_among(desktop: dict[str, bool], lit: dict[str, bool | None]) -> set[str]:
+        """Screens of the desktop that are lit; one on no outlet always is."""
+        return {key for key in desktop if lit.get(key, True) is True}
+
+    def _heirs(self, keys: set[str]) -> list[str]:
+        """Who may become the primary screen, best first, among `keys`.
+
+        The primary screen of the captured layout first: it is the one the
+        user chose. Then the boot screen, meant to be always there -- the
+        one the user also picked by hand, the day Windows had chosen a ghost.
+        """
+        order = [s.key for s in self.config.screens if s.primary]
+        boot = self.config.boot_screen_outlet()
+        if boot is not None and boot.monitor_key:
+            order.append(boot.monitor_key)
+        order += sorted(keys)
+        return [key for key in dict.fromkeys(order) if key in keys]
+
+    def release_screens(self) -> None:
+        """Put back every screen taken off the desktop: the application stops.
+
+        Without it, a screen taken off would stay so once its outlet is on
+        again, until Win+P > Extend -- the application would no longer be
+        there to do it.
+        """
+        detached = set(self.config.settings.detached_screens)
+        if not detached or not self.drives_devices:
+            return
+        # Called from the main thread: no waiting (see `_display_lock`). The
+        # list stays noted, and the next start puts them back.
+        if not self._display_lock.acquire(blocking=False):
+            self._log(f"Left off the desktop until the next start: {self._screen_names(detached)}")
+            return
+        try:
+            returned = monitors.reattach(detached, set())
+        except monitors.DisplayConfigError as exc:
+            self._log(f"Could not put {self._screen_names(detached)} back on the desktop: {exc}")
+            return
+        finally:
+            self._display_lock.release()
+        if returned:
+            self._log(f"Back on the Windows desktop: {self._screen_names(returned)}")
+        self.config.settings.detached_screens = sorted(detached - returned)
+        self._save()
+
+    def detached_labels(self) -> list[str]:
+        """Names of the screens taken off the desktop, for the interface."""
+        return [
+            self._screen_names({key}) for key in self.config.settings.detached_screens
+        ]
+
+    def _screens_lit(self) -> dict[str, bool | None]:
+        """For each screen linked to an outlet: is the outlet on? None if unknown.
+
+        Two outlets linked to the same screen -- a configuration error the
+        layout check reports -- light it as soon as one of them is on.
+        """
+        lit: dict[str, bool | None] = {}
+        for outlet in self.config.outlets:
+            key = outlet.monitor_key
+            if not key:
+                continue
+            state = self._outputs.get(outlet.ref)
+            if state or lit.get(key):
+                lit[key] = True
+            elif state is None or (key in lit and lit[key] is None):
+                lit[key] = None
+            else:
+                lit[key] = False
+        return lit
+
+    def _may_detach(self, key: str, now: float) -> bool:
+        """False if this ghost was taken off too often lately (see DETACH_MAX)."""
+        recent = [t for t in self._detach_times.get(key, []) if now - t < DETACH_WINDOW_S]
+        self._detach_times[key] = recent
+        if len(recent) < DETACH_MAX:
+            return True
+        self._note_display(
+            f"Windows keeps putting ghost screen {self._screen_names({key})} back on "
+            f"the desktop: left there for now"
+        )
+        return False
+
+    def _screen_names(self, keys: set[str]) -> str:
+        """Readable names of screens: the outlet powering them, failing that their key."""
+        names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
+        return ", ".join(sorted(names.get(key, key) for key in keys))
+
+    def _note_display(self, message: str) -> None:
+        """Log a display message, but not again on every refresh."""
+        if message != self._display_note:
+            self._display_note = message
+            self._log(message)
+
     def _switch_many(
         self, refs: list[str], on: bool, report: ApplyReport, urgent: bool = False
     ) -> list[str]:
@@ -1074,6 +1355,7 @@ class ScreenController:
                 continue
             try:
                 self.device_for(key).set_switch(switch_id, on)
+                self._outputs[ref] = on
                 done.append(ref)
             except ProtectedOutlet as exc:
                 report.errors.append(f"{ref}: {exc}")
