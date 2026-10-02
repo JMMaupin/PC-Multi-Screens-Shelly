@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Monitor profiles, sleep and window rescue · Shelly PC Screens</title>
-<meta name="description" content="What Shelly PC Screens does on a multi-monitor PC: monitor profiles, one-key switching, sleep and boot following, safeguards, window rescue, power history.">
+<meta name="description" content="What Shelly PC Screens does on a multi-monitor PC: monitor profiles, one-key switching, sleep and boot following, safeguards, window rescue, ghost screens, power history.">
 <link rel="canonical" href="https://jmmaupin.github.io/PC-Multi-Screens-Shelly/features.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Shelly PC Screens">
 <meta property="og:title" content="Monitor profiles, sleep and window rescue · Shelly PC Screens">
-<meta property="og:description" content="What Shelly PC Screens does on a multi-monitor PC: monitor profiles, one-key switching, sleep and boot following, safeguards, window rescue, power history.">
+<meta property="og:description" content="What Shelly PC Screens does on a multi-monitor PC: monitor profiles, one-key switching, sleep and boot following, safeguards, window rescue, ghost screens, power history.">
 <meta property="og:url" content="https://jmmaupin.github.io/PC-Multi-Screens-Shelly/features.html">
 <meta property="og:image" content="https://jmmaupin.github.io/PC-Multi-Screens-Shelly/assets/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -47,6 +47,7 @@
       <li><a href="#sleep">Sleep &amp; boot</a></li>
       <li><a href="#safety">Safeguards</a></li>
       <li><a href="#windows">Windows brought back</a></li>
+      <li><a href="#ghosts">Ghost screens</a></li>
       <li><a href="#identify">Identify displays</a></li>
       <li><a href="#history">Power history</a></li>
       <li><a href="#devices">Devices</a></li>
@@ -212,6 +213,64 @@
   <p>At the end of a profile change, a window left on a screen that went dark is moved to <strong>the nearest screen that is on</strong>, keeping its size, maximised again if it was, without stealing the focus. Windows straddling two screens, or deliberately parked off-screen by their program, are left alone.</p>
 </section>
 
+<section id="ghosts">
+  <h2>Ghost screens off the desktop</h2>
+  <p>An HDMI screen often stays listed by Windows once its power is cut: the cable itself keeps its detection alive. The panel is dark, yet Windows keeps it on the desktop, so new windows open on it and the mouse gets lost on it.</p>
+  <p>While its outlet is off, the app takes such a screen <strong>off the Windows desktop</strong>, as <em>Disconnect this display</em> does in the display settings, and puts it back <strong>as soon as its outlet is on again</strong>, whoever switched it: a profile, the menu, the Shelly app or the outlet's own button.</p>
+
+  <figure class="diagram">
+    <figcaption>Only the right-hand screen on. The main screen, on DisplayPort, left Windows with its power; Windows then made the dark HDMI screen its primary one, taskbar included.</figcaption>
+    <svg viewBox="0 0 900 270" role="img" aria-labelledby="ghostTitle">
+      <title id="ghostTitle">Left, Windows alone: the top screen has no power but stays on the desktop as the primary screen, with the taskbar, while the right-hand screen is the only one lit. Right, with the app: the top screen is taken off the desktop and the lit right-hand screen becomes primary, with the taskbar.</title>
+      <!-- Same desk as on the overview page: small screen on top, main in the middle. -->
+      <g transform="translate(100,20)">
+        <rect class="stroke-warn dash fill-soft" x="98" y="4" width="74" height="44" rx="4"/>
+        <rect class="fill-accent" x="102" y="40" width="66" height="5" rx="1"/>
+        <rect class="screen-off" x="4" y="58" width="84" height="56" rx="4"/>
+        <rect class="screen-off" x="94" y="54" width="112" height="62" rx="4"/>
+        <rect class="screen-on" x="212" y="58" width="84" height="56" rx="4"/>
+        <path class="line" d="M150 116v18M46 114v20M254 114v20M20 136h260"/>
+        <text x="180" y="22" class="t-warn t-small">primary, dark</text>
+        <text x="150" y="168" text-anchor="middle" class="t-strong">Windows alone</text>
+        <text x="150" y="188" text-anchor="middle" class="t-muted t-small">taskbar and new windows on a dark screen</text>
+      </g>
+      <path class="line" d="M430 85h40M462 79l8 6-8 6"/>
+      <g transform="translate(500,20)">
+        <rect class="screen-off" x="98" y="4" width="74" height="44" rx="4"/>
+        <rect class="screen-off" x="4" y="58" width="84" height="56" rx="4"/>
+        <rect class="screen-off" x="94" y="54" width="112" height="62" rx="4"/>
+        <rect class="screen-on" x="212" y="58" width="84" height="56" rx="4"/>
+        <rect class="fill-accent" x="216" y="106" width="76" height="5" rx="1"/>
+        <path class="line" d="M150 116v18M46 114v20M254 114v20M20 136h260"/>
+        <text x="180" y="22" class="t-muted t-small">off the desktop</text>
+        <text x="254" y="50" text-anchor="middle" class="t-on t-small">primary</text>
+        <text x="150" y="168" text-anchor="middle" class="t-strong">With the app</text>
+        <text x="150" y="188" text-anchor="middle" class="t-muted t-small">the lit screen takes over</text>
+      </g>
+      <g transform="translate(150,248)">
+        <rect class="screen-on" x="0" y="-10" width="16" height="11" rx="2"/>
+        <text x="24" y="0" class="t-small">powered</text>
+        <rect class="screen-off" x="110" y="-10" width="16" height="11" rx="2"/>
+        <text x="134" y="0" class="t-small">power cut</text>
+        <rect class="stroke-warn dash fill-soft" x="230" y="-10" width="16" height="11" rx="2"/>
+        <text x="254" y="0" class="t-small">power cut, kept on the desktop</text>
+        <rect class="fill-accent" x="470" y="-6" width="16" height="4" rx="1"/>
+        <text x="494" y="0" class="t-small">taskbar</text>
+      </g>
+    </svg>
+  </figure>
+
+  <ul>
+    <li><strong>The primary screen follows.</strong> A DisplayPort screen whose power is cut leaves Windows altogether. If it was the primary one, Windows picks another, often the ghost. The ghost hands the role over as it leaves: to the primary screen of your captured layout if it is lit, otherwise to the boot screen, otherwise to another lit screen.</li>
+    <li><strong>Never a desktop without a lit screen.</strong> If Windows kept nothing but ghosts, a lit screen is brought onto the desktop first. With no screen known to be lit, for instance while a power strip does not answer, the ghost is left where it is.</li>
+    <li><strong>Nothing saved in Windows.</strong> The change stays out of the display settings Windows remembers: after a crash or a restart, the desktop comes back as you arranged it. Quitting the app puts the screen back too.</li>
+    <li><strong>Out of the way when it should be.</strong> Nothing is taken off while <a href="#identify">Identify displays</a> runs, since it watches ghosts on purpose. If something keeps putting a ghost back, the app stops after ten tries in ten minutes rather than make windows jump. One checkbox in the Behaviour tab turns it all off.</li>
+  </ul>
+  <div class="callout">
+    <p><strong>The display settings still list it.</strong> Windows keeps showing the ghost there, numbered, because the HDMI cable keeps it detected: no software can change that. It holds no part of the desktop, and nothing lands on it.</p>
+  </div>
+</section>
+
 <section id="identify">
   <h2>Identify displays</h2>
   <p>The assistant cuts each screen outlet in turn and watches which monitor Windows loses, then powers it back. About twelve seconds per outlet; the others stay on meanwhile. Two identical monitors remain distinct, and the match survives reboots.</p>
@@ -234,7 +293,7 @@
     </div>
     <div class="card">
       <h3>Day to day</h3>
-      <p>While its outlet is off, the app takes it off the Windows desktop, as <em>Disconnect this display</em> would, and puts it back once the outlet is on again. Nothing opens on a dark screen any more.</p>
+      <p>While its outlet is off, the app takes it off the Windows desktop and puts it back once the outlet is on again: see <a href="#ghosts">ghost screens off the desktop</a>.</p>
     </div>
   </div>
   <figure class="shot">

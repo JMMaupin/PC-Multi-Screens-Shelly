@@ -31,7 +31,7 @@ are replaced with example values.
 | `add-device-found.png` | Add a Shelly device: the new strip found and selected | done, masked |
 | `history-window.png` | Consumption history of the PC's outlet | done |
 | `history-export.png` | History, Export menu open | done |
-| `behaviour-tab.png` | Settings → Behaviour | done |
+| `behaviour-tab.png` | Settings → Behaviour | to redo: 2.3 adds *Take ghost screens off the Windows desktop* under *Profiles and windows* |
 | `leds-dialog.png` | Devices → LEDs...: rings, night mode, push buttons | done |
 | `password-dialog.png` | Devices → Password... | done; DPAPI sentence updated to the 2.2 wording |
 | `services-dialog.png` | Devices → Services... | done |
