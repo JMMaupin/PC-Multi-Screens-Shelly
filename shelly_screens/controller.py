@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
@@ -55,6 +56,9 @@ REATTACH_RETRY_S = 60.0
 # to screen at every refresh. It is then left alone until the window passes.
 DETACH_MAX = 10
 DETACH_WINDOW_S = 600.0
+# Least draw accepted for the PC's outlet while this application runs,
+# when the off threshold is set even lower (see `host_pc_floor`).
+HOST_PC_MIN_W = 5.0
 
 LogFn = Callable[[str], None]
 
@@ -193,6 +197,20 @@ class ScreenController:
         # Last known output of each outlet, by reference: read from the
         # devices, then updated by every switching. Absent when unknown.
         self._outputs: dict[str, bool] = {}
+        # Last reading of each reachable outlet, power included: what the
+        # PC role is checked against.
+        self.last_states: dict[str, SwitchState] = {}
+        # True once the outlets on before a sleep have been noted, until the
+        # wake restores them.
+        self._noted_for_resume = False
+        # True once the PC has been located: a PC without a battery cannot
+        # change places while it runs, so the location holds until the next
+        # wake. Until then, every reading tries again.
+        self._location_settled = False
+        self._location_note = ""
+        # Called with the new location key -- None: at none -- whenever it
+        # changes, from the thread that read the outlets.
+        self.on_location: Callable[[str | None], None] | None = None
         # True while the identification assistant runs: it cuts each outlet
         # in turn and watches the screens, ghosts staying listed included.
         # Taking them off the desktop then would distort its measurement.
@@ -210,6 +228,9 @@ class ScreenController:
         # take note of the change -- whether Windows waits for them is not
         # documented, so the main thread never takes this lock blocking.
         self._display_lock = threading.RLock()
+        # Devices are searched for in parallel; adopting what was found is
+        # done one at a time.
+        self._connect_lock = threading.RLock()
         # False while another Windows session drives the devices. The
         # application stops asking anything of them then; this flag is the
         # last line: whatever path gets here, no outlet is switched.
@@ -228,21 +249,51 @@ class ScreenController:
 
     @property
     def fully_connected(self) -> bool:
-        """True if every configured device answers."""
-        return bool(self.config.devices) and len(self._devices) == len(self.config.devices)
+        """True if every device of the location the PC is at answers."""
+        return bool(self.config.devices) and not self.missing_here()
+
+    def missing_here(self) -> list[str]:
+        """Devices that do not answer where the PC is: every one at no location.
+
+        Another location's devices out of reach are expected: the PC is not
+        there. Counting them would leave the icon orange for a whole trip.
+        """
+        here = self.config.location
+        return [
+            device.key for device in self.config.devices
+            if device.key not in self._devices
+            and (here is None or self.config.location_of(device.key) == here)
+        ]
+
+    def _elsewhere(self, key: str) -> bool:
+        """True for a device at another location than the settled one."""
+        return (
+            self._location_settled
+            and self.config.location is not None
+            and self.config.location_of(key) != self.config.location
+        )
 
     def identity(self, key: str) -> discovery.DeviceIdentity | None:
         return self._identities.get(key)
 
     def connect_all(self, allow_scan: bool = True) -> dict[str, bool]:
-        """Resolve every configured device; return their state by key."""
-        results: dict[str, bool] = {}
-        for device_config in list(self.config.devices):
-            results[device_config.key] = (
-                self.connect_device(device_config.key, allow_scan, force=True)
-                is not None
+        """Resolve every configured device at once; return their state by key.
+
+        In parallel: a device out of reach costs seconds -- an mDNS name
+        that does not resolve takes three, before any timeout applies, then
+        a sweep of the network. One after the other, a PC away from its desk
+        waited for each of the desk's power strips before reaching the one
+        beside it, at every start and every wake.
+        """
+        keys = [device.key for device in self.config.devices]
+        if not keys:
+            return {}
+        with ThreadPoolExecutor(max_workers=len(keys)) as pool:
+            found = pool.map(
+                lambda key: self.connect_device(key, allow_scan, force=True) is not None,
+                keys,
             )
-        return results
+            return dict(zip(keys, found))
 
     def connect_device(
         self, key: str, allow_scan: bool = True, force: bool = False
@@ -270,54 +321,57 @@ class ScreenController:
             expected_mac=device_config.mac or None,
             allow_scan=allow_scan,
         )
-        if identity is None:
-            self._devices.pop(key, None)
-            self._identities.pop(key, None)
-            self._log(f"Device '{key}' not found on the local network")
-            return None
+        # The search above runs in parallel (see `connect_all`); what follows
+        # changes the configuration and saves it: one device at a time.
+        with self._connect_lock:
+            if identity is None:
+                self._devices.pop(key, None)
+                self._identities.pop(key, None)
+                self._log(f"Device '{key}' not found on the local network")
+                return None
 
-        address = discovery.address_of(identity.host)
-        changed = device_config.host != identity.host or device_config.ip != address
-        device_config.host = identity.host
-        device_config.ip = address or device_config.ip
-        device_config.device_id = identity.device_id
-        device_config.mac = identity.mac
-        if not device_config.kind:
-            device_config.kind = identity.app
+            address = discovery.address_of(identity.host)
+            changed = device_config.host != identity.host or device_config.ip != address
+            device_config.host = identity.host
+            device_config.ip = address or device_config.ip
+            device_config.device_id = identity.device_id
+            device_config.mac = identity.mac
+            if not device_config.kind:
+                device_config.kind = identity.app
 
-        was_connected = key in self._devices
-        self._identities[key] = identity
-        self._devices[key] = ShellyDevice(
-            identity.host,
-            password=device_config.get_password() or None,
-            protected=self.protected_switches(key),
-        )
-        count = self._switch_count(key)
-        if count:
-            self.config.ensure_outlets(key, count)
-        if not was_connected:
-            # A device that shows up may be new, reset, or back from a
-            # firmware change: its outputs then revert to the factory
-            # setting, which turns them all on at boot -- the PC's outlet
-            # included. We reapply the guarantee here rather than only at
-            # app launch, since the app may have been running for hours when
-            # the device has just come back to life.
-            self.enforce_power_on_state(key)
-            self.enforce_button_lock(key)
-        if changed:
-            self._save()
-        # Only log what tells us something: a first connection, or an
-        # address that moved. Repeating the same line on every call drowned
-        # the log -- a hundred and eleven lines for two devices -- right when
-        # it needed to be readable.
-        if changed or not was_connected:
-            where = (
-                f"{identity.host} ({address})"
-                if address and address != identity.host
-                else identity.host
+            was_connected = key in self._devices
+            self._identities[key] = identity
+            self._devices[key] = ShellyDevice(
+                identity.host,
+                password=device_config.get_password() or None,
+                protected=self.protected_switches(key),
             )
-            self._log(f"Device '{key}' connected at {where}")
-        return identity
+            count = self._switch_count(key)
+            if count:
+                self.config.ensure_outlets(key, count)
+            if not was_connected:
+                # A device that shows up may be new, reset, or back from a
+                # firmware change: its outputs then revert to the factory
+                # setting, which turns them all on at boot -- the PC's outlet
+                # included. We reapply the guarantee here rather than only at
+                # app launch, since the app may have been running for hours when
+                # the device has just come back to life.
+                self.enforce_power_on_state(key)
+                self.enforce_button_lock(key)
+            if changed:
+                self._save()
+            # Only log what tells us something: a first connection, or an
+            # address that moved. Repeating the same line on every call drowned
+            # the log -- a hundred and eleven lines for two devices -- right when
+            # it needed to be readable.
+            if changed or not was_connected:
+                where = (
+                    f"{identity.host} ({address})"
+                    if address and address != identity.host
+                    else identity.host
+                )
+                self._log(f"Device '{key}' connected at {where}")
+            return identity
 
     def protected_switches(self, device_key: str) -> set[int]:
         """Outputs of this device that no command may switch off."""
@@ -394,7 +448,8 @@ class ScreenController:
         than the Power Strip lacks the component, and is not concerned.
         """
         device = self._devices.get(device_key)
-        pc = self.config.host_pc_outlet()
+        # The PC's outlet at this device's location, wherever the PC is now.
+        pc = self.config.host_pc_at(self.config.location_of(device_key))
         if device is None or pc is None or pc.device != device_key:
             return False
         try:
@@ -492,6 +547,13 @@ class ScreenController:
         now = time.monotonic()
         for device_config in self.config.devices:
             key = device_config.key
+            # Once the PC is located, a silent device at another location is
+            # left alone until the next wake: it is out of reach because the
+            # PC is not there, and searching for it every minute -- a name
+            # that does not resolve, a sweep of the network -- would only
+            # slow down every reading.
+            if key not in self._devices and self._elsewhere(key):
+                continue
             # A device that has just failed is granted a respite. Polling it
             # again every five seconds amounted to overwhelming it at the
             # moment it was least able to stand, and that burst is what
@@ -532,7 +594,92 @@ class ScreenController:
             if now >= self._signal_due.get(key, 0.0):
                 self._refresh_signal(key, now)
         self._outputs = {ref: state.output for ref, state in states.items()}
+        self.last_states = dict(states)
+        self._locate()
         return states
+
+    def output(self, ref: str) -> bool | None:
+        """Last known output of an outlet, switchings included; None if unknown."""
+        return self._outputs.get(ref)
+
+    # -------------------------------------------------------------- location
+
+    def unsettle_location(self) -> None:
+        """Work out the location again at the next reading.
+
+        On wake -- the PC may have travelled while hibernated --, and when
+        a PC outlet or a device's location changes.
+        """
+        self._location_settled = False
+
+    def _locate(self) -> None:
+        """Find where the PC is, unless already settled."""
+        if self._location_settled:
+            return
+        key, why = self._find_location(self.last_states)
+        self._location_settled = key is not None
+        # Logged when the conclusion changes, not when a reading moves by
+        # a watt: while the PC is away, this runs at every refresh.
+        note = f"{key}|{why.partition(':')[0]}"
+        changed = key != self.config.location
+        self.config.select_location(key)
+        if note != self._location_note:
+            self._location_note = note
+            if key is not None:
+                self._log(f"Location: {self.config.location_label(key)} ({why})")
+            else:
+                self._log(f"At no known location: {why}")
+        if changed and self.on_location is not None:
+            self.on_location(key)
+
+    def _find_location(self, states: dict[str, SwitchState]) -> tuple[str | None, str]:
+        """The location the PC is at, and why; None when it is at none.
+
+        The PC is where its outlet draws power: a running PC cannot be
+        anywhere else. Its outlet elsewhere draws nothing, or does not
+        answer at all -- the power strip is out of reach.
+
+        Two outlets drawing like a PC -- another machine plugged in at the
+        other desk -- are told apart by the screens Windows sees; failing
+        that, the application stays at none rather than drive the wrong
+        place. A location without a PC outlet cannot be recognised that way:
+        it is chosen only if no PC outlet draws, and it is the only one
+        whose devices answer.
+        """
+        floor = self.host_pc_floor()
+        readings: dict[str, str] = {}
+        drawing = []
+        for location in self.config.locations:
+            pc = self.config.host_pc_at(location.key)
+            if pc is None:
+                continue
+            state = states.get(pc.ref)
+            readings[location.key] = (
+                f"{pc.ref} {state.apower:.0f} W" if state else f"{pc.ref} unreachable"
+            )
+            if state is not None and state.apower >= floor:
+                drawing.append(location.key)
+        if len(drawing) == 1:
+            return drawing[0], f"PC outlet {readings[drawing[0]]}"
+        if len(drawing) > 1:
+            seen = monitors.connected_keys() or set()
+            watched = [
+                key for key in drawing
+                if any(o.monitor_key in seen for o in self.config.outlets_at(key) if o.monitor_key)
+            ]
+            if len(watched) == 1:
+                return watched[0], "its screens are the ones Windows sees"
+            return None, "several PC outlets draw power: " + ", ".join(readings.values())
+        answering = [
+            location.key for location in self.config.locations
+            if self.config.host_pc_at(location.key) is None
+            and any(o.ref in states for o in self.config.outlets_at(location.key))
+        ]
+        if len(answering) == 1:
+            return answering[0], "its devices answer, and it has no PC outlet"
+        if readings:
+            return None, "no PC outlet draws power: " + ", ".join(readings.values())
+        return None, "no device answers"
 
     def _refresh_signal(self, key: str, now: float) -> None:
         """Re-read the Wi-Fi signal strength, without ever failing."""
@@ -616,6 +763,78 @@ class ScreenController:
         self._save()
         self._log(f"Device '{key}': password {'set' if password else 'removed'}")
 
+    def host_pc_floor(self) -> float:
+        """Least draw of the PC's outlet while the PC runs this application.
+
+        The off threshold: below it, the on-device script judges the PC off
+        at its first reading, and switches off everything it drives.
+        """
+        return max(HOST_PC_MIN_W, self.config.sensing.off_threshold_w)
+
+    def host_pc_refusal(self, ref: str) -> str:
+        """Why this outlet cannot take the PC role now; empty if it can.
+
+        A physical check, independent of any labelling: this application
+        runs on the PC, so the PC is on and its outlet draws power. An
+        outlet drawing less than a running PC is not the one -- a tick on
+        the wrong row, most likely. Giving it the role takes the protection
+        away from the real one: that is how a misplaced tick once cut the
+        PC. An outlet that cannot be read is refused too: what we cannot
+        check, we do not hand the PC's protection to.
+        """
+        outlet = self.config.outlet(ref)
+        if outlet is None:
+            return t("Unknown outlet: {ref}", ref=ref)
+        state = self.last_states.get(ref)
+        if state is None:
+            return t("{outlet} cannot be read right now, and only its power draw "
+                     "can show that it powers this PC. Reconnect its device and "
+                     "try again.", outlet=outlet.label)
+        floor = self.host_pc_floor()
+        if state.apower < floor:
+            return t("{outlet} draws {watts} W. This PC is running, so its outlet "
+                     "draws at least {floor} W: {outlet} cannot be the one.",
+                     outlet=outlet.label, watts=f"{state.apower:.0f}",
+                     floor=f"{floor:.0f}")
+        return ""
+
+    def assign_host_pc(self, location: str, ref: str | None) -> list[str]:
+        """Give the PC role at a location to this outlet, or to none.
+
+        Each location has its own PC outlet. Refused (PermissionError) when
+        the outlet does not draw like a running PC. The outlet losing the
+        role keeps a protection, unless it is known to draw less than a
+        running PC: it becomes critical, so nothing switches it off until
+        someone unticks that knowingly. Returns the outlets kept critical
+        that way.
+        """
+        if ref is not None:
+            reason = self.host_pc_refusal(ref)
+            if reason:
+                self._log(f"PC role refused for {ref}: it does not draw like a running PC")
+                raise PermissionError(reason)
+            location = self.config.outlet_location(ref)
+        kept: list[str] = []
+        previous = self.config.host_pc_at(location)
+        if previous is not None and previous.ref != ref:
+            state = self.last_states.get(previous.ref)
+            if (state is None or state.apower >= self.host_pc_floor()) and not previous.critical:
+                previous.critical = True
+                kept.append(previous.ref)
+        for outlet in self.config.outlets_at(location):
+            outlet.host_pc = outlet.ref == ref
+        # The PC outlets say where the PC is: work it out again.
+        self.config.select_location(self.config.location)
+        self.unsettle_location()
+        self._save()
+        self._log(
+            f"PC role: {previous.ref if previous else 'none'} -> {ref or 'none'}"
+            + (f"; kept critical: {', '.join(kept)}" if kept else "")
+        )
+        # Clients already open keep their old list of protected outputs.
+        self.refresh_protection()
+        return kept
+
     def set_outlet(self, ref: str, on: bool, keep_a_screen: bool = False) -> None:
         """Operate an outlet, honouring the safeguards.
 
@@ -645,19 +864,40 @@ class ScreenController:
             self.settle_ghosts()
 
     def apply_profile(self, name: str) -> ApplyReport:
-        """Apply a profile: the outlets, then the windows to rescue."""
+        """Apply a profile: the screens, then the windows to rescue."""
         profile = self.config.profile(name)
         if profile is None:
             raise KeyError(f"Unknown profile: {name}")
-        targets = {
-            outlet.ref: (profile.wants(outlet.ref) or outlet.never_switch_off)
-            for outlet in self.config.outlets
-        }
+        if self.config.location is not None and not self.config.profile_fits(profile):
+            # Another desk's profile: applied here, it would switch off every
+            # screen of this one, since it lists none of them.
+            report = ApplyReport(profile=profile.name)
+            report.errors.append(
+                f"profile '{profile.name}' has no screen at "
+                f"{self.config.location_label(self.config.location)}"
+            )
+            self._log(report.summary())
+            return report
         return self._apply_targets(
             profile_name=profile.name,
-            targets=targets,
+            targets=self._profile_targets(profile),
             profile=profile,
         )
+
+    def _profile_targets(self, profile: Profile) -> dict[str, bool]:
+        """What a profile commands: the screens, and nothing else.
+
+        An accessory stays as it is whatever the screen profile -- a lamp or
+        speakers going dark because one picked "Gaming" was the complaint --,
+        and so does an outlet whose type is not set: what we do not know, we
+        do not touch. Before this rule, a profile also cut every accessory
+        it did not list. Only the screens of the location the PC is at.
+        """
+        return {
+            outlet.ref: (profile.wants(outlet.ref) or outlet.never_switch_off)
+            for outlet in self.config.here_outlets()
+            if outlet.is_screen
+        }
 
     def apply_outlets(self, targets: dict[str, bool]) -> ApplyReport:
         """Apply a one-off configuration, outside of profiles.
@@ -687,15 +927,20 @@ class ScreenController:
         control the outlets: the boot screen -- and the USB hub carrying the
         keyboard, if it is marked critical -- must therefore stay powered,
         otherwise the next boot would happen blind and with no way to type.
+
+        Only at the location the PC is at: elsewhere, the outlets belong to
+        whoever is there, and its own script handles them.
         """
         keep_on = set(self.config.shutdown_refs_on())
-        targets = {outlet.ref: (outlet.ref in keep_on) for outlet in self.config.outlets}
+        targets = {outlet.ref: (outlet.ref in keep_on) for outlet in self.config.here_outlets()}
         # What is on now is what will need to be restored on wake. Note it
         # before switching off: afterwards, the information is gone.
         states = self.read_outlets()
         self.config.settings.resume_refs = [
-            ref for ref, state in states.items() if state.output and ref not in keep_on
+            ref for ref, state in states.items()
+            if state.output and ref not in keep_on and self.config.is_here(ref)
         ]
+        self._noted_for_resume = True
         return self._apply_targets(
             profile_name="Suspend",
             targets=targets,
@@ -709,39 +954,73 @@ class ScreenController:
         """Note the powered outlets, without commanding anything.
 
         Useful when the switching off is left to the on-device script: we
-        still need to know what to restore on wake.
+        still need to know what to restore on wake. The script is told as
+        well: an accessory switched by hand since the last profile must come
+        back at the next power-on as it is now.
         """
         keep_on = set(self.config.shutdown_refs_on())
         states = self.read_outlets()
         refs = [
-            ref for ref, state in states.items() if state.output and ref not in keep_on
+            ref for ref, state in states.items()
+            if state.output and ref not in keep_on and self.config.is_here(ref)
         ]
         self.config.settings.resume_refs = refs
+        self._noted_for_resume = True
         self._save()
+        try:
+            sensing.publish_for_boot(self, self.config)
+        except Exception as exc:  # noqa: BLE001 - never hold up the sleep
+            self._log(f"Outlets to restore not published: {exc}")
         return refs
 
     def resume(self) -> ApplyReport | None:
         """On wake, restore what was powered before sleep.
 
-        The last profile first, since that is the expressed intent. Failing
-        that, the state recorded just before the cut: without it, a user
-        who had never applied a profile woke up in front of dark screens,
-        with nothing to switch them back on.
-        """
-        name = self.config.settings.last_profile
-        if name and self.config.profile(name) is not None:
-            self._log(f"Resuming profile '{name}'")
-            return self.apply_profile(name)
+        Screens: the last profile first, since that is the expressed intent.
+        Failing that, the screens on just before the cut: without them, a
+        user who had never applied a profile woke up in front of dark
+        screens, with nothing to switch them back on.
 
-        refs = [r for r in self.config.settings.resume_refs if self.config.outlet(r)]
+        The other outlets the sleep switched off come back as they were,
+        whatever the profile: it does not decide for them. Those it left
+        alone are not touched -- the fallback used to switch off every
+        outlet it had not noted, an accessory kept on through the night
+        included.
+
+        The PC may have travelled while hibernated: it is located again
+        first, and nothing is restored if it is at no known location.
+        """
+        self.read_outlets()
+        if self.config.location is None:
+            self._log("Resume: the PC is at no known location, nothing restored")
+            self._noted_for_resume = False
+            return None
+        refs = [r for r in self.config.settings.resume_refs if self.config.is_here(r)]
+        # Only if this sleep was noted: a list left over from an earlier one
+        # would switch back on an accessory switched off by hand since.
+        noted, self._noted_for_resume = self._noted_for_resume, False
+        targets = {
+            ref: True for ref in refs
+            if noted and not self.config.outlet(ref).is_screen  # type: ignore[union-attr]
+        }
+        name = self.config.settings.last_profile
+        profile = self.config.profile(name) if name else None
+        if profile is not None:
+            self._log(f"Resuming profile '{name}'")
+            targets.update(self._profile_targets(profile))
+            return self._apply_targets(
+                profile_name=profile.name, targets=targets, profile=profile
+            )
+
         if not refs:
             self._log("Nothing to restore on resume")
             return None
         self._log(f"No profile set, restoring the outlets that were on: {refs}")
-        targets = {
+        targets.update({
             outlet.ref: (outlet.ref in refs or outlet.never_switch_off)
-            for outlet in self.config.outlets
-        }
+            for outlet in self.config.here_outlets()
+            if outlet.is_screen
+        })
         return self._apply_targets(
             profile_name="Resume",
             targets=targets,
@@ -766,6 +1045,13 @@ class ScreenController:
             if not states:
                 report.errors.append("No Shelly device is reachable")
                 return report
+            # The last word, whatever the caller: nothing is switched at a
+            # place the PC is not at -- another desk's screens, the suitcase's.
+            if self.config.location is None:
+                report.errors.append("the PC is at no known location: nothing switched")
+                self._log(report.summary())
+                return report
+            targets = {ref: want for ref, want in targets.items() if self.config.is_here(ref)}
 
             if keep_a_screen:
                 self._keep_a_screen(targets, states)
@@ -854,7 +1140,8 @@ class ScreenController:
         outputs = monitors.list_outputs()
         physical = monitors.physical_monitors(outputs)
         found = screen_layout.problems(
-            self.config.outlets,
+            # The screens of this location: another desk's are expected off.
+            self.config.here_outlets(),
             states,
             {m.key for m in physical},
             outputs or {},
@@ -920,13 +1207,18 @@ class ScreenController:
         applied, a requested capture. Otherwise it would judge the outlet
         state read before the operation against the screens after it. Its
         refusals are not logged: with screens off, they are the rule.
+
+        Nothing is recorded at no known location: the screens there -- a
+        hotel television -- belong to no layout worth keeping.
         """
+        if self.config.location is None:
+            return False
         if not self._lock.acquire(blocking=False):
             return False
         try:
             physical, outputs, found = self.check_screen_layout(states)
             self._note_ghosts(
-                screen_layout.ghosts(self.config.outlets, states, {m.key for m in physical})
+                screen_layout.ghosts(self.config.here_outlets(), states, {m.key for m in physical})
             )
             reading = tuple((m.key, m.rect, m.scale) for m in physical)
             stable = reading == self._layout_reading
@@ -989,7 +1281,11 @@ class ScreenController:
         """
         say = progress or (lambda _text: None)
         capture = LayoutCapture(False, "")
-        screens = [o for o in self.config.outlets if o.monitor_key]
+        if self.config.location is None:
+            capture.message = t("The PC is at no known location: there is no layout to capture.")
+            self._note_capture([capture.message])
+            return capture
+        screens = [o for o in self.config.here_outlets() if o.monitor_key]
         if not screens:
             capture.message = t("No outlet is linked to a screen yet: "
                                 "run Identify displays first.")

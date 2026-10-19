@@ -40,6 +40,7 @@ STATUS_COLORS = {
     "warning": (230, 155, 60, 255),  # a device is missing or rejects the password
     "offline": (220, 90, 70, 255),  # nothing responds any more
     "passive": (90, 140, 220, 255),  # another session drives the devices
+    "away": (165, 120, 215, 255),  # the PC is at none of its locations
 }
 BADGE_RING = (18, 20, 24, 255)  # dark ring, to stand out from the background
 

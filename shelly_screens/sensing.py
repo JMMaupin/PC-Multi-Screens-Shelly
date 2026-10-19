@@ -92,8 +92,13 @@ def controlled_outlets(config: AppConfig) -> list[OutletConfig]:
     well: an accessory meant to stay powered must not even appear in the
     on-device table, or the script would switch it off despite the stated
     intent.
+
+    Only the outlets of the location the PC is at: each location's PC
+    outlet carries its own script. One driving another desk's outlets
+    would switch them off as soon as the PC left -- its outlet then draws
+    nothing --, while the PC was in use over there.
     """
-    return [o for o in config.outlets if o.cuts_on_sleep]
+    return [o for o in config.here_outlets() if o.cuts_on_sleep]
 
 
 def outlet_index(config: AppConfig, ref: str) -> int:
@@ -179,16 +184,36 @@ def render(config: AppConfig) -> str:
 
 
 def profile_indexes(config: AppConfig, profile_name: str) -> list[int]:
-    """Indexes, in the on-device table, of the outlets powered by a profile."""
+    """Indexes, in the on-device table, of the screens powered by a profile."""
     profile = config.profile(profile_name)
     if profile is None:
         return []
     indexes = []
-    for ref in profile.outlets_on:
+    for ref in config.profile_screens(profile):
         index = outlet_index(config, ref)
         if index >= 0:
             indexes.append(index)
     return sorted(set(indexes))
+
+
+def boot_indexes(
+    controller: "ScreenController", config: AppConfig, profile_name: str
+) -> list[int]:
+    """What the script switches back on at the next PC power-on.
+
+    The screens of the profile, as it states them; the other outlets the
+    script drives, as they are now -- a profile does not decide for an
+    accessory. Empty when the profile has no screen (see `publish_profile`).
+    """
+    screens = profile_indexes(config, profile_name)
+    if not screens:
+        return []
+    others = [
+        index
+        for index, outlet in enumerate(controlled_outlets(config))
+        if not outlet.is_screen and controller.output(outlet.ref)
+    ]
+    return sorted(set(screens + others))
 
 
 def encode_profile(indexes: list[int]) -> str:
@@ -420,7 +445,7 @@ def publish_profile(
     """
     if not config.sensing.enabled or not config.sensing.pc_ref:
         return False
-    indexes = profile_indexes(config, profile_name)
+    indexes = boot_indexes(controller, config, profile_name)
     if not indexes:
         return False
     try:
@@ -429,6 +454,35 @@ def publish_profile(
         return True
     except Exception:  # noqa: BLE001 - a silent KVS must not block a profile
         return False
+
+
+def publish_for_boot(controller: "ScreenController", config: AppConfig) -> bool:
+    """Bring the outlets to switch back on up to date, as the PC goes to sleep.
+
+    Accessories may have been switched by hand since the last profile: the
+    script must find them as they are now. The last profile gives the
+    screens; without one, the outlets on right now give everything.
+
+    Only through a device already connected: a reconnection -- a network
+    scan at worst -- has no place while Windows waits to suspend.
+    """
+    if not config.sensing.enabled or not config.sensing.pc_ref:
+        return False
+    if host_device_key(config) not in controller.online_keys:
+        return False
+    name = config.settings.last_profile
+    if name and config.profile(name) is not None:
+        return publish_profile(controller, config, name)
+    indexes = [
+        index
+        for index, outlet in enumerate(controlled_outlets(config))
+        if controller.output(outlet.ref)
+    ]
+    if not indexes:
+        return False
+    device = controller.device_for(host_device_key(config))
+    device.call("KVS.Set", {"key": KVS_PROFILE_KEY, "value": encode_profile(indexes)})
+    return True
 
 
 def read_published_profile(controller: "ScreenController", config: AppConfig) -> list[int]:
@@ -864,7 +918,7 @@ def ensure_published(controller: "ScreenController", config: AppConfig) -> list[
     name = config.settings.last_profile
     if name and profile_indexes(config, name):
         publish_profile(controller, config, name)
-        return profile_indexes(config, name)
+        return boot_indexes(controller, config, name)
     return publish_current_state(controller, config)
 
 

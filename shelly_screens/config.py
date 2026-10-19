@@ -57,13 +57,15 @@ MACHINE_SETTINGS = (
 )
 STATE_SETTINGS = ("resume_refs", "detached_screens")
 USER_SETTINGS = (
-    "last_profile",
+    "last_profiles",
     "apply_profile_on_start",
     "theme",
     "language",
     "profile_hotkey",
     "rescue_offscreen_windows",
     "detach_ghost_screens",
+    "quick_outlets",
+    "keep_taskbar_autohide",
 )
 # Device and sensing fields the application updates by itself: an address
 # changed by DHCP, the id and fingerprint of the script it installed.
@@ -76,6 +78,11 @@ USER_SETTINGS = (
 # every account can decrypt it anyway (see `secrets_store`).
 DEVICE_STATE_FIELDS = ("host", "ip", "password")
 SENSING_STATE_FIELDS = ("script_id", "installed_fingerprint")
+
+# The location every device belongs to until another one is created. Its
+# devices carry no location in `machine.json`: a setup with a single
+# location -- the most common -- writes the file exactly as before.
+DEFAULT_LOCATION = "main"
 
 log = logging.getLogger("shelly_screens")
 
@@ -138,6 +145,8 @@ class DeviceConfig:
     # Never read this field directly: go through `get_password`.
     password: str | None = None
     switch_count: int = 0  # number of outputs found
+    # Key of the location the device sits at; empty for the first one.
+    location: str = ""
 
     def get_password(self) -> str:
         """Plain-text password, decrypted on use."""
@@ -170,7 +179,30 @@ class DeviceConfig:
             kind=str(data.get("kind", "")),
             password=data.get("password") or None,
             switch_count=int(data.get("switch_count", 0)),
+            location=str(data.get("location", "")),
         )
+
+
+@dataclass
+class LocationConfig:
+    """A place where the PC is used, and the devices found there.
+
+    The PC moves: a compact case carried from one desk to another, with a
+    power strip and screens of its own in the suitcase. Each place has its
+    devices, its PC outlet, its screens and its layout; the application
+    works out where the PC is from the outlet that feeds it (see
+    `ScreenController._find_location`), and drives that place only.
+    """
+
+    key: str
+    name: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LocationConfig":
+        return cls(key=str(data.get("key", "")), name=str(data.get("name", "")))
 
 
 @dataclass
@@ -201,10 +233,11 @@ class OutletConfig:
     # the behaviour of a master/slave power strip.
     host_pc: bool = False
     # What is plugged in: a screen, or an accessory (USB hub, speakers...).
-    # Accessories remain controllable by profiles, but fall outside the
-    # scope of the identification assistant: switching them off will not
-    # make any screen disappear, and testing them would only waste time
-    # and cause pointless power cuts.
+    # Profiles only switch screens: an accessory stays as it is whatever
+    # the screen profile chosen, and is switched by hand -- the menu, the
+    # quick switches. It also falls outside the scope of the
+    # identification assistant: switching it off will not make any screen
+    # disappear, and testing it would only cause pointless power cuts.
     kind: str = KIND_UNKNOWN
     # Does this outlet follow the PC's sleep? Screens do: that is the
     # whole point of the setup. Accessories only when asked -- switching
@@ -461,8 +494,12 @@ class Settings:
     switch_delay_ms: int = 250
     # Maximum time to wait for Windows to pick up the screens.
     display_settle_timeout_s: float = 20.0
-    # Last applied profile, reapplied on resume and at startup.
+    # Last applied profile, reapplied on resume and at startup: the one of
+    # the location the PC is at, empty while it is at none.
     last_profile: str = ""
+    # The last profile of each location, by location key, the one above
+    # included once saved: back at a desk, its own profile comes back.
+    last_profiles: dict[str, str] = field(default_factory=dict)
     # Outlets powered just before going to sleep. Without an applied
     # profile, this is the only record of what to restore on resume: a
     # profile name may be missing, the outlet state always exists.
@@ -489,6 +526,13 @@ class Settings:
     # that they are put back once their outlet is on again, even by an
     # instance started after the one that took them off.
     detached_screens: list[str] = field(default_factory=list)
+    # Outlets offered as on/off switches in the window of the profile
+    # shortcut: the accessories one switches by hand -- speakers, a desk
+    # lamp --, which profiles leave alone.
+    quick_outlets: list[str] = field(default_factory=list)
+    # Put the taskbar's auto-hide back whenever Windows drops it: it
+    # sometimes does when screens come and go.
+    keep_taskbar_autohide: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -506,6 +550,9 @@ class Settings:
                 data.get("display_settle_timeout_s", defaults.display_settle_timeout_s)
             ),
             last_profile=str(data.get("last_profile", "")),
+            last_profiles={
+                str(k): str(v) for k, v in (data.get("last_profiles") or {}).items()
+            },
             resume_refs=[str(r) for r in data.get("resume_refs", [])],
             apply_profile_on_start=bool(
                 data.get("apply_profile_on_start", defaults.apply_profile_on_start)
@@ -521,6 +568,10 @@ class Settings:
                 data.get("detach_ghost_screens", defaults.detach_ghost_screens)
             ),
             detached_screens=[str(k) for k in data.get("detached_screens", [])],
+            quick_outlets=[str(r) for r in data.get("quick_outlets", [])],
+            keep_taskbar_autohide=bool(
+                data.get("keep_taskbar_autohide", defaults.keep_taskbar_autohide)
+            ),
         )
 
 
@@ -533,10 +584,21 @@ class AppConfig:
     profiles: list[Profile] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
     sensing: PowerSensing = field(default_factory=PowerSensing)
-    # Position of the screens on the desktop, recorded while they were all on.
+    # The places the PC is used at; the first one holds every device not
+    # assigned elsewhere.
+    locations: list[LocationConfig] = field(default_factory=list)
+    # Position of the screens on the desktop, recorded while they were all
+    # on: those of the location the PC is at, empty while it is at none.
     screens: list[ScreenPosition] = field(default_factory=list)
     # Time of the last layout capture (Unix time), 0 if none.
     screens_captured_at: float = 0.0
+    # What each location keeps of its own, by location key: its screen
+    # layout, and the state of the script on its PC outlet's device. The
+    # location the PC is at has it in the fields above, and here once saved.
+    location_states: dict[str, dict] = field(default_factory=dict)
+    # Key of the location the PC is at; None while it is at none, or not
+    # known yet. Worked out as the application runs, never saved.
+    location: str | None = field(default=None, compare=False, repr=False)
     # Screens proven to be on no outlet: they stayed on while the
     # assistant cut every screen outlet. Only this test proves it -- a
     # wall-powered screen cannot be told apart any other way.
@@ -577,11 +639,204 @@ class AppConfig:
     def outlets_of(self, device_key: str) -> list[OutletConfig]:
         return [o for o in self.outlets if o.device == device_key]
 
-    def all_on_profile(self) -> Profile:
-        """The built-in profile, recomputed: it follows added or removed outlets."""
-        return Profile(
-            name=ALL_ON_PROFILE, outlets_on=self.refs(), order=-1, builtin=True
+    # ---------------------------------------------------------- locations
+
+    def location_keys(self) -> list[str]:
+        return [location.key for location in self.locations]
+
+    def location_config(self, key: str | None) -> LocationConfig | None:
+        for location in self.locations:
+            if location.key == key:
+                return location
+        return None
+
+    def location_label(self, key: str | None) -> str:
+        location = self.location_config(key)
+        if location is None:
+            return ""
+        if location.name:
+            return location.name
+        return t("Main location") if location.key == DEFAULT_LOCATION else location.key
+
+    def location_of(self, device_key: str) -> str:
+        """Key of the location a device sits at."""
+        device = self.device(device_key)
+        key = device.location if device is not None else ""
+        if key and self.location_config(key) is not None:
+            return key
+        return self.locations[0].key if self.locations else DEFAULT_LOCATION
+
+    def outlet_location(self, ref: str) -> str:
+        return self.location_of(parse_ref(ref)[0])
+
+    def outlets_at(self, key: str | None) -> list[OutletConfig]:
+        """The outlets of a location; none for None."""
+        if key is None:
+            return []
+        return [o for o in self.outlets if self.location_of(o.device) == key]
+
+    def here_outlets(self) -> list[OutletConfig]:
+        """The outlets of the location the PC is at; none while it is at none."""
+        return self.outlets_at(self.location)
+
+    def is_here(self, ref: str) -> bool:
+        return self.location is not None and self.outlet_location(ref) == self.location
+
+    def has_several_locations(self) -> bool:
+        return len(self.locations) > 1
+
+    def select_location(self, key: str | None) -> None:
+        """Make this location the one the PC is at; None: at none of them.
+
+        Its layout, script state and last profile take the place of the
+        previous location's, which are kept for its return.
+        """
+        if key is not None and self.location_config(key) is None:
+            key = None
+        if key != self.location:
+            if self.location:
+                self.location_states[self.location] = self._active_state()
+                self.settings.last_profiles[self.location] = self.settings.last_profile
+            self.location = key
+            stored = self.location_states.get(key, {}) if key is not None else {}
+            self.screens = [ScreenPosition.from_dict(s) for s in stored.get("screens", [])]
+            self.screens_captured_at = float(stored.get("screens_captured_at", 0.0))
+            self.sensing.script_id = int(stored.get("script_id", 0))
+            self.sensing.installed_fingerprint = str(stored.get("installed_fingerprint", ""))
+            self.settings.last_profile = (
+                self.settings.last_profiles.get(key, "") if key is not None else ""
+            )
+        pc = self.host_pc_outlet()
+        self.sensing.pc_ref = pc.ref if pc is not None else ""
+
+    def _active_state(self) -> dict[str, Any]:
+        """What the current location keeps of its own, as saved."""
+        return {
+            "screens": [screen.to_dict() for screen in self.screens],
+            "screens_captured_at": self.screens_captured_at,
+            "script_id": self.sensing.script_id,
+            "installed_fingerprint": self.sensing.installed_fingerprint,
+        }
+
+    def assign_location(self, device_key: str, name: str) -> str:
+        """Put a device at the location of that name, created if needed.
+
+        Returns the location key. A location left without any device goes
+        away, the first one excepted: it holds whatever has no other place.
+        """
+        device = self.device(device_key)
+        name = name.strip()
+        if device is None or not name:
+            return ""
+        location = next(
+            (loc for loc in self.locations
+             if self.location_label(loc.key).casefold() == name.casefold()),
+            None,
         )
+        if location is None:
+            location = LocationConfig(key=self._location_key(name), name=name)
+            self.locations.append(location)
+        device.location = "" if location.key == self.locations[0].key else location.key
+        self._drop_empty_locations()
+        self.normalise_roles()
+        return location.key
+
+    def rename_location(self, key: str, name: str) -> bool:
+        """Give a location another name; false if taken by another one."""
+        name = name.strip()
+        location = self.location_config(key)
+        if location is None or not name:
+            return False
+        if any(
+            loc.key != key and self.location_label(loc.key).casefold() == name.casefold()
+            for loc in self.locations
+        ):
+            return False
+        location.name = name
+        return True
+
+    def _location_key(self, name: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "", name.lower())[:12] or "place"
+        taken = set(self.location_keys())
+        key, index = slug, 2
+        while key in taken:
+            key, index = f"{slug}{index}", index + 1
+        return key
+
+    def _drop_empty_locations(self) -> None:
+        used = {self.location_of(device.key) for device in self.devices}
+        self.locations = [
+            loc for index, loc in enumerate(self.locations) if index == 0 or loc.key in used
+        ]
+        known = set(self.location_keys())
+        self.location_states = {k: v for k, v in self.location_states.items() if k in known}
+        self.settings.last_profiles = {
+            k: v for k, v in self.settings.last_profiles.items() if k in known
+        }
+        if self.location is not None and self.location not in known:
+            self.select_location(None)
+
+    def _init_locations(self) -> None:
+        """Give every device a location, and file what belongs to one there.
+
+        A configuration from before locations has none: everything goes to
+        the default location -- the layout, the script's state and the last
+        profile included, since they were recorded where the PC always stood.
+        Nothing is active then until the PC has been located.
+        """
+        if not self.locations:
+            self.locations = [LocationConfig(DEFAULT_LOCATION)]
+        first = self.locations[0].key
+        for device in self.devices:
+            if device.location == first or self.location_config(device.location) is None:
+                device.location = ""
+        legacy = self._active_state()
+        if not self.location_states and (
+            self.screens or self.screens_captured_at
+            or self.sensing.script_id or self.sensing.installed_fingerprint
+        ):
+            self.location_states[first] = legacy
+        if not self.settings.last_profiles and self.settings.last_profile:
+            self.settings.last_profiles[first] = self.settings.last_profile
+        self._drop_empty_locations()
+        self.location = ""  # forces `select_location` to load nothing
+        self.select_location(None)
+
+    # ------------------------------------------------------------ profiles
+
+    def all_on_profile(self) -> Profile:
+        """The built-in profile, recomputed: every screen here, as declared now."""
+        return Profile(
+            name=ALL_ON_PROFILE, outlets_on=self.screen_refs(), order=-1, builtin=True
+        )
+
+    def screen_refs(self) -> list[str]:
+        """The outlets profiles switch: the screens of the location the PC is at."""
+        return [outlet.ref for outlet in self.here_outlets() if outlet.is_screen]
+
+    def profile_screens(self, profile: Profile) -> list[str]:
+        """The screens a profile switches on, at the location the PC is at.
+
+        Only screens: a profile saved before profiles were limited to them
+        may still list an accessory, which no longer means anything.
+        """
+        return [ref for ref in self.screen_refs() if profile.wants(ref)]
+
+    def profile_fits(self, profile: Profile) -> bool:
+        """True if the profile belongs where the PC is.
+
+        A profile belongs to the locations of the screens it lists: a desk's
+        profile has nothing to say about the screens in the suitcase. One
+        that lists no screen at all fits anywhere. None fits while the PC is
+        at no location.
+        """
+        if self.location is None:
+            return False
+        screens = [
+            ref for ref in profile.outlets_on
+            if (outlet := self.outlet(ref)) is not None and outlet.is_screen
+        ]
+        return profile.builtin or not screens or any(self.is_here(ref) for ref in screens)
 
     @staticmethod
     def is_reserved_name(name: str) -> bool:
@@ -597,9 +852,16 @@ class AppConfig:
                 return profile
         return None
 
-    def sorted_profiles(self) -> list[Profile]:
-        """The built-in profile first, then the user's in their order."""
-        return [self.all_on_profile()] + self.user_profiles()
+    def sorted_profiles(self, here_only: bool = False) -> list[Profile]:
+        """The built-in profile first, then the user's in their order.
+
+        `here_only` keeps those that fit the location the PC is at: what the
+        menu and the shortcut offer. The settings list them all.
+        """
+        profiles = [self.all_on_profile()] + self.user_profiles()
+        if here_only:
+            profiles = [profile for profile in profiles if self.profile_fits(profile)]
+        return profiles
 
     def user_profiles(self) -> list[Profile]:
         return sorted(self.profiles, key=lambda p: (p.order, p.name.lower()))
@@ -625,11 +887,17 @@ class AppConfig:
         return len(self.devices)
 
     def add_device(self, device: DeviceConfig) -> DeviceConfig:
-        """Add a device, giving it a free key if needed."""
+        """Add a device, giving it a free key if needed.
+
+        It joins the location the PC is at: a device is found on the network
+        where the PC stands, most likely on the desk next to it.
+        """
         if not device.key:
             device.key = make_key(device.kind or device.device_id, self.device_keys())
         elif self.device(device.key) is not None:
             device.key = make_key(device.key, self.device_keys())
+        if self.locations and self.location and self.location != self.locations[0].key:
+            device.location = self.location
         self.devices.append(device)
         return device
 
@@ -657,6 +925,10 @@ class AppConfig:
         self.settings.resume_refs = [
             self._repoint(ref, old_key, new_key)
             for ref in self.settings.resume_refs
+        ]
+        self.settings.quick_outlets = [
+            self._repoint(ref, old_key, new_key)
+            for ref in self.settings.quick_outlets
         ]
         return True
 
@@ -689,19 +961,22 @@ class AppConfig:
         ]
 
     def boot_screen_outlet(self) -> OutletConfig | None:
-        """The outlet that must stay powered when the PC shuts down."""
-        for outlet in self.outlets:
+        """The outlet that must stay powered when the PC shuts down, here."""
+        return self.boot_screen_at(self.location)
+
+    def boot_screen_at(self, key: str | None) -> OutletConfig | None:
+        for outlet in self.outlets_at(key):
             if outlet.boot_screen:
                 return outlet
         return None
 
     def leaves_a_screen(self, powered: set[str]) -> bool:
-        """True if these powered outlets leave at least one screen on.
+        """True if these powered outlets leave at least one screen on, here.
 
         Nothing to protect without a declared screen outlet, nor when a
         screen depends on no outlet: that one stays on whatever is cut.
         """
-        screens = [outlet.ref for outlet in self.outlets if outlet.is_screen]
+        screens = self.screen_refs()
         if not screens or self.unswitched_screens:
             return True
         return any(ref in powered for ref in screens)
@@ -713,21 +988,25 @@ class AppConfig:
         that must never be missing; failing that, the first declared
         screen. `candidates` rules out outlets we could not command.
         """
-        screens = [o for o in self.outlets if o.is_screen and o.ref in candidates]
+        screens = [o for o in self.here_outlets() if o.is_screen and o.ref in candidates]
         boot = self.boot_screen_outlet()
         if boot is not None and boot in screens:
             return boot
         return screens[0] if screens else None
 
     def host_pc_outlet(self) -> OutletConfig | None:
-        """The outlet powering the PC, if known."""
-        for outlet in self.outlets:
+        """The outlet powering the PC where it is, if known."""
+        return self.host_pc_at(self.location)
+
+    def host_pc_at(self, key: str | None) -> OutletConfig | None:
+        """The PC's outlet at a location: each location has its own."""
+        for outlet in self.outlets_at(key):
             if outlet.host_pc:
                 return outlet
         return None
 
     def shutdown_refs_on(self) -> list[str]:
-        """Outlets to leave powered when the PC sleeps or shuts down.
+        """Outlets to leave powered when the PC sleeps or shuts down, here.
 
         The boot screen is only among them if nothing can switch it back
         on. As soon as the on-device script watches the power draw, it
@@ -735,11 +1014,12 @@ class AppConfig:
         only waste energy, and would defeat the very purpose of sensing
         -- cutting everything at shutdown.
         """
-        keep = [outlet.ref for outlet in self.outlets if not outlet.cuts_on_sleep]
+        here = self.here_outlets()
+        keep = [outlet.ref for outlet in here if not outlet.cuts_on_sleep]
         if not self.sensing.enabled:
             keep += [
                 outlet.ref
-                for outlet in self.outlets
+                for outlet in here
                 if outlet.boot_screen and outlet.ref not in keep
             ]
         return keep
@@ -747,44 +1027,68 @@ class AppConfig:
     # -------------------------------------------------------- persistence
 
     def machine_dict(self) -> dict[str, Any]:
-        """What `machine.json` holds: the hardware and how to treat it."""
+        """What `machine.json` holds: the hardware and how to treat it.
+
+        With a single location, nothing about locations is written: the
+        file stays the same as before they existed, and an update leaves no
+        hardware change waiting for an administrator.
+        """
         settings = self.settings.to_dict()
-        sensing = self.sensing.to_dict()
-        return {
+        sensing = {
+            k: v for k, v in self.sensing.to_dict().items() if k not in SENSING_STATE_FIELDS
+        }
+        # The application derives it from the location the PC is at; the
+        # file keeps the first location's, which does not change as the PC
+        # travels.
+        first_pc = self.host_pc_at(self.locations[0].key) if self.locations else None
+        sensing["pc_ref"] = first_pc.ref if first_pc is not None else ""
+        data: dict[str, Any] = {
             "version": CONFIG_VERSION,
             "devices": [
-                {k: v for k, v in device.to_dict().items() if k not in DEVICE_STATE_FIELDS}
+                {
+                    k: v for k, v in device.to_dict().items()
+                    if k not in DEVICE_STATE_FIELDS and not (k == "location" and not v)
+                }
                 for device in self.devices
             ],
+        }
+        if self.has_several_locations() or any(loc.name for loc in self.locations):
+            data["locations"] = [location.to_dict() for location in self.locations]
+        data.update({
             "outlets": [outlet.to_dict() for outlet in self.outlets],
-            "sensing": {k: v for k, v in sensing.items() if k not in SENSING_STATE_FIELDS},
+            "sensing": sensing,
             "settings": {k: settings[k] for k in MACHINE_SETTINGS},
             "unswitched_screens": sorted(set(self.unswitched_screens)),
             "default_profiles": [
                 profile.to_dict()
                 for profile in sorted(self.default_profiles, key=lambda p: p.order)
             ],
-        }
+        })
+        return data
 
     def state_dict(self) -> dict[str, Any]:
         """What `state.json` holds: what the application notes as it runs."""
         settings = self.settings.to_dict()
-        sensing = self.sensing.to_dict()
+        locations = {key: dict(value) for key, value in self.location_states.items()}
+        if self.location:
+            locations[self.location] = self._active_state()
         return {
             "version": CONFIG_VERSION,
             "devices": {
                 device.key: {k: getattr(device, k) for k in DEVICE_STATE_FIELDS}
                 for device in self.devices
             },
-            "sensing": {k: sensing[k] for k in SENSING_STATE_FIELDS},
             "settings": {k: settings[k] for k in STATE_SETTINGS},
-            "screens": [screen.to_dict() for screen in self.screens],
-            "screens_captured_at": self.screens_captured_at,
+            "locations": locations,
         }
 
     def user_dict(self) -> dict[str, Any]:
         """What `user.json` holds: this account's profiles and preferences."""
         settings = self.settings.to_dict()
+        last = dict(self.settings.last_profiles)
+        if self.location:
+            last[self.location] = self.settings.last_profile
+        settings["last_profiles"] = last
         return {
             "version": CONFIG_VERSION,
             "profiles": [profile.to_dict() for profile in self.user_profiles()],
@@ -797,7 +1101,8 @@ class AppConfig:
         The interface already ensures it, but a hand-edited file -- or a
         half-migrated configuration -- could carry two boot screens. The
         first of each role is kept, because two rival outlets would make
-        the shutdown behaviour unpredictable.
+        the shutdown behaviour unpredictable. Unique per location: each
+        place has its own PC outlet and its own boot screen.
         """
         # An outlet associated with a screen is one: infer it rather than
         # asking again for what is already known.
@@ -806,12 +1111,18 @@ class AppConfig:
                 outlet.kind = KIND_SCREEN
 
         for attribute in ("boot_screen", "host_pc"):
-            seen = False
+            seen: set[str] = set()
             for outlet in self.outlets:
                 if getattr(outlet, attribute):
-                    if seen:
+                    where = self.location_of(outlet.device)
+                    if where in seen:
                         setattr(outlet, attribute, False)
-                    seen = True
+                        # A second PC outlet -- a device moved to a location
+                        # that already had one -- may well be the real one:
+                        # it keeps its protection, as critical.
+                        if attribute == "host_pc":
+                            outlet.critical = True
+                    seen.add(where)
 
         self._heal_refs()
 
@@ -832,6 +1143,9 @@ class AppConfig:
         self.settings.resume_refs = [
             ref for ref in self.settings.resume_refs if ref in known
         ]
+        self.settings.quick_outlets = [
+            ref for ref in self.settings.quick_outlets if ref in known
+        ]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], paths: DataPaths) -> "AppConfig":
@@ -843,14 +1157,20 @@ class AppConfig:
             profiles=[Profile.from_dict(item) for item in data.get("profiles", [])],
             settings=Settings.from_dict(data.get("settings", {})),
             sensing=PowerSensing.from_dict(data.get("sensing", {})),
+            locations=[LocationConfig.from_dict(item) for item in data.get("locations", [])],
             screens=[ScreenPosition.from_dict(item) for item in data.get("screens", [])],
             screens_captured_at=float(data.get("screens_captured_at", 0.0)),
+            location_states={
+                str(k): dict(v) for k, v in (data.get("location_states") or {}).items()
+                if isinstance(v, dict)
+            },
             unswitched_screens=[str(k) for k in data.get("unswitched_screens", [])],
             default_profiles=[
                 Profile.from_dict(item) for item in data.get("default_profiles", [])
             ],
             paths=paths,
         )
+        config._init_locations()
         config.normalise_roles()
         config._adopt_all_on()
         return config
@@ -950,8 +1270,13 @@ class AppConfig:
         """Replace the shared parts with those of a merged configuration."""
         fresh = AppConfig.from_dict(merged, paths=self.paths)
         for name in ("devices", "outlets", "sensing", "settings", "screens",
-                     "screens_captured_at", "unswitched_screens", "default_profiles"):
+                     "screens_captured_at", "unswitched_screens", "default_profiles",
+                     "locations", "location_states"):
             setattr(self, name, getattr(fresh, name))
+        # The fresh copy is at no location: bring back what belongs to the
+        # one the PC is at, as just read.
+        here, self.location = self.location, None
+        self.select_location(here)
 
 
 def _mtime(path: Path) -> int:
@@ -1136,6 +1461,10 @@ def merge_files(
             **user.get("settings", {}),
         },
         "sensing": {**machine.get("sensing", {}), **state.get("sensing", {})},
+        "locations": machine.get("locations", []),
+        "location_states": state.get("locations", {}),
+        # Before locations, the state held a single layout: it goes to the
+        # first location (see `AppConfig._init_locations`).
         "screens": state.get("screens", []),
         "screens_captured_at": state.get("screens_captured_at", 0.0),
         "unswitched_screens": machine.get("unswitched_screens", []),

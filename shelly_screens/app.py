@@ -32,12 +32,16 @@ from .win import hotkey as hotkey_module
 from .win import icon as icon_module
 from .win import monitors
 from .win import session as session_module
+from .win import taskbar
 from .win.shell import WM_SHOW_SETTINGS, MenuItem, TrayWindow
 
 from . import __version__, product
 
 APP_NAME = product.APP_NAME
 REFRESH_INTERVAL_MS = 5000
+# After Windows refused to hide the taskbar again, wait this long before
+# trying anew: insisting at every refresh would only fill the log.
+TASKBAR_RETRY_S = 300.0
 
 
 class Application:
@@ -84,6 +88,12 @@ class Application:
         # refreshing is periodic, a balloon every five seconds would be
         # unbearable.
         self._auth_warned: set[str] = set()
+        # Before this time, a taskbar left visible is not corrected again.
+        self._taskbar_retry_at = 0.0
+        # Set when the PC has just been located somewhere: the scripts of
+        # that location are brought up to date at the next refresh.
+        self._location_changed = False
+        self.controller.on_location = self._on_location
 
     # ------------------------------------------------------------------ log
 
@@ -169,22 +179,9 @@ class Application:
             # Protected outputs are set on connection; we apply them again
             # here in case the configuration changed between two launches.
             self.controller.refresh_protection()
+            # Locates the PC, and then brings that location's scripts up to
+            # date (see `_sync_location`).
             self._refresh_states()
-            # Without a stored profile, the on-device script would only turn
-            # the boot screen back on: we leave it at least the current state.
-            from . import sensing
-
-            changed = sensing.sync_installed(self.controller, self.config)
-            if changed:
-                self.log(f"On-device script {changed}")
-            # The probe sees the consumption while the PC sleeps: the
-            # history depends on it, so it must be installed and up to date.
-            probe = sensing.sync_probe(self.controller, self.config)
-            if probe:
-                self.log(f"On-device probe {probe}")
-            published = sensing.ensure_published(self.controller, self.config)
-            if published:
-                self.log(f"Published outlets for the on-device script: {published}")
             if at_startup and self.config.settings.apply_profile_on_start:
                 name = self.config.settings.last_profile
                 if name and self.config.profile(name):
@@ -205,11 +202,46 @@ class Application:
 
     # ----------------------------------------------------------------- state
 
+    def _on_location(self, _key: str | None) -> None:
+        """The PC has been located somewhere else: from the reading thread."""
+        self._location_changed = True
+
+    def _sync_location(self) -> None:
+        """Bring the scripts of the location the PC is at up to date.
+
+        Each location's PC outlet carries its own: the first time the PC is
+        used somewhere, they are installed there.
+        """
+        if self.config.location is None:
+            return
+        from . import sensing
+
+        try:
+            changed = sensing.sync_installed(self.controller, self.config)
+            if changed:
+                self.log(f"On-device script {changed}")
+            # The probe sees the consumption while the PC sleeps: the
+            # history depends on it, so it must be installed and up to date.
+            probe = sensing.sync_probe(self.controller, self.config)
+            if probe:
+                self.log(f"On-device probe {probe}")
+            # Without a stored profile, the on-device script would only turn
+            # the boot screen back on: we leave it at least the current state.
+            published = sensing.ensure_published(self.controller, self.config)
+            if published:
+                self.log(f"Published outlets for the on-device script: {published}")
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001 - the outlets stay driven without it
+            self.log(f"On-device scripts not brought up to date: {exc}")
+
     def _refresh_states(self) -> None:
         """Rereads the outlet states and updates the icon."""
         try:
             self.states = self.controller.read_outlets()
             self.online = bool(self.states)
+            if self._location_changed:
+                self._location_changed = False
+                self._sync_location()
             try:
                 self.history.feed(self.states)
             except Exception as exc:  # noqa: BLE001 - never at the expense of control
@@ -222,7 +254,34 @@ class Application:
             self.online = False
             self.log(f"Refresh failed: {exc}")
         self._warn_about_auth_failures()
+        # After the ghosts: taking one off the desktop is one of the screen
+        # changes that make Windows drop the auto-hide.
+        self.keep_taskbar_hidden()
         self._update_icon()
+
+    def keep_taskbar_hidden(self, force: bool = False) -> None:
+        """Put the taskbar's auto-hide back if Windows dropped it.
+
+        Off the message thread: the shell answers through Explorer, and a
+        hung Explorer must not freeze the tray icon. `force` ignores the
+        pause after a refusal -- the box has just been ticked.
+        """
+        if not self.config.settings.keep_taskbar_autohide:
+            return
+        if not force and time.monotonic() < self._taskbar_retry_at:
+            return
+        try:
+            if taskbar.auto_hide() is not False:
+                return  # hidden already, or no taskbar to set
+            if taskbar.set_auto_hide(True):
+                self._taskbar_retry_at = 0.0
+                self.log("Taskbar auto-hide was off: turned back on")
+            else:
+                self._taskbar_retry_at = time.monotonic() + TASKBAR_RETRY_S
+                self.log("Taskbar auto-hide is off, and Windows did not take it back")
+        except OSError as exc:
+            self._taskbar_retry_at = time.monotonic() + TASKBAR_RETRY_S
+            self.log(f"Taskbar auto-hide not checked: {exc}")
 
     def _warn_about_auth_failures(self) -> None:
         """Warns only once per device that refuses the password."""
@@ -252,6 +311,8 @@ class Application:
         """
         if not self.in_control:
             status = "passive"
+        elif self.config.devices and self.config.location is None:
+            status = "away"
         else:
             status = icon_module.status_for(
                 self._outlet_states(),
@@ -267,14 +328,18 @@ class Application:
             return f"{APP_NAME} - " + t("driven by {driver}", driver=self._driver_label())
         if not self.config.devices:
             return f"{APP_NAME} - no device configured"
+        if self.config.location is None:
+            return f"{APP_NAME} - " + t("at no known location")
         if not self.online:
             return f"{APP_NAME} - no device reachable"
         states = self._outlet_states()
         total = sum(state.apower for state in self.states.values())
         profile = self.config.settings.last_profile or "no profile"
+        if self.config.has_several_locations():
+            profile = f"{self.config.location_label(self.config.location)} - {profile}"
         suffix = ""
         if not self.controller.fully_connected:
-            missing = len(self.config.devices) - len(self.controller.online_keys)
+            missing = len(self.controller.missing_here())
             suffix = f" - {missing} device(s) offline"
         return (
             f"{APP_NAME} - {profile} - {sum(states)}/{len(states)} on "
@@ -283,16 +348,16 @@ class Application:
 
     # --------------------------------------------------------------- actions
 
-    def _run_async(self, label: str, function) -> None:
-        """Runs an operation in the background, one at a time."""
+    def _run_async(self, label: str, function) -> bool:
+        """Runs an operation in the background, one at a time; false if refused."""
         if not self.in_control:
             self.log(f"Ignored '{label}': another session drives the devices")
             self._explain_passive()
-            return
+            return False
         with self._busy_lock:
             if self.busy:
                 self.log(f"Ignored '{label}': '{self.busy}' still running")
-                return
+                return False
             self.busy = label
 
         def worker() -> None:
@@ -307,6 +372,7 @@ class Application:
                 self._refresh_states()
 
         threading.Thread(target=worker, name=label, daemon=True).start()
+        return True
 
     def apply_profile(self, name: str) -> None:
         self._run_async(f"Apply '{name}'", lambda: self._apply_profile_sync(name))
@@ -319,11 +385,14 @@ class Application:
 
     def toggle_outlet(self, ref: str) -> None:
         state = self.states.get(ref)
-        target = not (state and state.output)
+        self.set_outlet(ref, not (state and state.output))
+
+    def set_outlet(self, ref: str, on: bool) -> bool:
+        """Switches one outlet in the background; false if not started."""
         outlet = self.config.outlet(ref)
-        label = f"{outlet.label if outlet else ref} {'on' if target else 'off'}"
-        self._run_async(
-            label, lambda: self.controller.set_outlet(ref, target, keep_a_screen=True)
+        label = f"{outlet.label if outlet else ref} {'on' if on else 'off'}"
+        return self._run_async(
+            label, lambda: self.controller.set_outlet(ref, on, keep_a_screen=True)
         )
 
     def refresh_now(self) -> None:
@@ -363,9 +432,7 @@ class Application:
                 MenuItem.info(f"{sum(states)}/{len(states)} outlets on - {total:.0f} W")
             )
             if not self.controller.fully_connected:
-                offline = [
-                    d.key for d in self.config.devices if d.key not in self.controller.online_keys
-                ]
+                offline = self.controller.missing_here()
                 items.append(MenuItem.info(f"Offline: {', '.join(offline)}"))
                 items.append(MenuItem(t("Reconnect"), action=self.reconnect))
             if self.controller.auth_failures:
@@ -403,7 +470,16 @@ class Application:
             items.append(MenuItem.info(f"Busy: {self.busy}"))
 
         items.append(MenuItem.sep())
-        items.extend(self._profile_items())
+        if self.config.location is None:
+            # No profile anywhere: the outlets in reach belong to a place the
+            # PC is not at. Switching one by hand stays possible below.
+            items.append(MenuItem.info(t("At no known location: profiles are off")))
+        else:
+            if self.config.has_several_locations():
+                items.append(MenuItem.info(
+                    t("At {location}", location=self.config.location_label(self.config.location))
+                ))
+            items.extend(self._profile_items())
         items.append(MenuItem.sep())
         items.append(MenuItem(t("Outlets"), submenu=self._outlet_items()))
         items.append(MenuItem(t("Screens"), submenu=self._screen_items()))
@@ -475,14 +551,15 @@ class Application:
             self.log(f"Cannot open the log file ({path}): {exc}")
 
     def _profile_items(self) -> list[MenuItem]:
-        profiles = self.config.sorted_profiles()
+        profiles = self.config.sorted_profiles(here_only=True)
         if not profiles:
             return [MenuItem.info("No profile configured")]
         current = self.config.settings.last_profile
         items: list[MenuItem] = []
         for profile in profiles:
-            count = len(profile.outlets_on)
-            detail = f"{count} outlet(s)" if count else "all off"
+            count = len(self.config.profile_screens(profile))
+            detail = (t("{count} screen(s)", count=count) if count
+                      else t("screens off"))
             items.append(
                 MenuItem(
                     label=f"{profile.label}  ({detail})",
@@ -695,8 +772,10 @@ class Application:
 
     def _on_resume(self) -> None:
         """Wake: reapply the last profile."""
-        # The session on the screen may have changed while the PC slept.
+        # The session on the screen may have changed while the PC slept, and
+        # the PC may have travelled while hibernated.
         self._check_control()
+        self.controller.unsettle_location()
         if not self.in_control:
             return
         # During sleep, only the on-device probe measured: its ticks will

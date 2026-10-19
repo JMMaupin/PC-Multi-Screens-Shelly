@@ -651,4 +651,105 @@ CATALOG: dict[str, str] = {
     "Switch to it to change profiles or settings.":
         "Les multiprises sont pilotees par {driver}, affichee a l'ecran en ce "
         "moment. Basculer vers elle pour changer de profil ou de reglages.",
+    # --- PC role, profiles limited to screens, quick switches, taskbar
+    "Unknown outlet: {ref}": "Prise inconnue : {ref}",
+    "{outlet} cannot be read right now, and only its power draw can show that "
+    "it powers this PC. Reconnect its device and try again.":
+        "{outlet} ne peut pas etre lue en ce moment, et seule sa consommation "
+        "peut montrer qu'elle alimente ce PC. Reconnecter son appareil et "
+        "reessayer.",
+    "{outlet} draws {watts} W. This PC is running, so its outlet draws at least "
+    "{floor} W: {outlet} cannot be the one.":
+        "{outlet} consomme {watts} W. Ce PC est allume, sa prise consomme donc "
+        "au moins {floor} W : {outlet} ne peut pas etre la sienne.",
+    "{count} screen(s)": "{count} ecran(s)",
+    "screens off": "ecrans eteints",
+    "Busy: {task}. Try again in a moment.": "Occupe : {task}. Reessayer dans un instant.",
+    "On/off switch in the quick menu (profile shortcut)":
+        "Interrupteur dans le menu rapide (raccourci des profils)",
+    "Every display outlet must be set to « Screen »: profiles and the wizard "
+    "only switch what has been declared, and leave anything still « Not set » "
+    "alone. Accessories - USB hubs, speakers, a lamp - stay as they are "
+    "whatever the profile: switch them from the tray menu, or give them a "
+    "switch in the quick menu. A USB hub carrying your keyboard should also be "
+    "marked critical: without it you could not enter the BIOS or type your PIN "
+    "at the next boot.":
+        "Chaque prise d'ecran doit etre declaree « Ecran » : les profils et "
+        "l'assistant ne commutent que ce qui a ete declare, et laissent de cote "
+        "tout ce qui est encore « Non defini ». Les accessoires (hubs USB, "
+        "enceintes, une lampe) restent dans leur etat quel que soit le profil : "
+        "les commuter depuis le menu de l'icone, ou leur donner un interrupteur "
+        "dans le menu rapide. Un hub USB qui porte le clavier doit aussi etre "
+        "marque critique : sans lui, impossible d'entrer dans le BIOS ou de "
+        "taper son code PIN au demarrage suivant.",
+    "PC outlet": "Prise du PC",
+    "The PC role stays where it is.": "Le role PC reste ou il est.",
+    "{outlets} kept on as critical": "{outlets} : gardee comme critique, jamais coupee",
+    "Give the PC role to {outlet} ({draw})?": "Donner le role PC a {outlet} ({draw}) ?",
+    "It will never be switched off, and its power draw will tell whether the PC "
+    "is running: the on-device script will watch it.":
+        "Elle ne sera jamais coupee, et sa consommation dira si le PC est allume : "
+        "le script embarque la surveillera.",
+    "Remove the PC role from {outlet}?": "Retirer le role PC a {outlet} ?",
+    "No outlet will be protected as the PC's, and nothing will tell whether the "
+    "PC is running.":
+        "Aucune prise ne sera plus protegee comme celle du PC, et plus rien ne "
+        "dira si le PC est allume.",
+    "{outlet} loses the role. It draws {draw}: it becomes an outlet like any other.":
+        "{outlet} perd le role. Elle consomme {draw} : elle devient une prise "
+        "comme les autres.",
+    "{outlet} loses the role, but it draws {draw}, as a running PC would: it "
+    "stays protected, as critical. Untick Critical only once you are sure it "
+    "does not power the PC.":
+        "{outlet} perd le role, mais consomme {draw}, comme un PC allume : elle "
+        "reste protegee, marquee critique. Ne decocher Critique qu'une fois sur "
+        "qu'elle n'alimente pas le PC.",
+    "Windows options": "Options Windows",
+    "Keep the taskbar auto-hidden": "Garder la barre des taches masquee automatiquement",
+    "Windows sometimes turns auto-hide off when screens come and go. Ticked, it "
+    "is turned back on within seconds.":
+        "Windows desactive parfois le masquage automatique quand des ecrans vont "
+        "et viennent. Coche, il est retabli en quelques secondes.",
+    "Screens switched on": "Ecrans allumes",
+    "No outlet is declared as a screen yet: set the type in the Outlets tab.":
+        "Aucune prise n'est encore declaree comme ecran : regler le type dans "
+        "l'onglet Prises.",
+    "Accessories and outlets without a type stay as they are, whatever the profile.":
+        "Les accessoires et les prises sans type restent dans leur etat, quel "
+        "que soit le profil.",
+    "built-in, every screen on": "integre, tous les ecrans allumes",
+    # --- locations
+    "Main location": "Emplacement principal",
+    "Location...": "Emplacement...",
+    "Location": "Emplacement",
+    "Location - {device}": "Emplacement - {device}",
+    "Where this device is used. The application drives only the location the "
+    "PC is at, and recognises it by that location's outlet marked « Powers the "
+    "PC itself » drawing power: give each location its own. Type a new name to "
+    "create a location.":
+        "Ou cet appareil est utilise. L'application ne pilote que l'emplacement "
+        "ou se trouve le PC, et le reconnait a la prise marquee « Alimente "
+        "l'unite centrale » de cet emplacement qui consomme : en donner une a "
+        "chaque emplacement. Taper un nouveau nom cree un emplacement.",
+    "{device} is now at {location}": "{device} est maintenant a l'emplacement {location}",
+    "Rename location": "Renommer l'emplacement",
+    "New name of {location}:": "Nouveau nom de {location} :",
+    "'{name}' is already a location.": "'{name}' est deja un emplacement.",
+    "the PC is here": "PC ici",
+    "At {location}": "Emplacement : {location}",
+    "at no known location": "a aucun emplacement connu",
+    "At no known location: profiles are off":
+        "A aucun emplacement connu : profils desactives",
+    "The PC is at no known location: there is no layout to capture.":
+        "Le PC n'est a aucun emplacement connu : aucune disposition a relever.",
+    "The PC is at no known location: nothing to identify here.":
+        "Le PC n'est a aucun emplacement connu : rien a identifier ici.",
+    "The PC is at no known location: install the script from the location it is at.":
+        "Le PC n'est a aucun emplacement connu : installer le script depuis "
+        "l'emplacement ou il se trouve.",
+    "The PC is at no known location: none of its PC outlets draws power. "
+    "Detection is handled there by each location's own script.":
+        "Le PC n'est a aucun emplacement connu : aucune de ses prises PC ne "
+        "consomme. La detection y est assuree par le script propre a chaque "
+        "emplacement.",
 }

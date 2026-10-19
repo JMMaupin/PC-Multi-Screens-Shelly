@@ -42,6 +42,9 @@ IDENTIFY_MAX_WATTS = 80.0
 SENSING_REFRESH_TICKS = 5
 # One refresh of the measurement every N 3-second cycles.
 SENSING_REFRESH_TICKS = 5
+# Prefix of the rows heading each location in the device list. Device keys
+# hold letters and digits only: no clash possible.
+LOCATION_ROW = "location-"
 
 
 def open_settings(application: "Application") -> None:
@@ -89,7 +92,7 @@ class SettingsWindow:
         root.title(t("{app} {version} - Settings", app=product.APP_NAME, version=__version__))
         # The Devices view lines up 944 pixels of columns; any narrower and
         # the last ones get truncated with nothing to show it.
-        root.geometry("1020x760")
+        root.geometry("1020x800")
         root.minsize(900, 640)
 
         # The theme must be set before the widgets are created: some of
@@ -379,20 +382,31 @@ class SettingsWindow:
             self.auth_banner, text=t("Recovery steps"), command=self._show_reset_help
         ).pack(side="right")
 
+        # Two rows: on one, the nine buttons no longer fit the window, and
+        # the last one was cut off. The device's settings first, then what
+        # acts on the device itself.
         buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=12)
+        buttons.pack(fill="x", pady=(12, 0))
         ttk.Button(buttons, text=t("Add device..."), command=self._add_device).pack(side="left")
         for caption, command in (
             ("Name and key...", self._name_device),
+            ("Location...", self._device_location),
             ("Password...", self._device_password),
             ("Services...", self._device_services),
             ("LEDs...", self._device_leds),
-            ("Open web UI", self._open_web_ui),
-            ("Reconnect", self._reconnect),
-            ("Remove", self._remove_device),
         ):
             ttk.Button(buttons, text=t(caption), command=command).pack(
                 side="left", padx=(8, 0)
+            )
+        actions = ttk.Frame(frame)
+        actions.pack(fill="x", pady=(8, 12))
+        for index, (caption, command) in enumerate((
+            ("Open web UI", self._open_web_ui),
+            ("Reconnect", self._reconnect),
+            ("Remove", self._remove_device),
+        )):
+            ttk.Button(actions, text=t(caption), command=command).pack(
+                side="left", padx=(8 if index else 0, 0)
             )
 
     def _signal_label(self, key: str) -> str:
@@ -433,7 +447,40 @@ class SettingsWindow:
 
     def _selected_device_key(self) -> str | None:
         selection = self.device_tree.selection()
-        return selection[0] if selection else None
+        # Location rows head the devices when there are several: not devices.
+        if not selection or selection[0].startswith(LOCATION_ROW):
+            return None
+        return selection[0]
+
+    def _device_location(self) -> None:
+        """Move the selected device to a location, or rename the selected location."""
+        selection = self.device_tree.selection()
+        if selection and selection[0].startswith(LOCATION_ROW):
+            self._rename_location(selection[0][len(LOCATION_ROW):])
+            return
+        key = self._selected_device_key()
+        device = self.config.device(key) if key else None
+        if device is None:
+            self.set_status(t("Select a device first"))
+            return
+        LocationDialog(self.root, self, device)
+
+    def _rename_location(self, key: str) -> None:
+        current = self.config.location_label(key)
+        name = simpledialog.askstring(
+            t("Rename location"), t("New name of {location}:", location=current),
+            initialvalue=current, parent=self.root,
+        )
+        if not name or name.strip() == current:
+            return
+        if not self.config.rename_location(key, name):
+            messagebox.showerror(
+                product.APP_NAME, t("'{name}' is already a location.", name=name.strip()),
+                parent=self.root,
+            )
+            return
+        self._save()
+        self.refresh()
 
     def _ip_column_id(self) -> str:
         """Tk identifier of the address column (#1 is the first)."""
@@ -589,8 +636,14 @@ class SettingsWindow:
         self.outlet_tree.pack(fill="both", expand=True)
         self.outlet_tree.bind("<<TreeviewSelect>>", lambda _e: self._on_outlet_selected())
 
-        editor = ttk.LabelFrame(frame, text=t("Selected outlet"), padding=10)
-        editor.pack(fill="x", pady=10)
+        # The outlet's options on the left, Windows' on the right: two owners,
+        # side by side rather than one under the other, so the list above
+        # keeps its height.
+        options = ttk.Frame(frame)
+        options.pack(fill="x", pady=10)
+        editor = ttk.LabelFrame(options, text=t("Selected outlet"), padding=10)
+        editor.pack(side="left", fill="both", expand=True)
+        self._build_windows_box(options)
 
         ttk.Label(editor, text=t("Name")).grid(row=0, column=0, sticky="w")
         self.outlet_name = tk.StringVar(self.root)
@@ -632,7 +685,7 @@ class SettingsWindow:
             editor,
             text=t("Powers the PC itself - never switched off"),
             variable=self.outlet_host_pc,
-            command=self._apply_outlet_edits,
+            command=self._on_host_pc_clicked,
         ).grid(row=3, column=1, columnspan=3, sticky="w", pady=(4, 0))
 
         self.outlet_cut_on_sleep = tk.BooleanVar(self.root)
@@ -649,27 +702,38 @@ class SettingsWindow:
                    "tick this for a USB hub or speakers you want cut along "
                    "with the screens, and leave it clear for whatever must "
                    "stay powered through the night."),
-            wraplength=560,
+            wraplength=520,
             justify="left",
             style="Hint.TLabel",
         ).grid(row=5, column=1, columnspan=3, sticky="w", pady=(2, 0))
 
+        # An account preference, unlike the rest of this box: no
+        # administrator needed.
+        self.outlet_quick = tk.BooleanVar(self.root)
+        self.outlet_quick_box = ttk.Checkbutton(
+            editor,
+            text=t("On/off switch in the quick menu (profile shortcut)"),
+            variable=self.outlet_quick,
+            command=self._on_quick_clicked,
+        )
+        self.outlet_quick_box.grid(row=6, column=1, columnspan=3, sticky="w", pady=(8, 0))
+
         ttk.Label(
             editor,
             text=(
-                t("Every display outlet must be set to « Screen »: the wizard "
-                "only touches what has been declared, and leaves anything "
-                "still « Not set » alone. "
-                "Accessories - USB hubs, speakers - stay switchable by "
-                "profiles but are left out of the display wizard: cutting "
-                "them makes no screen disappear. A USB hub carrying your "
-                "keyboard should also be marked critical: without it you "
-                "could not enter the BIOS or type your PIN at the next boot.")
+                t("Every display outlet must be set to « Screen »: profiles and "
+                  "the wizard only switch what has been declared, and leave "
+                  "anything still « Not set » alone. Accessories - USB hubs, "
+                  "speakers, a lamp - stay as they are whatever the profile: "
+                  "switch them from the tray menu, or give them a switch in "
+                  "the quick menu. A USB hub carrying your keyboard should also "
+                  "be marked critical: without it you could not enter the BIOS "
+                  "or type your PIN at the next boot.")
             ),
-            wraplength=740,
+            wraplength=600,
             justify="left",
             style="Hint.TLabel",
-        ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x")
@@ -700,6 +764,11 @@ class SettingsWindow:
         self.outlet_boot.set(outlet.boot_screen)
         self.outlet_host_pc.set(outlet.host_pc)
         self.outlet_cut_on_sleep.set(outlet.cut_on_sleep)
+        self.outlet_quick.set(outlet.ref in self.config.settings.quick_outlets)
+        # A switch for an outlet nothing may switch off would only fail.
+        self.outlet_quick_box.state(
+            ["disabled"] if outlet.never_switch_off else ["!disabled"]
+        )
 
     def _apply_outlet_edits(self) -> None:
         outlet = self.config.outlet(self._selected_ref() or "")
@@ -724,25 +793,23 @@ class SettingsWindow:
         if became_screen and not outlet.cut_on_sleep:
             outlet.cut_on_sleep = True
             self.outlet_cut_on_sleep.set(True)
-        # Only one boot screen and only one PC outlet, otherwise these roles
-        # lose their meaning.
+        # Only one boot screen, otherwise the role loses its meaning. The
+        # PC's has its own path: see `_on_host_pc_clicked`.
         if self.outlet_boot.get():
             for other in self.config.outlets:
                 other.boot_screen = other.ref == outlet.ref
         else:
             outlet.boot_screen = False
-        if self.outlet_host_pc.get():
-            for other in self.config.outlets:
-                other.host_pc = other.ref == outlet.ref
-        else:
-            outlet.host_pc = False
         self._save()
 
         # Clients already open keep their old list of protected outputs: it
-        # must be handed to them again, otherwise the PC outlet would remain
-        # switchable until the next reconnection.
+        # must be handed to them again, otherwise a critical outlet would
+        # remain switchable until the next reconnection.
         self.app.controller.refresh_protection()
-        # And the on-device guard follows the role, from one device to another.
+        self._after_role_change()
+
+    def _after_role_change(self) -> None:
+        """The on-device guard follows the roles, then the lists are redrawn."""
         _run_off_thread(
             self.root,
             lambda: sensing.sync_guard(self.app.controller, self.config),
@@ -751,6 +818,135 @@ class SettingsWindow:
             ),
         )
         self.refresh()
+
+    def _on_host_pc_clicked(self) -> None:
+        """Move the PC role only after a physical check and a confirmation.
+
+        A tick on the wrong row once moved it to another outlet: the real
+        one lost its protection, the next profile switched it off, and the
+        on-device script, now watching an outlet drawing nothing, judged
+        the PC off. The controller refuses an outlet that does not draw
+        like a running PC; this asks before anything else moves.
+        """
+        outlet = self.config.outlet(self._selected_ref() or "")
+        if outlet is None:
+            return
+        wanted = self.outlet_host_pc.get()
+        # Nothing changes until confirmed.
+        self.outlet_host_pc.set(outlet.host_pc)
+        if wanted == outlet.host_pc:
+            return
+        controller = self.app.controller
+        title = t("PC outlet")
+        location = self.config.location_of(outlet.device)
+        if wanted:
+            reason = controller.host_pc_refusal(outlet.ref)
+            if reason:
+                messagebox.showerror(
+                    title, reason + "\n\n" + t("The PC role stays where it is."),
+                    parent=self.root,
+                )
+                return
+        # Each location has its own PC outlet: the one this outlet would replace.
+        current = self.config.host_pc_at(location)
+        if not messagebox.askyesno(
+            title, self._host_pc_question(outlet if wanted else None, current),
+            icon="warning", default="no", parent=self.root,
+        ):
+            return
+        try:
+            kept = controller.assign_host_pc(location, outlet.ref if wanted else None)
+        except PermissionError as exc:
+            messagebox.showerror(title, str(exc), parent=self.root)
+            return
+        self.outlet_host_pc.set(outlet.host_pc)
+        self.outlet_critical.set(outlet.critical)
+        self._update_admin_banner()
+        if kept:
+            labels = ", ".join(self.config.outlet(ref).label for ref in kept)  # type: ignore[union-attr]
+            self.set_status(t("{outlets} kept on as critical", outlets=labels))
+        self._after_role_change()
+
+    def _host_pc_question(self, new: OutletConfig | None, current: OutletConfig | None) -> str:
+        """What moving the PC role does, with the draws that back it up."""
+        controller = self.app.controller
+
+        def draw(outlet: OutletConfig) -> str:
+            state = controller.last_states.get(outlet.ref)
+            return f"{state.apower:.0f} W" if state else t("unknown")
+
+        if new is not None:
+            lines = [
+                t("Give the PC role to {outlet} ({draw})?", outlet=new.label, draw=draw(new)),
+                "",
+                t("It will never be switched off, and its power draw will tell "
+                  "whether the PC is running: the on-device script will watch it."),
+            ]
+        else:
+            lines = [
+                t("Remove the PC role from {outlet}?", outlet=current.label if current else ""),
+                "",
+                t("No outlet will be protected as the PC's, and nothing will tell "
+                  "whether the PC is running."),
+            ]
+        if current is not None and (new is None or current.ref != new.ref):
+            state = controller.last_states.get(current.ref)
+            if state is not None and state.apower < controller.host_pc_floor():
+                lines += ["", t("{outlet} loses the role. It draws {draw}: it becomes "
+                                "an outlet like any other.",
+                                outlet=current.label, draw=draw(current))]
+            elif not current.critical:
+                lines += ["", t("{outlet} loses the role, but it draws {draw}, as a "
+                                "running PC would: it stays protected, as critical. "
+                                "Untick Critical only once you are sure it does not "
+                                "power the PC.", outlet=current.label, draw=draw(current))]
+        return "\n".join(lines)
+
+    def _on_quick_clicked(self) -> None:
+        """Add the outlet to the quick menu's switches, or take it out."""
+        ref = self._selected_ref()
+        if ref is None:
+            return
+        refs = [r for r in self.config.settings.quick_outlets if r != ref]
+        if self.outlet_quick.get():
+            refs.append(ref)
+        # In the order of the outlet list, whatever the order of the clicks.
+        order = {r: i for i, r in enumerate(self.config.refs())}
+        self.config.settings.quick_outlets = sorted(refs, key=lambda r: order.get(r, 0))
+        self._save()
+
+    def _build_windows_box(self, parent: ttk.Frame) -> None:
+        """Windows options, next to the outlet's: what Windows itself undoes."""
+        box = ttk.LabelFrame(parent, text=t("Windows options"), padding=10)
+        box.pack(side="left", fill="y", padx=(10, 0))
+        self.var_taskbar = tk.BooleanVar(
+            self.root, value=self.config.settings.keep_taskbar_autohide
+        )
+        ttk.Checkbutton(
+            box,
+            text=t("Keep the taskbar auto-hidden"),
+            variable=self.var_taskbar,
+            command=self._apply_taskbar,
+        ).pack(anchor="w")
+        ttk.Label(
+            box,
+            text=t("Windows sometimes turns auto-hide off when screens come and "
+                   "go. Ticked, it is turned back on within seconds."),
+            wraplength=230,
+            justify="left",
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(4, 0))
+
+    def _apply_taskbar(self) -> None:
+        self.config.settings.keep_taskbar_autohide = self.var_taskbar.get()
+        self._save()
+        if self.var_taskbar.get():
+            # Off this thread: the shell answers through Explorer.
+            threading.Thread(
+                target=lambda: self.app.keep_taskbar_hidden(force=True),
+                name="taskbar", daemon=True,
+            ).start()
+        self.set_status(t("Settings saved"))
 
     def _toggle_selected(self) -> None:
         ref = self._selected_ref()
@@ -938,7 +1134,7 @@ class SettingsWindow:
 
         # The checkboxes are rebuilt on every configuration change: adding a
         # power strip adds outlets, and therefore checkboxes.
-        self.outlets_box = ttk.LabelFrame(content, text=t("Powered outlets"), padding=10)
+        self.outlets_box = ttk.LabelFrame(content, text=t("Screens switched on"), padding=10)
         self.outlets_box.pack(fill="x", pady=10)
         self.profile_outlet_vars: dict[str, tk.BooleanVar] = {}
 
@@ -949,7 +1145,11 @@ class SettingsWindow:
         ).pack(side="left")
 
     def _rebuild_profile_outlets(self) -> None:
-        """Recreate the checkboxes, one per known outlet."""
+        """Recreate the checkboxes, one per screen outlet.
+
+        Only screens: a profile leaves accessories as they are, so offering
+        them here would promise what applying the profile no longer does.
+        """
         for child in self.outlets_box.winfo_children():
             child.destroy()
         self.profile_outlet_vars = {}
@@ -960,16 +1160,35 @@ class SettingsWindow:
                 anchor="w"
             )
             return
+        screens = [outlet for outlet in self.config.outlets if outlet.is_screen]
+        if not screens:
+            ttk.Label(
+                self.outlets_box,
+                text=t("No outlet is declared as a screen yet: set the type in "
+                       "the Outlets tab."),
+                wraplength=520, justify="left",
+            ).pack(anchor="w")
+            return
 
-        multi_device = len(self.config.devices) > 1
+        # Grouped by location as soon as there are several: a profile belongs
+        # to the locations of the screens it lists.
+        several = self.config.has_several_locations()
+        if several:
+            order = {key: i for i, key in enumerate(self.config.location_keys())}
+            screens.sort(key=lambda o: order.get(self.config.location_of(o.device), 0))
+        multi_device = len({outlet.device for outlet in screens}) > 1
         current_device = None
-        for outlet in self.config.outlets:
+        for outlet in screens:
             if multi_device and outlet.device != current_device:
                 current_device = outlet.device
                 device = self.config.device(current_device)
+                title = device.label if device else current_device
+                if several:
+                    where = self.config.location_of(current_device)
+                    title = f"{self.config.location_label(where)}  -  {title}"
                 ttk.Label(
                     self.outlets_box,
-                    text=device.label if device else current_device,
+                    text=title,
                     style="Section.TLabel",
                 ).pack(anchor="w", pady=(6, 2))
             variable = tk.BooleanVar(self.root)
@@ -986,6 +1205,12 @@ class SettingsWindow:
             )
             box.pack(anchor="w", padx=(12 if multi_device else 0, 0))
             self._profile_boxes.append((box, outlet.ref))
+        ttk.Label(
+            self.outlets_box,
+            text=t("Accessories and outlets without a type stay as they are, "
+                   "whatever the profile."),
+            style="Hint.TLabel", wraplength=520, justify="left",
+        ).pack(anchor="w", pady=(8, 0))
 
     def _selected_profile(self) -> Profile | None:
         # The list shows translated names: the profile is found by its row
@@ -1000,7 +1225,7 @@ class SettingsWindow:
         if profile is None:
             return
         self.profile_title.set(
-            f"{profile.label}  -  {t('built-in, every outlet on')}"
+            f"{profile.label}  -  {t('built-in, every screen on')}"
             if profile.builtin else profile.label
         )
         for ref, variable in self.profile_outlet_vars.items():
@@ -1497,7 +1722,14 @@ class SettingsWindow:
         logger requires querying the device, so it runs in the background.
         """
         outlet = self.config.host_pc_outlet()
-        if outlet is None:
+        if outlet is None and self.config.location is None and any(
+            o.host_pc for o in self.config.outlets
+        ):
+            self.sensing_state.set(
+                t("The PC is at no known location: none of its PC outlets draws "
+                  "power. Detection is handled there by each location's own script.")
+            )
+        elif outlet is None:
             self.sensing_state.set(
                 t(
                     "No outlet is marked as powering the PC. Set that role in "
@@ -1679,7 +1911,10 @@ class SettingsWindow:
         if outlet is None:
             messagebox.showinfo(
                 product.APP_NAME,
-                "First mark the outlet that powers the PC, in the Outlets tab.",
+                t("The PC is at no known location: install the script from the "
+                  "location it is at.")
+                if self.config.location is None and any(o.host_pc for o in self.config.outlets)
+                else "First mark the outlet that powers the PC, in the Outlets tab.",
             )
             return False
         self.config.sensing.pc_ref = outlet.ref
@@ -2032,13 +2267,25 @@ class SettingsWindow:
         """Rebuild the lists from the configuration."""
         online = self.app.controller.online_keys
 
-        # --- devices
-        selected_device = self._selected_device_key()
+        # --- devices, under their location as soon as there are several
+        selection = self.device_tree.selection()
+        selected_device = selection[0] if selection else None
         self.device_tree.delete(*self.device_tree.get_children())
+        parents = {}
+        if self.config.has_several_locations():
+            for location in self.config.locations:
+                here = location.key == self.config.location
+                row = LOCATION_ROW + location.key
+                self.device_tree.insert(
+                    "", "end", iid=row, open=True,
+                    text=self.config.location_label(location.key),
+                    values=("", "", "", "", "", "", t("the PC is here") if here else ""),
+                )
+                parents[location.key] = row
         for device in self.config.devices:
             identity = self.app.controller.identity(device.key)
             self.device_tree.insert(
-                "",
+                parents.get(self.config.location_of(device.key), ""),
                 "end",
                 iid=device.key,
                 text=f"{device.key}" + (f"  -  {device.name}" if device.name else ""),
@@ -2068,8 +2315,11 @@ class SettingsWindow:
             parent = ""
             if multi_device:
                 parent = f"dev-{device.key}"
+                title = device.label
+                if self.config.has_several_locations():
+                    title += f"  ({self.config.location_label(self.config.location_of(device.key))})"
                 self.outlet_tree.insert(
-                    "", "end", iid=parent, text=device.label, open=True,
+                    "", "end", iid=parent, text=title, open=True,
                     values=("", "", "", "", "", ""),
                 )
             for outlet in outlets:
@@ -2188,6 +2438,15 @@ class SettingsWindow:
         if not self.app.online:
             messagebox.showerror(product.APP_NAME, "No Shelly device is reachable.")
             return
+        # Only where the PC is: the screens it can see are there, and another
+        # desk's outlets, reachable on the same network, are none of its business.
+        if self.config.location is None:
+            messagebox.showinfo(
+                t("Identify displays"),
+                t("The PC is at no known location: nothing to identify here."),
+                parent=self.root,
+            )
+            return
         online = self.app.controller.online_keys
         states = self.app.states
 
@@ -2198,7 +2457,7 @@ class SettingsWindow:
         # PC" role was not assigned, or was lost.
         candidates: list[OutletConfig] = []
         refused: list[str] = []
-        for outlet in self.config.outlets:
+        for outlet in self.config.here_outlets():
             if outlet.device not in online:
                 continue
             if outlet.never_switch_off:
@@ -2883,6 +3142,82 @@ class DeviceNamingDialog:
         self.owner.refresh()
         if key != self.original_key:
             self.owner.set_status(f"Key '{self.original_key}' renamed to '{key}'")
+        self._close()
+
+    def _close(self) -> None:
+        try:
+            self.window.destroy()
+        except tk.TclError:
+            pass
+
+
+class LocationDialog:
+    """Where a device sits: a location picked from the list, or a new one.
+
+    The PC is recognised at a location by that location's PC outlet drawing
+    power: the dialog says so, since a location without one can only be
+    told by elimination.
+    """
+
+    def __init__(self, parent: tk.Tk, owner: SettingsWindow, device) -> None:
+        self.owner = owner
+        self.config = owner.config
+        self.device = device
+
+        self.window = tk.Toplevel(parent)
+        self.window.title(t("Location - {device}", device=device.label))
+        self.window.resizable(False, False)
+        self.window.transient(parent)
+        self.window.grab_set()
+        _theme_dialog(self.window, owner.palette)
+
+        ttk.Label(
+            self.window,
+            text=t("Where this device is used. The application drives only the "
+                   "location the PC is at, and recognises it by that location's "
+                   "outlet marked « Powers the PC itself » drawing power: give "
+                   "each location its own. Type a new name to create a location."),
+            wraplength=480,
+            justify="left",
+            padding=14,
+        ).pack(anchor="w")
+
+        form = ttk.Frame(self.window, padding=(14, 0, 14, 0))
+        form.pack(fill="x")
+        ttk.Label(form, text=t("Location")).pack(side="left")
+        labels = [self.config.location_label(loc.key) for loc in self.config.locations]
+        self.name = tk.StringVar(
+            self.window, value=self.config.location_label(self.config.location_of(device.key))
+        )
+        box = ttk.Combobox(form, textvariable=self.name, values=labels, width=30)
+        box.pack(side="left", padx=8)
+
+        buttons = ttk.Frame(self.window, padding=14)
+        buttons.pack(fill="x", side="bottom")
+        ttk.Button(buttons, text=t("Save"), command=self._save).pack(side="left")
+        ttk.Button(buttons, text=t("Cancel"), command=self._close).pack(side="right")
+        box.focus_set()
+        self.window.bind("<Return>", lambda _e: self._save())
+        self.window.bind("<Escape>", lambda _e: self._close())
+
+    def _save(self) -> None:
+        name = self.name.get().strip()
+        if not name:
+            return
+        before = self.config.location_of(self.device.key)
+        key = self.config.assign_location(self.device.key, name)
+        if key and key != before:
+            # Where the PC is depends on which location each outlet is at.
+            self.owner.app.controller.unsettle_location()
+            self.owner.app.log(
+                f"Device '{self.device.key}' moved to location "
+                f"'{self.config.location_label(key)}'"
+            )
+            self.owner.set_status(t("{device} is now at {location}",
+                                    device=self.device.label,
+                                    location=self.config.location_label(key)))
+        self.owner._save()
+        self.owner.refresh()
         self._close()
 
     def _close(self) -> None:

@@ -12,7 +12,12 @@ Mouse hover moves the same selection: a single highlight, never two that
 contradict each other. It closes by itself when you click elsewhere:
 a quick choice lingering on screen would become clutter.
 
-Below the buttons, the screen map, drawn as in the settings. On opening,
+Below the buttons, the quick switches: one per outlet ticked "Show in the
+quick menu" in the settings -- the accessories one switches by hand, which
+profiles leave alone. A click switches the outlet at once, and the window
+stays open: one may want the speakers and the lamp in one go.
+
+Then the screen map, drawn as in the settings. On opening,
 it shows the actual state; as soon as the selection moves, it shows what
 the selected profile would give. A click on a screen starts from what is
 displayed and toggles its planned state, without switching anything: it
@@ -47,6 +52,8 @@ _current: "ProfilePicker | None" = None
 # without the window sprawling.
 BUTTON_WIDTH = 26
 MAP_HEIGHT = 120  # the screen map, below the buttons
+# How often the quick switches follow the outlets' actual state, in ms.
+SWITCH_SYNC_MS = 400
 
 
 def toggle_picker(application: "Application") -> None:
@@ -118,7 +125,9 @@ class ProfilePicker:
 
         body = ttk.Frame(root, padding=14)
         body.pack(fill="both", expand=True)
-        profiles = config.sorted_profiles()
+        # Those of the location the PC is at: another desk's profile would
+        # only switch this one's screens off.
+        profiles = config.sorted_profiles(here_only=True)
         self.profiles = profiles
         current = config.settings.last_profile
         self.buttons: list[ttk.Button] = []
@@ -126,7 +135,11 @@ class ProfilePicker:
         # stays clickable -- reapplying it is useful after a screen was
         # turned back on by hand.
         self.start = 0
-        if not profiles:
+        if config.location is None and config.devices:
+            ttk.Label(
+                body, text=t("At no known location: profiles are off"),
+            ).pack(padx=20, pady=10)
+        elif not profiles:
             ttk.Label(body, text=t("No profile configured")).pack(padx=20, pady=10)
         for index, profile in enumerate(profiles):
             label = f"{index + 1}   {profile.label}" if index < 9 else f"     {profile.label}"
@@ -145,6 +158,7 @@ class ProfilePicker:
             self.buttons.append(button)
             if index < 9:
                 root.bind(str(index + 1), lambda _e, name=profile.name: self.choose(name))
+        self._build_switches(body)
         self._build_map(body)
         self.hint = tk.StringVar(root, value=t("Arrows and Enter to choose, Esc to close"))
         ttk.Label(
@@ -238,6 +252,66 @@ class ProfilePicker:
             # window: this window is no longer active.
             self.close()
 
+    # ------------------------------------------------------- quick switches
+
+    def _build_switches(self, body: ttk.Frame) -> None:
+        """One on/off switch per outlet chosen for the quick menu."""
+        config = self.app.config
+        self.switches: dict[str, tuple[tk.BooleanVar, ttk.Checkbutton]] = {}
+        # Outlets whose command is on its way: their switch shows the
+        # requested state until the application is done with it.
+        self.switching: set[str] = set()
+        outlets = [
+            config.outlet(ref) for ref in config.settings.quick_outlets
+        ]
+        # Never offered for an outlet nothing may switch off.
+        outlets = [o for o in outlets if o is not None and not o.never_switch_off]
+        if not outlets:
+            return
+        box = ttk.LabelFrame(body, text=t("Outlets"), padding=(10, 4, 10, 6))
+        box.pack(fill="x", pady=(10, 0))
+        for outlet in outlets:
+            variable = tk.BooleanVar(self.root, value=bool(self.app.controller.output(outlet.ref)))
+            button = ttk.Checkbutton(
+                box, text=outlet.label, variable=variable, takefocus=False,
+                command=lambda ref=outlet.ref: self._switch(ref),
+            )
+            button.pack(anchor="w", pady=1)
+            self.switches[outlet.ref] = (variable, button)
+        self._sync_switches()
+
+    def _switch(self, ref: str) -> None:
+        """Switch the outlet as the box now says, right away."""
+        variable, _button = self.switches[ref]
+        wanted = variable.get()
+        if self.app.set_outlet(ref, wanted):
+            self.switching.add(ref)
+            self.app.log(
+                f"Quick switch from the keyboard shortcut: {ref} {'on' if wanted else 'off'}"
+            )
+        else:
+            # Another operation is running: say so rather than pretend.
+            variable.set(not wanted)
+            self.hint.set(t("Busy: {task}. Try again in a moment.", task=self.app.busy))
+        self._sync_switches(reschedule=False)
+
+    def _sync_switches(self, reschedule: bool = True) -> None:
+        """Follow the outlets' state, as known to the application."""
+        if self.closing or not self.switches:
+            return
+        if not self.app.busy:
+            self.switching.clear()
+        for ref, (variable, button) in self.switches.items():
+            known = self.app.controller.output(ref)
+            if ref not in self.switching and known is not None:
+                variable.set(known)
+            # Unknown state -- a silent device --, or a command on its way:
+            # nothing to click for now.
+            usable = known is not None and ref not in self.switching
+            button.state(["!disabled"] if usable else ["disabled"])
+        if reschedule:
+            self.root.after(SWITCH_SYNC_MS, self._sync_switches)
+
     # --------------------------------------------------------------- map
 
     def _build_map(self, body: ttk.Frame) -> None:
@@ -246,7 +320,7 @@ class ProfilePicker:
         # The actual state of the screen outlets: the starting point for clicks.
         self.actual = {
             o.ref: bool(self.app.states[o.ref].output)
-            for o in config.outlets
+            for o in config.here_outlets()
             if o.monitor_key and o.ref in self.app.states
         }
         self.pending = dict(self.actual)
