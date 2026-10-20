@@ -331,6 +331,19 @@ cable), in the proportions of its resolution. A 27″ 4K and a 27″ QHD are the
 same size on the map, as on the desk. Under the name: diagonal, resolution
 and the scaling set in Windows.
 
+Below that, **the graphics card and the socket** the screen is plugged into:
+*RTX 4080 SUPER · DP 2*, *HDMI 1*. Once the cables run through a cable tray,
+it is the only way left to tell which one feeds which screen.
+
+* `QueryDisplayConfig` lists every output of every card with its kind
+  (HDMI, DisplayPort, DVI, USB-C...); the outputs of one kind are numbered
+  from 1 in the driver's order.
+* **Which socket on the bracket is "DP 2", Windows does not say.** Unplug
+  one cable once and watch which number disappears: the order holds for
+  good on that card.
+* A screen that is off keeps its socket on the map: its key carries the
+  number of its output, listed even with nothing plugged in.
+
 * The EDID is read from the registry
   (`HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\…\Device Parameters\EDID`),
   without administrator rights, and it stays there when the screen is off.
@@ -394,6 +407,16 @@ none. They are remembered as such (`unswitched_screens` in `machine.json`),
 drawn in grey *on no outlet*, and counted separately. Any other unlinked
 physical screen is **unknown** and blocks the capture until the wizard is
 run again.
+
+**A screen plugged into another socket is followed.** Windows tells screens
+apart by the card output they use: after moving the PC, cables rarely go
+back into the same sockets, and every screen would come back as unknown.
+When a linked screen whose outlet is on disappears and an unknown screen of
+the **same model** appears on another output, it is the same screen: its
+link and its position follow at once, and Settings offers to save the new
+link (administrator). The model must be the only candidate on both sides;
+when both EDIDs carry a **serial number**, it must match too. Two identical
+screens without a serial number, swapped, still need **Identify displays**.
 
 After moving a screen or changing its scaling in the Windows display
 settings, **Capture layout...** updates the map right away.
@@ -1027,8 +1050,8 @@ tracked later, but only while the app is running.
 
 ## Version
 
-`major.minor`, with a third number for the smallest fixes: 2.2, 2.2.1,
-2.2.2, then 2.3. The number is in
+Always three numbers, `major.minor.fix`: 3.0.0, 3.0.1, 3.0.2, then 3.1.0
+("3.0" and "3.0.0" are the same version). The number is in
 [shelly_screens/__init__.py](shelly_screens/__init__.py), shown in the
 settings window title and on the first line of the log.
 
@@ -1037,13 +1060,15 @@ is: a file format that evolves, a setting whose meaning changes, an
 on-device script incompatible with the old one. In other words, when an
 update requires checking something rather than simply restarting.
 
-The **minor** changes with each iteration that adds or changes behaviour.
+The **minor** changes when a feature is added: something one can do that one
+could not before.
 
-The **third number** changes for a very minor fix (a wording, a misleading
-message, a threshold), even for a detail. Its role is not to summarise the
-extent of the work but to answer a single question, asked on a day something
-breaks: *which version is running in front of me?* A log that does not say
-which code it is about wastes more time than it saves.
+The **fix** number changes for every correction, behaviour included (a screen
+not recognised, a wait too long, a wording, a threshold), even for a detail.
+Its role is not to summarise the extent of the work but to answer a single
+question, asked on a day something breaks: *which version is running in front
+of me?* A log that does not say which code it is about wastes more time than
+it saves.
 
 A third number rather than a second decimal: versions are compared number by
 number, so "2.21" would read as newer than "2.3", and the installer would

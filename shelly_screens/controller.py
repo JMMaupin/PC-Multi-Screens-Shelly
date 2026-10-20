@@ -1136,9 +1136,16 @@ class ScreenController:
         links: dict[str, str] | None = None,
         unswitched: set[str] | None = None,
     ) -> tuple[list[monitors.MonitorInfo], dict, list[str]]:
-        """Physical screens, outputs, and what prevents capturing their position."""
+        """Physical screens, outputs, and what prevents capturing their position.
+
+        Screens plugged into another output are followed first
+        (`relink_moved_screens`), unless the identification assistant
+        runs: it is establishing the links itself.
+        """
         outputs = monitors.list_outputs()
         physical = monitors.physical_monitors(outputs)
+        if links is None and not self.identifying:
+            self.relink_moved_screens(states, {m.key for m in physical})
         found = screen_layout.problems(
             # The screens of this location: another desk's are expected off.
             self.config.here_outlets(),
@@ -1149,6 +1156,36 @@ class ScreenController:
             links,
         )
         return physical, outputs or {}, found
+
+    def relink_moved_screens(
+        self, states: dict[str, SwitchState], physical: set[str]
+    ) -> list[str]:
+        """Follow the screens plugged into another output of the graphics card.
+
+        Moving the PC means unplugging its cables, and they rarely go back
+        into the same outputs: the screens then come back under other keys
+        (see win.monitors), and their links and recorded positions point
+        at screens Windows no longer shows. When the deduction leaves no
+        doubt (screen_layout.match_moved), they follow at once. Writing the
+        new links waits for an administrator like any hardware change;
+        until then, the same deduction is made again after each start.
+
+        Returns the labels of the outlets whose screen moved.
+        """
+        moves = screen_layout.moved_screens(
+            self.config.here_outlets(), states, physical,
+            set(self.config.unswitched_screens), monitors.edid_serial,
+        )
+        if not moves:
+            return []
+        relinked = self.config.rename_screens(moves)
+        self._log(
+            "Screen plugged into another output, link updated: "
+            + ", ".join(f"{old} -> {new}" for old, new in sorted(moves.items()))
+            + (f" ({', '.join(relinked)})" if relinked else "")
+        )
+        self._save()
+        return relinked
 
     def _record_screens(
         self, physical: list[monitors.MonitorInfo], outputs: dict, touch: bool
@@ -1292,6 +1329,7 @@ class ScreenController:
             self._note_capture([capture.message])
             return capture
         report = ApplyReport(profile="Screen layout")
+        keys_before = {o.ref: o.monitor_key for o in screens}
         with self._lock:
             states = self.read_outlets()
             capture.states_before = {ref: state.output for ref, state in states.items()}
@@ -1319,6 +1357,12 @@ class ScreenController:
             capture.ok, capture.message = self.capture_when_ready()
             if restore:
                 self.undo_capture(capture)
+        moved = [o.label for o in screens if o.monitor_key != keys_before[o.ref]]
+        if moved:
+            capture.message += "\n" + t(
+                "Plugged into another output of the graphics card, link updated: {outlets}",
+                outlets=", ".join(moved),
+            )
         if report.errors:
             capture.ok = False
             capture.message += " " + "; ".join(report.errors)
@@ -1689,7 +1733,7 @@ class ScreenController:
         while time.monotonic() - started < timeout:
             time.sleep(POLL_INTERVAL_S)
             present = monitors.monitor_keys()
-            if expected_keys and expected_keys.issubset(present):
+            if expected_keys and not self._missing_displays(expected_keys, present):
                 time.sleep(DISPLAY_GRACE_S)  # let the panel finish initialising
                 return time.monotonic() - started
             if present != previous:
@@ -1701,10 +1745,25 @@ class ScreenController:
 
         waited = time.monotonic() - started
         if expected_keys:
-            missing = expected_keys - monitors.monitor_keys()
+            missing = self._missing_displays(expected_keys, monitors.monitor_keys())
             if missing:
                 self._log(f"Displays still missing after {waited:.1f}s: {sorted(missing)}")
         return waited
+
+    def _missing_displays(self, expected: set[str], present: set[str]) -> set[str]:
+        """Expected screens not seen, a screen back on another output counting as seen.
+
+        Its link only follows at the next layout check
+        (`relink_moved_screens`): waiting for its old key would last until
+        the timeout for nothing.
+        """
+        missing = expected - present
+        if missing:
+            known = {o.monitor_key for o in self.config.here_outlets() if o.monitor_key}
+            known |= set(self.config.unswitched_screens)
+            missing -= set(screen_layout.match_moved(missing, present - known,
+                                                     monitors.edid_serial))
+        return missing
 
     # ----------------------------------------------------------------- io
 

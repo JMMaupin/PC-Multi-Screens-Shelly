@@ -16,6 +16,10 @@ Desktop coordinates, however, are in pixels: once each screen is brought
 back to its real size, they no longer fit together. The map is therefore
 rebuilt step by step, starting from the primary screen, following the
 edges the screens share.
+
+Under each screen, the graphics card and the socket it is plugged into
+("RTX 4080 SUPER  ·  DP 2"): once the cables run through a cable tray, it
+is the only way left to tell which one feeds which screen.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from __future__ import annotations
 import math
 import tkinter as tk
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from ..i18n import t
 from .theme import Palette
@@ -57,6 +61,7 @@ class ScreenTile:
     scale: float = 1.0  # scale set in Windows
     primary: bool = False
     diagonal: float = 0.0  # inches, according to the EDID; 0 if unknown
+    connector: str = ""  # card and socket it is plugged into; "" if unknown
 
 
 def mm_per_pixel(tile: ScreenTile) -> float:
@@ -229,14 +234,26 @@ class ScreenMap:
                 font=("", 8, "bold"), width=wrap, justify="center",
             )
             return
-        canvas.create_text(
-            centre_x, centre_y - 2, anchor="s", text=tile.title, fill=title_colour,
-            font=("", 10, "bold"), width=wrap, justify="center",
-        )
-        canvas.create_text(
-            centre_x, centre_y + 2, anchor="n", text=tile.detail, fill=detail_colour,
-            font=("", 8), width=wrap, justify="center",
-        )
+        items = [
+            canvas.create_text(
+                centre_x, centre_y - 2, anchor="s", text=tile.title, fill=title_colour,
+                font=("", 10, "bold"), width=wrap, justify="center",
+            ),
+            canvas.create_text(
+                centre_x, centre_y + 2, anchor="n", text=tile.detail, fill=detail_colour,
+                font=("", 8), width=wrap, justify="center",
+            ),
+        ]
+        if tile.connector:
+            below = canvas.bbox(items[-1])[3]
+            items.append(canvas.create_text(
+                centre_x, below + 1, anchor="n", text=tile.connector,
+                fill=palette.text_muted, font=("", 8), width=wrap, justify="center",
+            ))
+            # The block moves up by half the added line, to stay centred.
+            shift = (canvas.bbox(items[-1])[3] - below) / 2
+            for item in items:
+                canvas.move(item, 0, -shift)
 
     # ------------------------------------------------------------ mouse
 
@@ -283,14 +300,17 @@ def build_tiles(
     lit: Callable[[str], bool | None],
     editable: bool,
     ghosts: tuple[str, ...] | list[str] = (),
+    connectors: Mapping[str, str] | None = None,
 ) -> list[ScreenTile]:
     """The remembered screens, ready to draw.
 
     `lit(ref)` tells whether a screen's outlet is on -- None: show it as
-    on, for lack of knowing. `editable` makes the screens clickable. Shared
+    on, for lack of knowing. `editable` makes the screens clickable.
+    `connectors` gives the card and socket of each screen, by key. Shared
     by the settings map and the shortcut window's map: same drawing, same
     rules.
     """
+    connectors = connectors or {}
     by_key = {o.monitor_key: o for o in config.outlets if o.monitor_key}
     tiles = []
     for screen in config.screens:
@@ -318,5 +338,6 @@ def build_tiles(
             scale=screen.scale,
             primary=screen.primary,
             diagonal=screen.diagonal,
+            connector=connectors.get(screen.key, ""),
         ))
     return tiles

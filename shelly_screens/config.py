@@ -28,7 +28,7 @@ import os
 import re
 import shutil
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -681,6 +681,22 @@ class AppConfig:
 
     def is_here(self, ref: str) -> bool:
         return self.location is not None and self.outlet_location(ref) == self.location
+
+    def rename_screens(self, moves: dict[str, str]) -> list[str]:
+        """Screens now known under another key, old key -> new key.
+
+        The links of the outlets here and the recorded layout follow. The
+        screens noted off the desktop need nothing: a key no longer plugged
+        in leaves that list by itself. Returns the labels of the outlets
+        relinked.
+        """
+        relinked = []
+        for outlet in self.here_outlets():
+            if outlet.monitor_key in moves:
+                outlet.monitor_key = moves[outlet.monitor_key]
+                relinked.append(outlet.label)
+        self.screens = [replace(s, key=moves.get(s.key, s.key)) for s in self.screens]
+        return relinked
 
     def has_several_locations(self) -> bool:
         return len(self.locations) > 1

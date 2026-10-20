@@ -418,6 +418,8 @@ CATALOG: dict[str, str] = {
     "Windows is still arranging the screens": "Windows n'a pas fini de disposer les ecrans",
     "Layout not captured: {reasons}": "Disposition non relevee : {reasons}",
     "Screen layout captured ({count} screens)": "Disposition relevee ({count} ecrans)",
+    "Plugged into another output of the graphics card, link updated: {outlets}":
+        "Branche(s) sur une autre sortie de la carte graphique, lien mis a jour : {outlets}",
     "No outlet is linked to a screen yet: run Identify displays first.":
         "Aucune prise n'est encore liee a un ecran : lancez d'abord Identifier les ecrans.",
     "unreachable: {outlets}": "injoignable(s) : {outlets}",

@@ -1307,6 +1307,7 @@ class SettingsWindow:
             self.config, lit,
             editable=selected is not None and not selected.builtin,
             ghosts=self.app.controller.ghost_screens,
+            connectors=self._connectors([s.key for s in self.config.screens]),
         )
         self._drawn_screens = list(self.config.screens)
         self._drawn_ghosts = list(self.app.controller.ghost_screens)
@@ -1394,8 +1395,10 @@ class SettingsWindow:
             return
         names = {o.monitor_key: o.label for o in self.config.outlets if o.monitor_key}
         outputs = monitors.list_outputs() or {}
+        physical = monitors.physical_monitors(outputs)
+        connectors = self._connectors([m.key for m in physical])
         tiles = []
-        for m in monitors.physical_monitors(outputs):
+        for m in physical:
             diagonal = monitors.physical_diagonal(m.key)
             output = outputs.get(m.key)
             tiles.append(screen_map.ScreenTile(
@@ -1406,6 +1409,7 @@ class SettingsWindow:
                 ),
                 state=screen_map.STATE_ON,
                 scale=m.scale, primary=m.is_primary, diagonal=diagonal,
+                connector=connectors.get(m.key, ""),
             ))
         self.screen_map.show(tiles, empty_text=self._capture_step)
         self.layout_state.set(t("{step} {count} of {total} screen(s) detected",
@@ -1413,6 +1417,14 @@ class SettingsWindow:
                                 total=len({o.monitor_key for o in self.config.outlets
                                            if o.monitor_key})))
         self.root.after(500, self._draw_live_capture)
+
+    @staticmethod
+    def _connectors(keys: list[str]) -> dict[str, str]:
+        """Card and socket of each screen, for the map; {} if Windows does not say."""
+        try:
+            return {key: c.describe() for key, c in monitors.connectors(keys).items()}
+        except OSError:
+            return {}
 
     def _capture_finished(self, capture) -> None:
         """Say what was learned, then offer to stay or go back."""

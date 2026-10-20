@@ -21,13 +21,14 @@ been done, a physical screen without an outlet is unknown, and the
 capture waits.
 
 The module changes nothing: it returns the list of problems, empty when
-the capture can go ahead.
+the capture can go ahead, and the screens it recognises on another output
+of the graphics card, for the controller to relink.
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from .config import KIND_SCREEN
 from .i18n import t
@@ -120,6 +121,60 @@ def problems(
             found.append(t("{screens} are mirrored",
                            screens=", ".join(name_of(k) for k in sorted(keys))))
     return found
+
+
+def match_moved(
+    lost: set[str],
+    strangers: set[str],
+    serial_of: Callable[[str], str],
+) -> dict[str, str]:
+    """Pair each lost screen with the key it now has: old key -> new key.
+
+    A key holds the model and the output of the graphics card (see
+    win.monitors). Plug a screen into another output, as when the PC is
+    moved and its cables put back, and Windows reports a screen it has
+    never seen while the known one vanishes. The same model on both sides
+    is the same screen, provided it is the only candidate on each side:
+    two identical screens swapped can only be told apart by the
+    identification assistant. When both EDIDs give a serial number, it
+    must match too; many screens give none.
+    """
+    def same_screen(old: str, new: str) -> bool:
+        if old.partition("#")[0] != new.partition("#")[0]:
+            return False
+        old_serial, new_serial = serial_of(old), serial_of(new)
+        return not (old_serial and new_serial) or old_serial == new_serial
+
+    candidates = {
+        old: [new for new in sorted(strangers) if same_screen(old, new)]
+        for old in sorted(lost)
+    }
+    claims = Counter(new for news in candidates.values() for new in news)
+    return {
+        old: news[0] for old, news in candidates.items()
+        if len(news) == 1 and claims[news[0]] == 1
+    }
+
+
+def moved_screens(
+    outlets: list["OutletConfig"],
+    states: Mapping[str, "SwitchState"],
+    physical: set[str],
+    unswitched: set[str],
+    serial_of: Callable[[str], str],
+) -> dict[str, str]:
+    """Linked screens found again on another output: old key -> new key.
+
+    Only a screen whose outlet is on counts as lost: a screen switched off
+    is simply absent, and an identical one plugged in meanwhile is not it.
+    """
+    screen_outlets = [o for o in outlets if o.monitor_key and not o.host_pc]
+    known = {o.monitor_key for o in screen_outlets} | unswitched
+    expected = {
+        o.monitor_key for o in screen_outlets
+        if o.ref in states and states[o.ref].output
+    }
+    return match_moved(expected - physical, physical - known, serial_of)
 
 
 def ghosts(

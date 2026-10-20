@@ -11,6 +11,10 @@ use the interface path returned by EnumDisplayDevices with the
 EDD_GET_DEVICE_INTERFACE_NAME flag, which contains the UID of the graphics
 card's physical output -- stable, and distinct for two screens of the same
 model.
+
+Stable as long as the cable stays in that output: plugged into another
+one, the screen comes back under another key. The model part does not
+change, which is enough to follow it (see screen_layout.match_moved).
 """
 
 from __future__ import annotations
@@ -20,9 +24,10 @@ import math
 import re
 import struct
 import winreg
+from collections import defaultdict
 from ctypes import wintypes
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from ..i18n import t
 from .api import RECT, user32
@@ -256,43 +261,80 @@ def parse_edid_diagonal(edid: bytes) -> float:
     return next((d for d in candidates if d >= MIN_DIAGONAL_IN), 0.0)
 
 
-def physical_diagonal(key: str) -> float:
-    """A screen's diagonal in inches, read from its EDID; 0 if unknown.
+def parse_edid_serial(edid: bytes) -> str:
+    """Serial number an EDID gives its screen; "" if it gives none.
+
+    Two places again: a text descriptor (tag 0xFF), and a 32-bit number in
+    the header. Many screens leave both empty, or fill the number with a
+    placeholder (01010101): those tell nothing.
+    """
+    for offset in range(54, 126, 18):
+        block = edid[offset:offset + 18]
+        if len(block) == 18 and block[:3] == b"\0\0\0" and block[3] == 0xFF:
+            text = block[5:].split(b"\n")[0].decode("ascii", "replace").strip(" \0")
+            if text.strip("0"):
+                return text
+    if len(edid) >= 16:
+        number = struct.unpack_from("<I", edid, 12)[0]
+        if number not in (0, 0x01010101, 0xFFFFFFFF):
+            return str(number)
+    return ""
+
+
+def _registry_edids(key: str):
+    """EDIDs Windows keeps for the screen a key designates.
 
     Windows keeps each screen's EDID in the registry, under the instance
     the key designates (`GSM774B#UID8453`: hardware `GSM774B`, instance
-    ending in `UID8453`). It stays there while the screen is off, and can
-    be read without administrator rights. It doesn't change: read it once.
+    ending in `UID8453`). It stays there while the screen is off, and even
+    once it has moved to another output; it can be read without
+    administrator rights.
     """
-    if key in _diagonals:
-        return _diagonals[key]
-    value = 0.0
     hardware, _, uid = key.partition("#")
-    if hardware and uid.startswith("UID"):
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                f"{ENUM_DISPLAY}\\{hardware}") as parent:
-                index = 0
-                while not value:
-                    try:
-                        instance = winreg.EnumKey(parent, index)
-                    except OSError:
-                        break
-                    index += 1
-                    if instance.split("&")[-1] != uid:
-                        continue
-                    try:
-                        with winreg.OpenKey(
-                            parent, instance + "\\Device Parameters"
-                        ) as params:
-                            edid = winreg.QueryValueEx(params, "EDID")[0]
-                    except OSError:
-                        continue
-                    value = round(parse_edid_diagonal(bytes(edid)), 1)
-        except OSError:
-            pass
-    _diagonals[key] = value
-    return value
+    if not hardware or not uid.startswith("UID"):
+        return
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            f"{ENUM_DISPLAY}\\{hardware}") as parent:
+            index = 0
+            while True:
+                try:
+                    instance = winreg.EnumKey(parent, index)
+                except OSError:
+                    return
+                index += 1
+                if instance.split("&")[-1] != uid:
+                    continue
+                try:
+                    with winreg.OpenKey(parent, instance + "\\Device Parameters") as params:
+                        edid = winreg.QueryValueEx(params, "EDID")[0]
+                except OSError:
+                    continue
+                yield bytes(edid)
+    except OSError:
+        return
+
+
+def physical_diagonal(key: str) -> float:
+    """A screen's diagonal in inches, read from its EDID; 0 if unknown.
+
+    It doesn't change: read it once.
+    """
+    if key not in _diagonals:
+        _diagonals[key] = next(
+            (d for d in (round(parse_edid_diagonal(e), 1) for e in _registry_edids(key)) if d),
+            0.0,
+        )
+    return _diagonals[key]
+
+
+def edid_serial(key: str) -> str:
+    """A screen's serial number, read from its EDID; "" if unknown.
+
+    Not kept in memory: another screen of the same model plugged into the
+    same output takes over the same registry entry.
+    """
+    return next(filter(None, map(parse_edid_serial, _registry_edids(key))), "")
 
 
 # ------------------------------------------------------------ physical outputs
@@ -436,14 +478,22 @@ def _query(flags: int) -> _DisplayConfig | None:
     )
 
 
-def _target_name(target: _PATH_TARGET) -> tuple[str, str]:
-    """Stable key and EDID model of the screen on an output; ("", "") if unknown."""
+def _target_device(target: _PATH_TARGET) -> _TARGET_DEVICE_NAME | None:
+    """What Windows says of an output and the screen on it; None if it says nothing."""
     name = _TARGET_DEVICE_NAME()
     name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME
     name.header.size = ctypes.sizeof(_TARGET_DEVICE_NAME)
     name.header.adapterId = target.adapterId
     name.header.id = target.id
     if user32.DisplayConfigGetDeviceInfo(ctypes.byref(name)):
+        return None
+    return name
+
+
+def _target_name(target: _PATH_TARGET) -> tuple[str, str]:
+    """Stable key and EDID model of the screen on an output; ("", "") if unknown."""
+    name = _target_device(target)
+    if name is None:
         return "", ""
     return monitor_key(name.monitorDevicePath), name.monitorFriendlyDeviceName.strip()
 
@@ -484,6 +534,137 @@ def physical_monitors(outputs: dict[str, DisplayOutput] | None) -> list[MonitorI
     if outputs is None:
         return found
     return [m for m in found if not (m.key in outputs and outputs[m.key].virtual)]
+
+
+# ------------------------------------------------------------ connectors
+
+DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME = 4
+# How each kind of output is written on a graphics card bracket. The other
+# technologies (wireless, virtual, a laptop's own panel) have no socket to
+# look for.
+CONNECTOR_KINDS = {0: "VGA", 4: "DVI", 5: "HDMI", 10: "DP", 11: "eDP", 18: "USB-C"}
+# Words that only make a card's name longer.
+_GPU_NOISE = ("(R)", "(TM)", "\u00ae", "\u2122")
+_GPU_PREFIXES = ("NVIDIA GeForce ", "NVIDIA ", "AMD ")
+
+
+class _ADAPTER_NAME(ctypes.Structure):
+    _fields_ = [("header", _DEVICE_INFO_HEADER), ("adapterDevicePath", ctypes.c_wchar * 128)]
+
+
+@dataclass(frozen=True)
+class Connector:
+    """The graphics card output a screen is plugged into."""
+
+    gpu: str  # the card, shortened: "RTX 4080 SUPER"; "" if unknown
+    kind: str  # "DP", "HDMI"...
+    number: int  # 1 for the card's first output of that kind
+
+    def describe(self) -> str:
+        port = f"{self.kind} {self.number}"
+        return f"{self.gpu}  ·  {port}" if self.gpu else port
+
+
+def connectors(keys: Iterable[str]) -> dict[str, Connector]:
+    """The output each of these screens is plugged into, when Windows says.
+
+    Once the cables run through a cable tray, nobody can tell which one
+    feeds which screen: the card and the socket answer it. Windows lists
+    every output of every card, with its kind (HDMI, DisplayPort...) and
+    its rank among the outputs of that kind; numbering them from 1 in that
+    order gives "DP 1", "DP 2"... The order is the driver's: which socket
+    on the bracket is "DP 2", Windows does not say. Unplugging one cable,
+    once, tells for good.
+
+    A screen switched off is found too: its key ends with the number of
+    its output (UID8451 is output 8451), listed even with nothing plugged
+    in -- provided only one card has an output with that number.
+    """
+    found = _raw_query(QDC_ALL_PATHS)
+    if found is None:
+        return {}
+    # Every output once: QDC_ALL_PATHS repeats each one for every source.
+    outputs: dict[tuple[int, int, int], tuple[_LUID, _TARGET_DEVICE_NAME]] = {}
+    for path in found[0]:
+        target = path.targetInfo
+        ident = (target.adapterId.HighPart, target.adapterId.LowPart, target.id)
+        if ident in outputs:
+            continue
+        name = _target_device(target)
+        if name is not None and name.outputTechnology in CONNECTOR_KINDS:
+            adapter = _LUID(target.adapterId.LowPart, target.adapterId.HighPart)
+            outputs[ident] = (adapter, name)
+
+    siblings: dict[tuple[int, int, str], list[tuple[int, int]]] = defaultdict(list)
+    for (high, low, target_id), (_adapter, name) in outputs.items():
+        kind = CONNECTOR_KINDS[name.outputTechnology]
+        siblings[(high, low, kind)].append((name.connectorInstance, target_id))
+
+    gpu_names = _gpu_names()
+    gpus: dict[tuple[int, int], str] = {}
+    by_key: dict[str, Connector] = {}
+    by_output: dict[int, list[Connector]] = defaultdict(list)
+    for (high, low, target_id), (adapter, name) in outputs.items():
+        if (high, low) not in gpus:
+            gpus[(high, low)] = gpu_names.get(_adapter_hardware_id(adapter), "")
+        kind = CONNECTOR_KINDS[name.outputTechnology]
+        rank = sorted(siblings[(high, low, kind)]).index((name.connectorInstance, target_id))
+        connector = Connector(gpus[(high, low)], kind, rank + 1)
+        key = monitor_key(name.monitorDevicePath)
+        if key:
+            by_key[key] = connector
+        by_output[target_id].append(connector)
+
+    result = {}
+    for key in keys:
+        uid = re.search(r"#UID(\d+)$", key)
+        same_output = by_output.get(int(uid.group(1)), []) if uid else []
+        if key in by_key:
+            result[key] = by_key[key]
+        elif len(same_output) == 1:
+            result[key] = same_output[0]
+    return result
+
+
+def _adapter_hardware_id(adapter: _LUID) -> str:
+    r"""Hardware ID of a graphics card, `PCI\VEN_10DE&DEV_2702&...`; "" if unknown."""
+    request = _ADAPTER_NAME()
+    request.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME
+    request.header.size = ctypes.sizeof(_ADAPTER_NAME)
+    request.header.adapterId = adapter
+    if user32.DisplayConfigGetDeviceInfo(ctypes.byref(request)):
+        return ""
+    # \\?\PCI#VEN_10DE&DEV_2702&SUBSYS_89781043&REV_A1#4&128bc5f7&0&0008#{...}
+    parts = request.adapterDevicePath.removeprefix("\\\\?\\").split("#")
+    return "\\".join(parts[:2]).upper()
+
+
+def _gpu_names() -> dict[str, str]:
+    """Short name of each graphics card, by hardware ID."""
+    names: dict[str, str] = {}
+    index = 0
+    while True:
+        device = DISPLAY_DEVICEW()
+        device.cb = ctypes.sizeof(DISPLAY_DEVICEW)
+        if not user32.EnumDisplayDevicesW(None, index, ctypes.byref(device), 0):
+            return names
+        index += 1
+        names.setdefault(device.DeviceID.upper(), short_gpu_name(device.DeviceString))
+
+
+def short_gpu_name(name: str) -> str:
+    """A card's name without the brand words: room is short on a tile.
+
+    "NVIDIA GeForce RTX 4080 SUPER" -> "RTX 4080 SUPER",
+    "Intel(R) Graphics" -> "Intel Graphics".
+    """
+    for noise in _GPU_NOISE:
+        name = name.replace(noise, "")
+    name = " ".join(name.split())
+    for prefix in _GPU_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
 
 
 def monitor_keys() -> set[str]:
