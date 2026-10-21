@@ -22,6 +22,15 @@ CATALOG: dict[str, str] = {
     "Key / name": "Cle / nom",
     "Model": "Modele",
     "Reached via": "Joint par",
+    "Wi-Fi network": "Reseau Wi-Fi",
+    "{location} still has devices: {devices}. Move them to another location first (Location...).":
+        "{location} a encore des appareils : {devices}. Deplacez-les d'abord vers un "
+        "autre emplacement (Emplacement...).",
+    "Delete the location {location}? Its screen layout goes with it.":
+        "Supprimer l'emplacement {location} ? Sa disposition des ecrans part avec lui.",
+    "Location {location} deleted": "Emplacement {location} supprime",
+    "{network} (backup)": "{network} (secours)",
+    "{ip} (fixed address)": "{ip} (adresse fixe)",
     "IP address": "Adresse IP",
     "Address": "Adresse",
     "Outlet": "Prise",

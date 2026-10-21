@@ -189,10 +189,19 @@ you, and its internal roaming threshold is precisely -80.
 The signal is re-read once a minute, never more: a link does not change in
 the blink of an eye, and every query puts load on the device.
 
-Two columns separate **Reached via** and **IP address**. The app prefers to
-reach the device by its mDNS name, which is more stable than its DHCP lease,
-but the address is what you want to read, to open its web interface or to
-notice that it changed. **Clicking the address opens the device's web
+**Wi-Fi network** shows the network the device is on, flagged *(backup)*
+when it is not the one it is set to prefer. A Shelly that lost its preferred
+network falls back to its backup one and stays there, even once the first
+is back: a power strip sat at -74 dBm on a distant router that way, until it
+was restarted. A restart makes it try its preferred network first; it never
+switches an output.
+
+Two columns separate **Reached via** and **IP address**. The app reaches
+the device by its mDNS name, which follows it from one DHCP lease to the
+next, unless its address is fixed: then *Reached via* reads
+*192.168.1.104 (fixed address)*, and requests go to it directly (see
+*IP addresses* below). The address is also what you want to read, to open
+its web interface or to notice that it changed. **Clicking the address opens the device's web
 interface** in the browser; the cursor turns into a hand on hover. The
 *Open web UI* button does the same for the selected device.
 
@@ -904,6 +913,25 @@ request, and therefore replayable to trigger another command.
 **IP addresses.** Resolution first tries the **mDNS name**
 `<device-id>.local`, then the remembered address, then a scan of the local
 subnets, checking the MAC address every time.
+
+**A fixed address is used directly.** Resolving a `.local` name can take
+seconds at every request, eleven on some networks: three power strips read
+one after the other then outlasted the 20 s of a layout capture. At each
+connection the app therefore asks the device for its Wi-Fi settings, and
+reaches it by its address, without resolving anything, only if every
+enabled network (preferred and backup) is set to the **same static
+address**, the one in use. On DHCP, or with a backup network on DHCP, the
+name stays the way in. Two safeguards:
+
+* the next connection asks the remembered address first, and keeps it only
+  if the **MAC** that answers is the device's own; otherwise the usual
+  search takes over;
+* every reading checks the MAC the device reports: should the address now
+  belong to another device, its outlets never pass for this one's, nor
+  receive its commands. It is taken as unreachable and found again by name.
+
+The name remains the device's identity, and the one the on-device script is
+given. The verdict (`fixed_ip`) is kept in `state.json`.
 
 The name comes first even when the address still answers: a DHCP lease
 renews without warning, and the remembered address ends up hard-coded

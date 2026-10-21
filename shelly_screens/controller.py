@@ -38,6 +38,7 @@ from .device import (
     ShellyError,
     ShellyUnreachable,
     SwitchState,
+    normalise_mac,
 )
 from .i18n import t
 from .win import layout, monitors
@@ -180,6 +181,12 @@ class ScreenController:
         # Last known RSSI per device, and the time of the next re-read.
         # Absent until it could be read.
         self._signal: dict[str, int] = {}
+        # Devices being searched for and connected right now.
+        self._connecting: set[str] = set()
+        # Wi-Fi network each device is on, and the one it is set to prefer
+        # (its `sta`): on the other one, it has fallen back to its backup.
+        self._network: dict[str, str] = {}
+        self._preferred_network: dict[str, str] = {}
         self._signal_due: dict[str, float] = {}
         # One sequence at a time: a profile change handles power and
         # windows, two in parallel would trip over each other.
@@ -314,13 +321,28 @@ class ScreenController:
             if last is not None and now - last < RESOLVE_COOLDOWN_S:
                 return self._identities.get(key)
         self._last_resolve[key] = now
+        # Readings leave it alone meanwhile (see `read_outlets`): a failure
+        # counted while it is being found would hold it back once found.
+        self._connecting.add(key)
+        try:
+            return self._connect(key, device_config, allow_scan)
+        finally:
+            self._connecting.discard(key)
 
-        identity = discovery.resolve(
-            known_host=device_config.host or None,
-            device_id=device_config.device_id or None,
-            expected_mac=device_config.mac or None,
-            allow_scan=allow_scan,
-        )
+    def _connect(
+        self, key: str, device_config: DeviceConfig, allow_scan: bool
+    ) -> discovery.DeviceIdentity | None:
+        """The search and the connection proper (see `connect_device`)."""
+        identity, address = self._direct_identity(device_config)
+        if identity is None:
+            identity = discovery.resolve(
+                known_host=device_config.host or None,
+                device_id=device_config.device_id or None,
+                expected_mac=device_config.mac or None,
+                allow_scan=allow_scan,
+            )
+            address = discovery.address_of(identity.host) if identity is not None else ""
+        fixed = self._fixed_address(device_config, identity, address)
         # The search above runs in parallel (see `connect_all`); what follows
         # changes the configuration and saves it: one device at a time.
         with self._connect_lock:
@@ -330,10 +352,14 @@ class ScreenController:
                 self._log(f"Device '{key}' not found on the local network")
                 return None
 
-            address = discovery.address_of(identity.host)
-            changed = device_config.host != identity.host or device_config.ip != address
+            fixed_changed = device_config.fixed_ip != bool(fixed)
+            changed = (
+                device_config.host != identity.host or device_config.ip != address
+                or fixed_changed
+            )
             device_config.host = identity.host
             device_config.ip = address or device_config.ip
+            device_config.fixed_ip = bool(fixed)
             device_config.device_id = identity.device_id
             device_config.mac = identity.mac
             if not device_config.kind:
@@ -341,11 +367,17 @@ class ScreenController:
 
             was_connected = key in self._devices
             self._identities[key] = identity
-            self._devices[key] = ShellyDevice(
-                identity.host,
-                password=device_config.get_password() or None,
-                protected=self.protected_switches(key),
-            )
+            self._devices[key] = self._client(key, fixed)
+            self._preferred_network.pop(key, None)
+            # Found: the respite a failed reading imposed no longer applies,
+            # it is read at once.
+            self._retry_after.pop(key, None)
+            self._read_failures.pop(key, None)
+            if fixed_changed:
+                self._log(
+                    f"Device '{key}': fixed address {fixed}, reached directly" if fixed
+                    else f"Device '{key}': address not fixed, reached by its name"
+                )
             count = self._switch_count(key)
             if count:
                 self.config.ensure_outlets(key, count)
@@ -372,6 +404,58 @@ class ScreenController:
                 )
                 self._log(f"Device '{key}' connected at {where}")
             return identity
+
+    def _direct_identity(
+        self, device_config: DeviceConfig
+    ) -> tuple[discovery.DeviceIdentity | None, str]:
+        """The device asked at its fixed address, skipping the name; (None, "") if not there.
+
+        Only once it has said its address is fixed (`fixed_ip`), and only
+        if the MAC that answers is its own: otherwise the usual search, by
+        name first, takes over -- the address may have gone to DHCP.
+        """
+        if not (device_config.fixed_ip and device_config.ip and device_config.mac):
+            return None, ""
+        found = discovery.probe(device_config.ip)
+        if found is None or normalise_mac(found.mac) != normalise_mac(device_config.mac):
+            return None, ""
+        # The identity keeps the name: it alone would follow the device back
+        # to DHCP, and it is what the on-device script is given.
+        return replace(found, host=device_config.host or found.host), device_config.ip
+
+    def _fixed_address(
+        self,
+        device_config: DeviceConfig,
+        identity: discovery.DeviceIdentity | None,
+        address: str,
+    ) -> str:
+        """`address` if the device keeps it fixed, asked at that address; "" otherwise.
+
+        See `ShellyDevice.fixed_address`. A device that does not say --
+        silent, protected by a password we lack -- stays reached by its name.
+        """
+        if identity is None or not address:
+            return ""
+        client = ShellyDevice(
+            identity.host, password=device_config.get_password() or None,
+            address=address, mac=identity.mac,
+        )
+        try:
+            fixed = client.fixed_address()
+        except (ShellyUnreachable, AuthenticationFailed, ShellyError):
+            return ""
+        return fixed if fixed == address else ""
+
+    def _client(self, key: str, address: str = "") -> ShellyDevice:
+        """The client of a device: its password, its protected outputs, its fixed address."""
+        device_config = self.config.device(key)
+        return ShellyDevice(
+            device_config.host,
+            password=device_config.get_password() or None,
+            protected=self.protected_switches(key),
+            address=address,
+            mac=device_config.mac,
+        )
 
     def protected_switches(self, device_key: str) -> set[int]:
         """Outputs of this device that no command may switch off."""
@@ -554,6 +638,11 @@ class ScreenController:
             # slow down every reading.
             if key not in self._devices and self._elsewhere(key):
                 continue
+            # Being connected right now (at start, on wake): the connection
+            # will tell. Reading it as well counted a failure, and its
+            # respite then delayed the first reading once it was found.
+            if key in self._connecting:
+                continue
             # A device that has just failed is granted a respite. Polling it
             # again every five seconds amounted to overwhelming it at the
             # moment it was least able to stand, and that burst is what
@@ -617,12 +706,24 @@ class ScreenController:
         if self._location_settled:
             return
         key, why = self._find_location(self.last_states)
+        pc_devices = {
+            pc.device for pc in map(self.config.host_pc_at, self.config.location_keys())
+            if pc is not None
+        }
+        if key is None and self._connecting & pc_devices:
+            # A PC outlet's device is still being found (at start, on
+            # wake): "at no location" would only be its absence so far.
+            return
         self._location_settled = key is not None
         # Logged when the conclusion changes, not when a reading moves by
         # a watt: while the PC is away, this runs at every refresh.
         note = f"{key}|{why.partition(':')[0]}"
         changed = key != self.config.location
         self.config.select_location(key)
+        if changed:
+            # A capture refused elsewhere, or at no location, says nothing
+            # of the layout here.
+            self.capture_problems = []
         if note != self._location_note:
             self._location_note = note
             if key is not None:
@@ -682,19 +783,46 @@ class ScreenController:
         return None, "no device answers"
 
     def _refresh_signal(self, key: str, now: float) -> None:
-        """Re-read the Wi-Fi signal strength, without ever failing."""
+        """Re-read the Wi-Fi signal strength and network, without ever failing.
+
+        The configured networks change only by hand: they are read once per
+        connection, not every minute.
+        """
         self._signal_due[key] = now + SIGNAL_REFRESH_S
         try:
-            status = self._devices[key].call("Wifi.GetStatus") or {}
+            device = self._devices[key]
+            status = device.call("Wifi.GetStatus") or {}
+            if key not in self._preferred_network:
+                config = device.call("WiFi.GetConfig") or {}
+                preferred = config.get("sta") or {}
+                self._preferred_network[key] = (
+                    str(preferred.get("ssid") or "") if preferred.get("enable") else ""
+                )
         except Exception:  # noqa: BLE001 - a nice-to-have reading, nothing more
             return
         rssi = status.get("rssi")
         if isinstance(rssi, (int, float)) and rssi:
             self._signal[key] = int(rssi)
+        network = str(status.get("ssid") or "")
+        if network:
+            self._network[key] = network
 
     def wifi_signal(self, key: str) -> int | None:
         """Last known RSSI, in dBm, or None if it has not been read."""
         return self._signal.get(key)
+
+    def wifi_network(self, key: str) -> tuple[str, bool] | None:
+        """Wi-Fi network a device is on, and whether it is its backup; None if unknown.
+
+        A device that lost its preferred network falls back to its backup
+        and stays there, even once the first one is back: a power strip
+        sat at -74 dBm on a distant router that way, slowing every reading.
+        """
+        network = self._network.get(key)
+        if not network:
+            return None
+        preferred = self._preferred_network.get(key, "")
+        return network, bool(preferred) and network != preferred
 
     def _note_meter(self, ref: str, state: SwitchState) -> None:
         """Remember the voltage read, to judge whether the channel is alive."""
@@ -751,7 +879,10 @@ class ScreenController:
             raise SensingRealmMissing(key)
         self.device_for(key).set_password(realm, password)
         device_config.set_password(password)
-        self._devices[key] = ShellyDevice(device_config.host, password=password or None)
+        # Rebuilt like any other: its protected outputs included.
+        self._devices[key] = self._client(
+            key, device_config.ip if device_config.fixed_ip else ""
+        )
         # The identity is a snapshot taken at connection time: without this
         # update, it would keep announcing a device without a password when
         # one has just been set. The interface relies on it to show the
@@ -1262,6 +1393,10 @@ class ScreenController:
             self._layout_reading = reading
             if found or not stable:
                 return False
+            # Everything agrees now: what stood in the way of the last
+            # requested capture is gone. Left on screen, its reason would
+            # contradict a map that is right.
+            self.capture_problems = []
             return self._record_screens(physical, outputs, touch=False)
         finally:
             self._lock.release()
@@ -1285,7 +1420,11 @@ class ScreenController:
             reading = tuple((m.key, m.rect, m.scale) for m in physical)
             if not found and reading == previous:
                 break
-            if time.monotonic() >= deadline:
+            # A first clean reading is always given its confirmation, even
+            # past the deadline: when the devices are slow to answer, one
+            # reading alone can outlast it, and the capture then failed on
+            # a "still arranging" that nothing showed.
+            if time.monotonic() >= deadline and (found or previous is not None):
                 if not found:
                     found = [t("Windows is still arranging the screens")]
                 self._note_capture(found)

@@ -76,7 +76,7 @@ USER_SETTINGS = (
 # password and the configuration with the old one -- and the application
 # locked out. Keeping it out of the administrator's file costs nothing:
 # every account can decrypt it anyway (see `secrets_store`).
-DEVICE_STATE_FIELDS = ("host", "ip", "password")
+DEVICE_STATE_FIELDS = ("host", "ip", "fixed_ip", "password")
 SENSING_STATE_FIELDS = ("script_id", "installed_fingerprint")
 
 # The location every device belongs to until another one is created. Its
@@ -139,6 +139,11 @@ class DeviceConfig:
     # `host` when that is already an address, but always filled in:
     # it is what we display and open in a browser.
     ip: str = ""
+    # True once the device itself said `ip` is fixed, whatever network it
+    # joins (`ShellyDevice.fixed_address`): requests then go to it directly,
+    # without resolving the name each time. Checked at every connection;
+    # on DHCP, the name stays the way to reach it.
+    fixed_ip: bool = False
     name: str = ""  # human-readable label, free-form
     kind: str = ""  # application reported by the device (PowerStrip, PlugS...)
     # Device password, encrypted with DPAPI (see secrets_store).
@@ -175,6 +180,7 @@ class DeviceConfig:
             mac=str(data.get("mac", "")),
             host=str(data.get("host", "")),
             ip=str(data.get("ip", "")),
+            fixed_ip=bool(data.get("fixed_ip", False)),
             name=str(data.get("name", "")),
             kind=str(data.get("kind", "")),
             password=data.get("password") or None,
@@ -769,6 +775,33 @@ class AppConfig:
         ):
             return False
         location.name = name
+        return True
+
+    def remove_location(self, key: str) -> bool:
+        """Delete a location left without any device; false if it has some, or is the last.
+
+        Locations emptied by moving their devices go away by themselves,
+        except the first: it holds every device without a place of its own,
+        and stayed behind, empty, once they had all moved elsewhere. Its
+        layout and last profile go with it, and the next location takes
+        over its role.
+        """
+        location = self.location_config(key)
+        if location is None or len(self.locations) < 2:
+            return False
+        if any(self.location_of(device.key) == key for device in self.devices):
+            return False
+        self.locations.remove(location)
+        # The devices of the new first location carry no location of their
+        # own, as a setup with a single location writes them.
+        first = self.locations[0].key
+        for device in self.devices:
+            if device.location == first:
+                device.location = ""
+        self.location_states.pop(key, None)
+        self.settings.last_profiles.pop(key, None)
+        if self.location == key:
+            self.select_location(None)
         return True
 
     def _location_key(self, name: str) -> str:

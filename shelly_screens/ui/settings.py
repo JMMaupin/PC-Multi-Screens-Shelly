@@ -339,12 +339,13 @@ class SettingsWindow:
         # reached by its mDNS name, more stable than its DHCP lease, but the
         # address is what one wants to read to open its web interface or
         # notice that it has changed.
-        columns = ("kind", "host", "ip", "signal", "outlets", "auth", "state")
+        columns = ("kind", "host", "ip", "network", "signal", "outlets", "auth", "state")
         self.device_tree = ttk.Treeview(frame, columns=columns, height=7)
         self.device_tree.heading("#0", text=t("Key / name"))
         self.device_tree.heading("kind", text=t("Model"))
         self.device_tree.heading("host", text=t("Reached via"))
         self.device_tree.heading("ip", text=t("IP address"))
+        self.device_tree.heading("network", text=t("Wi-Fi network"))
         self.device_tree.heading("signal", text=t("Signal"))
         self.device_tree.heading("outlets", text=t("Outlets"))
         self.device_tree.heading("auth", text=t("Password"))
@@ -353,6 +354,7 @@ class SettingsWindow:
         self.device_tree.column("kind", width=115)
         self.device_tree.column("host", width=200)
         self.device_tree.column("ip", width=110)
+        self.device_tree.column("network", width=110)
         self.device_tree.column("signal", width=118)
         self.device_tree.column("outlets", width=58, anchor="center")
         # "Mot de passe" did not fit in the 78 pixels sized for "Password";
@@ -421,6 +423,21 @@ class SettingsWindow:
         if rssi is None:
             return "-"
         return f"{rssi} dBm - {wifi_setup.signal_quality(rssi)}"
+
+    def _network_label(self, key: str) -> str:
+        """Wi-Fi network of a device, flagged when it is its backup one."""
+        network = self.app.controller.wifi_network(key)
+        if network is None:
+            return "-"
+        name, backup = network
+        return t("{network} (backup)", network=name) if backup else name
+
+    @staticmethod
+    def _reached_label(device) -> str:
+        """How the application reaches a device: its fixed address, or its name."""
+        if device.fixed_ip and device.ip:
+            return t("{ip} (fixed address)", ip=device.ip)
+        return device.host or t("unknown")
 
     def _auth_label(self, device) -> str:
         """Password state as reported by the device.
@@ -540,6 +557,10 @@ class SettingsWindow:
         DeviceLedsDialog(self.root, self, device)
 
     def _remove_device(self) -> None:
+        selection = self.device_tree.selection()
+        if selection and selection[0].startswith(LOCATION_ROW):
+            self._remove_location(selection[0][len(LOCATION_ROW):])
+            return
         key = self._selected_device_key()
         device = self.config.device(key) if key else None
         if device is None:
@@ -554,6 +575,34 @@ class SettingsWindow:
         self.app.controller.forget(device.key)
         self.refresh()
         self.set_status(f"Device '{key}' removed")
+
+    def _remove_location(self, key: str) -> None:
+        """Delete the selected location, once it has no device left."""
+        label = self.config.location_label(key)
+        devices = [
+            d.label for d in self.config.devices if self.config.location_of(d.key) == key
+        ]
+        if devices:
+            messagebox.showinfo(
+                product.APP_NAME,
+                t("{location} still has devices: {devices}. Move them to another "
+                  "location first (Location...).", location=label, devices=", ".join(devices)),
+                parent=self.root,
+            )
+            return
+        if not messagebox.askyesno(
+            product.APP_NAME,
+            t("Delete the location {location}? Its screen layout goes with it.",
+              location=label),
+            parent=self.root,
+        ):
+            return
+        if not self.config.remove_location(key):
+            return
+        self.app.log(f"Location '{label}' deleted")
+        self._save()
+        self.refresh()
+        self.set_status(t("Location {location} deleted", location=label))
 
     def _show_reset_help(self) -> None:
         PasswordDialog.show_reset_help(self.root)
@@ -2291,7 +2340,7 @@ class SettingsWindow:
                 self.device_tree.insert(
                     "", "end", iid=row, open=True,
                     text=self.config.location_label(location.key),
-                    values=("", "", "", "", "", "", t("the PC is here") if here else ""),
+                    values=("", "", "", "", "", "", "", t("the PC is here") if here else ""),
                 )
                 parents[location.key] = row
         for device in self.config.devices:
@@ -2303,8 +2352,9 @@ class SettingsWindow:
                 text=f"{device.key}" + (f"  -  {device.name}" if device.name else ""),
                 values=(
                     identity.model if identity else device.kind,
-                    device.host or "unknown",
+                    self._reached_label(device),
                     device.ip or "-",
+                    self._network_label(device.key),
                     self._signal_label(device.key),
                     len(self.config.outlets_of(device.key)),
                     self._auth_label(device),
@@ -2431,8 +2481,9 @@ class SettingsWindow:
                 self.device_tree.set(
                     device.key, "auth", self._auth_label(device)
                 )
-                self.device_tree.set(device.key, "host", device.host or "unknown")
+                self.device_tree.set(device.key, "host", self._reached_label(device))
                 self.device_tree.set(device.key, "ip", device.ip or "-")
+                self.device_tree.set(device.key, "network", self._network_label(device.key))
                 self.device_tree.set(
                     device.key, "signal", self._signal_label(device.key)
                 )

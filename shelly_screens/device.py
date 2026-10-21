@@ -106,6 +106,11 @@ class SwitchState:
         )
 
 
+def normalise_mac(mac: str) -> str:
+    """One spelling to compare: "d8:85:ac:e1:c2:40" -> "D885ACE1C240"."""
+    return mac.replace(":", "").replace("-", "").upper()
+
+
 class ShellyDevice:
     """RPC access to a Shelly. Safe to use from several threads."""
 
@@ -115,10 +120,19 @@ class ShellyDevice:
         password: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         protected: set[int] | None = None,
+        address: str = "",
+        mac: str = "",
     ) -> None:
         self.host = host
         self.password = password
         self.timeout = timeout
+        # IPv4 address to send requests to, once the device has said it is
+        # fixed (`fixed_address`): resolving an mDNS name at every request
+        # can take seconds -- eleven, on some networks. Empty: by the name.
+        self.address = address
+        # The MAC the device must report: a device answering under another
+        # one, at that address, is not this one (see `get_all_switches`).
+        self.mac = normalise_mac(mac)
         # Outputs that no call can switch off: typically the one that
         # powers the tower. Cutting a running PC loses its work in progress
         # and can damage its file system.
@@ -147,7 +161,7 @@ class ShellyDevice:
         # link-local address, on which the connection fails.
         from .discovery import ipv4_host
 
-        url = f"http://{ipv4_host(self.host)}{RPC_URI}"
+        url = f"http://{self.address or ipv4_host(self.host)}{RPC_URI}"
 
         auth_header = self._build_auth_header(challenge) if challenge else None
         try:
@@ -253,14 +267,47 @@ class ShellyDevice:
         return self.call("Shelly.GetStatus")
 
     def get_all_switches(self) -> dict[int, SwitchState]:
-        """Read every outlet in a single Shelly.GetStatus call."""
+        """Read every outlet in a single Shelly.GetStatus call.
+
+        The reading also checks who answers: should the address now belong
+        to another device -- a fixed address given twice, a PC moved to
+        another network --, its outlets must not pass for this one's, nor
+        receive its commands. It is then taken as unreachable, and found
+        again by its name.
+        """
         status = self.get_status()
+        reported = normalise_mac(str((status.get("sys") or {}).get("mac") or ""))
+        if self.mac and reported and reported != self.mac:
+            raise ShellyUnreachable(f"{self.host}: answered as {reported}, another device")
         states: dict[int, SwitchState] = {}
         for key, value in status.items():
             if key.startswith("switch:") and isinstance(value, dict):
                 state = SwitchState.from_rpc(value)
                 states[state.id] = state
         return states
+
+    def fixed_address(self) -> str:
+        """The IPv4 address the device keeps whatever network it joins; "" if none.
+
+        A static address on the network it is on is not enough: should it
+        fall back to its other network, on DHCP there, its address would
+        change under our feet. Every enabled Wi-Fi network must therefore be
+        set to a static address, the same one, and it must be the one in
+        use. A device without Wi-Fi (Ethernet) stays reached by its name.
+        """
+        try:
+            status = self.call("WiFi.GetStatus") or {}
+            config = self.call("WiFi.GetConfig") or {}
+        except ShellyError:
+            return ""  # no Wi-Fi component
+        address = str(status.get("sta_ip") or "")
+        stations = [config.get(name) for name in ("sta", "sta1")]
+        enabled = [s for s in stations if isinstance(s, dict) and s.get("enable")]
+        if not address or not enabled:
+            return ""
+        if all(s.get("ipv4mode") == "static" and s.get("ip") == address for s in enabled):
+            return address
+        return ""
 
     def set_switch(self, switch_id: int, on: bool) -> bool:
         """Change an outlet's state; return the previous state.
