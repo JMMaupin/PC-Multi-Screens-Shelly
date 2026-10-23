@@ -39,7 +39,7 @@ import time
 import winreg
 from pathlib import Path
 
-from . import __version__, paths, product
+from . import __version__, paths, product, version_tuple  # noqa: F401 - used by setup_dialog
 
 log = logging.getLogger("shelly_screens")
 
@@ -74,16 +74,6 @@ class SetupError(Exception):
 
 
 # ------------------------------------------------------------------ versions
-
-
-def version_tuple(text: str) -> tuple[int, ...]:
-    """Comparable form of a version; "2.0" and "2.0.0" are the same."""
-    parts = []
-    for piece in str(text).split("."):
-        digits = "".join(ch for ch in piece if ch.isdigit())
-        parts.append(int(digits) if digits else 0)
-    parts += [0] * (4 - len(parts))
-    return tuple(parts[:4])
 
 
 def installed_version() -> str | None:

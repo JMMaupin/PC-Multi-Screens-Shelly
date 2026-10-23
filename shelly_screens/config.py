@@ -32,6 +32,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from . import __version__, version_tuple
 from . import paths as paths_module
 from . import secrets_store
 from .i18n import t
@@ -76,6 +77,30 @@ USER_SETTINGS = (
 # password and the configuration with the old one -- and the application
 # locked out. Keeping it out of the administrator's file costs nothing:
 # every account can decrypt it anyway (see `secrets_store`).
+# Each file says which version of the application wrote it. A copy older
+# than the newest of them writes nothing (see `AppConfig.save`): the copy
+# still installed, started by Windows while a newer one was being tried
+# from the sources, rewrote `state.json` in its own format, and the screen
+# layout and the fixed addresses were lost.
+VERSION_FIELD = "written_by"
+
+
+class NewerVersionFile(PermissionError):
+    """A file written by a newer version: this copy may not replace it."""
+
+
+def stamp(data: dict[str, Any]) -> dict[str, Any]:
+    """A file's content, headed by the version writing it."""
+    return {VERSION_FIELD: __version__, **{k: v for k, v in data.items() if k != VERSION_FIELD}}
+
+
+def newer_than_this(*contents: Any) -> str:
+    """The newest version that wrote these files, if newer than this one; "" otherwise."""
+    found = [str(c.get(VERSION_FIELD) or "") for c in contents if isinstance(c, dict)]
+    newest = max(found, key=version_tuple, default="")
+    return newest if newest and version_tuple(newest) > version_tuple(__version__) else ""
+
+
 DEVICE_STATE_FIELDS = ("host", "ip", "fixed_ip", "password")
 SENSING_STATE_FIELDS = ("script_id", "installed_fingerprint")
 
@@ -618,6 +643,11 @@ class AppConfig:
     # instance is the one noting the state, and a stale copy written from
     # here would overwrite what it noted.
     writes_state: bool = field(default=True, compare=False, repr=False)
+    # Newest version that wrote one of the files, when newer than this one;
+    # empty otherwise. This copy then writes nothing (see `save`), and the
+    # application leaves the devices alone.
+    newer_version: str = field(default="", compare=False, repr=False)
+    _newer_logged: bool = field(default=False, compare=False, repr=False)
     # Last machine content this account was refused permission to write:
     # logged once, not at every save of the state.
     _refused_machine: str = field(default="", compare=False, repr=False)
@@ -1255,13 +1285,28 @@ class AppConfig:
         account may not be allowed to write. Failing to write it must not
         cost the other two, so it comes last and its refusal is only
         logged.
+
+        Nothing at all is written once a newer version has written one of
+        the files: this copy does not know what it holds, and would lose
+        it by rewriting it in its own format.
         """
+        if self.newer_version:
+            if not self._newer_logged:
+                self._newer_logged = True
+                log.info(
+                    "Configuration written by version %s, newer than this one (%s): "
+                    "nothing is saved", self.newer_version, __version__,
+                )
+            return
         if self.writes_state:
-            _save_json(self.paths.state_file, self.state_dict())
-        _save_json(self.paths.user_file, self.user_dict())
+            _save_json(self.paths.state_file, stamp(self.state_dict()))
+        _save_json(self.paths.user_file, stamp(self.user_dict()))
         machine = self.machine_dict()
         try:
-            _save_json(self.paths.machine_file, machine)
+            # Only for a real change: rewriting it to update the version
+            # alone would ask for an administrator after every update.
+            if self.machine_pending():
+                _save_json(self.paths.machine_file, stamp(machine))
             self._machine_baseline = _payload(machine)
         except PermissionError:
             payload = _payload(machine)
@@ -1271,8 +1316,18 @@ class AppConfig:
         self._note_mtimes()
 
     def machine_pending(self) -> bool:
-        """True if the hardware configuration differs from `machine.json`."""
-        return _read_valid(self.paths.machine_file) != _payload(self.machine_dict())
+        """True if the hardware configuration differs from `machine.json`.
+
+        The version that wrote the file is left out: an update alone is not
+        a hardware change waiting for an administrator.
+        """
+        text = _read_valid(self.paths.machine_file)
+        if text is None:
+            return True
+        written = json.loads(text)
+        if isinstance(written, dict):
+            written.pop(VERSION_FIELD, None)
+        return _payload(written) != _payload(self.machine_dict())
 
     def mark_synced(self) -> None:
         """Record the configuration as matching the files on disk."""
@@ -1297,8 +1352,14 @@ class AppConfig:
         administrator -- rereading would silently throw them away.
         """
         local_edits = _payload(self.machine_dict()) != self._machine_baseline
-        machine = self.machine_dict() if local_edits else _load_json(self.paths.machine_file)
-        self._adopt(merge_files(machine, _load_json(self.paths.state_file), self.user_dict()))
+        on_disk = _load_json(self.paths.machine_file)
+        state = _load_json(self.paths.state_file)
+        # A newer version may have written meanwhile, in another session.
+        self.newer_version = self.newer_version or newer_than_this(
+            on_disk, state, _load_json(self.paths.user_file)
+        )
+        machine = self.machine_dict() if local_edits else on_disk
+        self._adopt(merge_files(machine, state, self.user_dict()))
         if local_edits:
             self._note_mtimes()
         else:
@@ -1370,6 +1431,14 @@ def _save_json(target: Path, data: dict[str, Any]) -> bool:
     previous = _read_valid(target)
     if previous == payload:
         return False
+    # The last lock, whatever the path that led here: a file a newer
+    # version wrote is never replaced by an older one.
+    written_by = newer_than_this(json.loads(previous)) if previous is not None else ""
+    if written_by:
+        raise NewerVersionFile(
+            f"{target.name} was written by version {written_by}, newer than this one "
+            f"({__version__})"
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     _write_durable(backup_path(target), previous if previous is not None else payload)
     _write_durable(target, payload)
@@ -1529,12 +1598,11 @@ def load(paths: DataPaths | None = None) -> AppConfig:
     paths = paths or paths_module.default()
     if not paths.machine_file.exists() and paths_module.LEGACY_CONFIG.exists():
         import_legacy(paths_module.LEGACY_CONFIG, paths)
-    data = merge_files(
-        _load_json(paths.machine_file),
-        _load_json(paths.state_file),
-        _load_json(paths.user_file),
-    )
-    config = AppConfig.from_dict(data, paths=paths)
+    machine = _load_json(paths.machine_file)
+    state = _load_json(paths.state_file)
+    user = _load_json(paths.user_file)
+    config = AppConfig.from_dict(merge_files(machine, state, user), paths=paths)
+    config.newer_version = newer_than_this(machine, state, user)
     config.mark_synced()
     return config
 

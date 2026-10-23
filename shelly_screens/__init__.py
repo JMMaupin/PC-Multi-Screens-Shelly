@@ -22,4 +22,14 @@ A third number, not a second decimal: versions compare number by number,
 so "2.21" would read as newer than "2.3", and an update would be refused.
 """
 
-__version__ = "3.1.0"
+__version__ = "3.1.1"
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    """Comparable form of a version; "2.0" and "2.0.0" are the same."""
+    parts = []
+    for piece in str(text).split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    parts += [0] * (4 - len(parts))
+    return tuple(parts[:4])

@@ -408,13 +408,16 @@ class ScreenController:
     def _direct_identity(
         self, device_config: DeviceConfig
     ) -> tuple[discovery.DeviceIdentity | None, str]:
-        """The device asked at its fixed address, skipping the name; (None, "") if not there.
+        """The device asked at its last known address, before any name or sweep.
 
-        Only once it has said its address is fixed (`fixed_ip`), and only
-        if the MAC that answers is its own: otherwise the usual search, by
-        name first, takes over -- the address may have gone to DHCP.
+        Kept only if the MAC that answers is its own: on DHCP, the address
+        may have gone to another device, and the usual search -- name first,
+        then a sweep -- takes over. Asked first even when its address is not
+        known to be fixed: a name that no longer resolves and a sweep that
+        missed it left a power strip unfound for hours while its address
+        answered in forty milliseconds. (None, "") if it is not there.
         """
-        if not (device_config.fixed_ip and device_config.ip and device_config.mac):
+        if not (device_config.ip and device_config.mac):
             return None, ""
         found = discovery.probe(device_config.ip)
         if found is None or normalise_mac(found.mac) != normalise_mac(device_config.mac):

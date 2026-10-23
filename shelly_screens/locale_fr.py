@@ -23,6 +23,14 @@ CATALOG: dict[str, str] = {
     "Model": "Modele",
     "Reached via": "Joint par",
     "Wi-Fi network": "Reseau Wi-Fi",
+    "This configuration was saved by version {newer}; this copy is {version}. To protect it, this copy changes nothing and drives no device: install version {newer} or later.":
+        "Cette configuration a ete enregistree par la version {newer} ; cette copie est la "
+        "{version}. Pour la proteger, cette copie ne modifie rien et ne pilote aucun appareil : "
+        "installez la version {newer} ou plus recente.",
+    "older than its configuration ({newer}): changes nothing":
+        "plus ancienne que sa configuration ({newer}) : ne modifie rien",
+    "Version {version}, older than its configuration ({newer}): changes nothing":
+        "Version {version}, plus ancienne que sa configuration ({newer}) : ne modifie rien",
     "{location} still has devices: {devices}. Move them to another location first (Location...).":
         "{location} a encore des appareils : {devices}. Deplacez-les d'abord vers un "
         "autre emplacement (Emplacement...).",

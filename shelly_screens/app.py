@@ -70,7 +70,7 @@ class Application:
         )
         # Only the session on the screen drives the devices; the others
         # keep their icon but leave the power strips alone.
-        self.in_control = session_module.is_console_session()
+        self.in_control = self._may_drive()
         self.controller.drives_devices = self.in_control
         self.config.writes_state = self.in_control
         # A request to exit older than this instance is a leftover.
@@ -113,6 +113,14 @@ class Application:
             # The first connection may require a network scan: in the
             # background, so the icon appears right away.
             threading.Thread(target=self._initial_connect, daemon=True).start()
+        elif self.config.newer_version:
+            self.log(
+                f"Configuration written by version {self.config.newer_version}, newer than "
+                "this one: this copy leaves it and the devices alone"
+            )
+            # Said at once, not only when someone opens the menu: this copy
+            # was most likely started by Windows, unseen.
+            threading.Timer(3.0, self._explain_passive).start()
         else:
             self.log("Another session is on the screen: this one leaves the devices alone")
         self.tray.run()
@@ -127,7 +135,7 @@ class Application:
         case a notification went missing: a missed handover would leave two
         instances driving the power strips, or none.
         """
-        now = session_module.is_console_session()
+        now = self._may_drive()
         if now == self.in_control:
             return
         self.in_control = now
@@ -144,12 +152,24 @@ class Application:
             threading.Thread(
                 target=self._initial_connect, kwargs={"at_startup": False}, daemon=True
             ).start()
+        elif self.config.newer_version:
+            self.log(
+                f"Configuration written by version {self.config.newer_version}, newer than "
+                "this one: this copy leaves it and the devices alone from now on"
+            )
+            self._explain_passive()
         else:
             self.log(f"Session switch: {self._driver_label()} now drives the devices")
             self.history.sync()
             self.states = {}
             self.online = False
         self._update_icon()
+
+    def _may_drive(self) -> bool:
+        """This copy drives the devices: its session is on the screen, and it
+        is not older than the configuration it would write (see
+        `AppConfig.newer_version`)."""
+        return session_module.is_console_session() and not self.config.newer_version
 
     def _quit_requested(self) -> bool:
         try:
@@ -163,6 +183,15 @@ class Application:
         return t("{user}'s session", user=user) if user else t("another session")
 
     def _explain_passive(self) -> None:
+        if self.config.newer_version:
+            self.tray.notify(
+                APP_NAME,
+                t("This configuration was saved by version {newer}; this copy is {version}. "
+                  "To protect it, this copy changes nothing and drives no device: install "
+                  "version {newer} or later.",
+                  newer=self.config.newer_version, version=__version__),
+            )
+            return
         self.tray.notify(
             APP_NAME,
             t("The power strips are driven by {driver}, on the screen right now. "
@@ -325,6 +354,11 @@ class Application:
 
     def _tooltip(self) -> str:
         if not self.in_control:
+            if self.config.newer_version:
+                return f"{APP_NAME} {__version__} - " + t(
+                    "older than its configuration ({newer}): changes nothing",
+                    newer=self.config.newer_version,
+                )
             return f"{APP_NAME} - " + t("driven by {driver}", driver=self._driver_label())
         if not self.config.devices:
             return f"{APP_NAME} - no device configured"
@@ -409,7 +443,13 @@ class Application:
         if not self.in_control:
             # Reading is harmless, driving is not: the history stays, the
             # profiles and outlets go.
-            items.append(MenuItem.info(t("Driven by {driver}", driver=self._driver_label())))
+            if self.config.newer_version:
+                items.append(MenuItem.info(t(
+                    "Version {version}, older than its configuration ({newer}): changes nothing",
+                    version=__version__, newer=self.config.newer_version,
+                )))
+            else:
+                items.append(MenuItem.info(t("Driven by {driver}", driver=self._driver_label())))
             items.append(MenuItem.sep())
             items.append(
                 MenuItem(t("Consumption history..."), action=self._open_history)

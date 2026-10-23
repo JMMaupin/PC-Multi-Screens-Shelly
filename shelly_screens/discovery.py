@@ -41,6 +41,9 @@ SCAN_WORKERS = 128
 # MAC address whatever its app.
 SUPPORTED_APPS = {
     "PowerStrip",
+    # The same Power Strip 4 Gen4 under its newer firmware (seen in
+    # October 2026: every strip of the setup switched to it).
+    "PowerStripZB",
     "PlugS",
     "PlugUS",
     "PlugUK",
@@ -161,8 +164,13 @@ def resolve(
 
 
 def scan_network(expected_mac: str | None = None) -> DeviceIdentity | None:
-    """Sweep the local subnets looking for a Shelly power strip."""
-    for identity in scan_network_all():
+    """Sweep the local subnets looking for a Shelly power strip.
+
+    A known MAC settles the matter alone (see `_matches`): every Shelly is
+    then looked at, whatever app it reports. Filtering on the app first
+    missed a power strip whose firmware update had renamed it.
+    """
+    for identity in scan_network_all(every_shelly=bool(expected_mac)):
         if _matches(identity, expected_mac):
             return identity
     return None

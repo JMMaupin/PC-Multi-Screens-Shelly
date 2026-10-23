@@ -41,6 +41,13 @@ def save(config: "AppConfig", owner: int | None = None) -> None:
     Blocks while the UAC prompt is up: call it from a worker thread.
     Raises SaveCancelled or SaveFailed; returns normally once saved.
     """
+    from .config import stamp
+
+    if config.newer_version:
+        # Not even with an administrator's blessing: the file holds what
+        # this copy does not know (see `AppConfig.save`).
+        raise SaveFailed(f"the configuration was written by version {config.newer_version}, "
+                         "newer than this one")
     config.save()  # direct write: enough whenever this account may write
     if not config.machine_pending():
         return
@@ -48,7 +55,7 @@ def save(config: "AppConfig", owner: int | None = None) -> None:
     handle, temp_name = tempfile.mkstemp(prefix="shelly-machine-", suffix=".json")
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(config.machine_dict(), stream, indent=2, ensure_ascii=False)
+            json.dump(stamp(config.machine_dict()), stream, indent=2, ensure_ascii=False)
         try:
             code = elevation.run_elevated(
                 [COMMIT_ARGUMENT, temp_name, str(config.paths.machine_dir)], owner=owner
