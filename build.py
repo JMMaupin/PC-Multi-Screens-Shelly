@@ -29,6 +29,7 @@ from shelly_screens import __version__, product  # noqa: E402
 
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
+VENV = ".venv-build"  # the environment build.cmd prepares
 ICONS = ROOT / "windows-icons"
 TIMESTAMP_URL = "http://timestamp.digicert.com"
 
@@ -93,7 +94,21 @@ def sign(exe: Path) -> None:
     print(f"Signed with {certificate}")
 
 
+def check_environment() -> None:
+    """Refuses to build with any Python other than build.cmd's environment.
+
+    3.1.1 was built by `py build.py`, hence with the launcher's default
+    Python: 3.14.3, Tcl 8.6 and another PyInstaller. Its _tkinter predates
+    gh-83274, and the executable crashed where the regular build did not.
+    The same sources must always give the same executable.
+    """
+    expected = (ROOT / VENV).resolve()
+    if Path(sys.prefix).resolve() != expected:
+        raise SystemExit(f"Run build.cmd: {sys.executable} is not the Python of {expected}")
+
+
 def main() -> None:
+    check_environment()
     import PyInstaller.__main__
 
     BUILD.mkdir(exist_ok=True)

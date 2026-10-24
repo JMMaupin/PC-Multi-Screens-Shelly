@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from . import screen_map
 from . import theme as theme_module
+from . import tk_thread
 from .. import discovery, sensing
 from .. import i18n
 from ..i18n import t
@@ -55,6 +56,11 @@ def open_settings(application: "Application") -> None:
             return
         _is_open = True
 
+    def show(root: tk.Tk) -> bool:
+        window = SettingsWindow(root, application)
+        root.mainloop()
+        return window.reopen
+
     def run() -> None:
         global _is_open
         try:
@@ -62,14 +68,10 @@ def open_settings(application: "Application") -> None:
             # the configuration read back: every field then shows what is
             # really in force, with nothing left over from the discarded
             # edits.
-            while True:
-                root = tk.Tk()
-                window = SettingsWindow(root, application)
-                root.mainloop()
-                if not window.reopen:
-                    break
-        except Exception as exc:  # noqa: BLE001 - a failed UI must not kill the app
-            application.log(f"Settings window failed: {exc}")
+            while tk_thread.run_window(
+                show, lambda exc: application.log(f"Settings window failed: {exc}")
+            ):
+                pass
         finally:
             with _state_lock:
                 _is_open = False

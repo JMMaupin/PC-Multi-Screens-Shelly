@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 
 from . import screen_map
 from . import theme as theme_module
+from . import tk_thread
 from ..i18n import t
 from ..win import icon as icon_module
 from ..win import monitors
@@ -73,18 +74,26 @@ def toggle_picker(application: "Application") -> None:
             return
         _is_open = True
 
-    def run() -> None:
-        global _is_open, _current
+    def show(root: tk.Tk) -> None:
+        global _current
+        _current = ProfilePicker(root, application)
         try:
-            root = tk.Tk()
-            _current = ProfilePicker(root, application)
             root.mainloop()
-        except Exception as exc:  # noqa: BLE001 - a failed UI must not kill the app
-            application.log(f"Profile picker failed: {exc}")
+        finally:
+            # Before `run_window` releases the interpreter: this reference
+            # would keep it.
+            with _state_lock:
+                _current = None
+
+    def run() -> None:
+        global _is_open
+        try:
+            tk_thread.run_window(
+                show, lambda exc: application.log(f"Profile picker failed: {exc}")
+            )
         finally:
             with _state_lock:
                 _is_open = False
-                _current = None
 
     threading.Thread(target=run, name="picker-ui", daemon=True).start()
 
