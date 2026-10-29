@@ -42,6 +42,17 @@ REFRESH_INTERVAL_MS = 5000
 # After Windows refused to hide the taskbar again, wait this long before
 # trying anew: insisting at every refresh would only fill the log.
 TASKBAR_RETRY_S = 300.0
+# How often the on-device script's reach to the other power strips is
+# checked (see `sensing.unreachable_remotes`), and how soon it is tried
+# again when the device hosting the script did not answer.
+SCRIPT_REACH_EVERY_S = 3600.0
+SCRIPT_REACH_RETRY_S = 300.0
+# A power strip carrying a PC outlet is restarted by itself once its metering
+# gives out (see `_restart_faulty_meters`): no sooner than this after the
+# last restart, and no more than so many times a day. A freeze that comes
+# back that fast is something else, for a person to look at.
+METER_RESTART_GAP_S = 1800.0
+METER_RESTARTS_PER_DAY = 3
 
 
 class Application:
@@ -94,6 +105,16 @@ class Application:
         # that location are brought up to date at the next refresh.
         self._location_changed = False
         self.controller.on_location = self._on_location
+        # Power strips the on-device script cannot reach, with the reason;
+        # checked from the first refresh on, then every hour, and again as
+        # soon as another script is installed.
+        self.script_unreachable: dict[str, str] = {}
+        self._script_reach_due = 0.0
+        self._script_reach_checked = ""  # fingerprint of the script checked
+        # Automatic restarts of a device whose metering gave out: when, by
+        # device, and the devices already announced as beyond that remedy.
+        self._meter_restarts: dict[str, list[float]] = {}
+        self._meter_given_up: set[str] = set()
 
     # ------------------------------------------------------------------ log
 
@@ -279,6 +300,8 @@ class Application:
             # read, and on the screens as they will stay.
             self._settle_ghosts()
             self._remember_screens()
+            self._check_script_reach()
+            self._restart_faulty_meters()
         except (NotConnected, OSError) as exc:
             self.online = False
             self.log(f"Refresh failed: {exc}")
@@ -324,6 +347,106 @@ class Application:
             )
         # A device that became reachable again may warn again later.
         self._auth_warned = failures
+
+    def _check_script_reach(self) -> None:
+        """Make sure the on-device script reaches the other power strips.
+
+        It switches their screens off once the PC sleeps or shuts down, and
+        nothing else can by then. When it fails, the screens stay on all
+        night, and nothing says so: the device is the only one to know.
+        Hence the check -- at the first refresh, then hourly -- and a
+        balloon the first time a power strip drops out of its reach.
+        """
+        if self.config.location is None or self.busy:
+            return  # an operation in progress has the devices first
+        now = time.monotonic()
+        installed = self.config.sensing.installed_fingerprint
+        if now < self._script_reach_due and installed == self._script_reach_checked:
+            return
+        self._script_reach_checked = installed
+        from . import sensing
+
+        try:
+            failures = sensing.unreachable_remotes(self.controller, self.config)
+        except Exception:  # noqa: BLE001 - its device is silent, and shown as such
+            self._script_reach_due = now + SCRIPT_REACH_RETRY_S
+            return
+        self._script_reach_due = now + SCRIPT_REACH_EVERY_S
+        lost = sorted(failures.keys() - self.script_unreachable.keys())
+        for key in lost:
+            self.log(f"On-device script cannot reach '{key}': {failures[key]}")
+        for key in sorted(self.script_unreachable.keys() - failures.keys()):
+            self.log(f"On-device script reaches '{key}' again")
+        self.script_unreachable = failures
+        if lost:
+            self.tray.notify(
+                APP_NAME,
+                t("The power strip that watches the PC cannot reach {devices}: "
+                  "their screens will stay on while the PC sleeps or is off.",
+                  devices=", ".join(lost)),
+            )
+
+    def _restart_faulty_meters(self) -> None:
+        """Restart a power strip carrying a PC outlet once its metering gives out.
+
+        Everything rests on that measurement: the on-device script switches
+        the screens on when it sees the PC draw, off when it stops, and the
+        location is recognised by it. Frozen, it held a standby 1 W while
+        the PC drew 150 (2026-10-29): no screen came on at boot. This
+        application runs on the PC, so the PC is on; a restart is the only
+        known remedy, and a harmless one -- latching relays, checked again
+        that day: the PC's outlet did not move. Bounded all the same (see
+        `METER_RESTART_GAP_S`), and announced.
+        """
+        if self.busy or not self.in_control:
+            return
+        pc_devices ={o.device for o in self.config.outlets if o.host_pc}
+        faulty = self.controller.faulty_meter_devices() & pc_devices
+        if not faulty:
+            self._meter_given_up.clear()
+            return
+        now = time.monotonic()
+        due = []
+        for key in sorted(faulty):
+            recent = [
+                at for at in self._meter_restarts.get(key, []) if now - at < 86400.0
+            ]
+            self._meter_restarts[key] = recent
+            if recent and now - recent[-1] < METER_RESTART_GAP_S:
+                continue
+            if len(recent) >= METER_RESTARTS_PER_DAY:
+                if key not in self._meter_given_up:
+                    self._meter_given_up.add(key)
+                    self.log(f"Device '{key}': metering still faulty after "
+                             f"{len(recent)} restarts today, left as is")
+                    self.tray.notify(APP_NAME, t(
+                        "The measurement of {device} keeps failing, even after {count} "
+                        "restarts today: its screens no longer follow the PC. Unplug "
+                        "it for a few seconds, or check its firmware.",
+                        device=key, count=len(recent)))
+                continue
+            due.append(key)
+        if not due:
+            return
+        refs = ", ".join(sorted(
+            r for r in self.controller.faulty_meters() if r.split(":")[0] in due
+        ))
+
+        def worker() -> None:
+            for key in due:
+                self.controller.reboot_device(key)
+            time.sleep(15.0)
+            self.controller.connect_all(allow_scan=False)
+            # Measured again, the PC may well be somewhere else.
+            self.controller.unsettle_location()
+
+        if self._run_async("Restarting device", worker):
+            for key in due:
+                self._meter_restarts[key].append(now)
+            self.log(f"Metering faulty ({refs}): restarting {', '.join(due)}")
+            self.tray.notify(APP_NAME, t(
+                "The measurement of {devices} had frozen: restarting it. "
+                "Its outlets stay as they are.", devices=", ".join(due)))
 
     def _outlet_states(self) -> list[bool]:
         """Outlet states, in configuration order."""
@@ -483,7 +606,7 @@ class Application:
             items.append(MenuItem.info(t("No device reachable")))
             items.append(MenuItem(t("Reconnect"), action=self.reconnect))
 
-        frozen = self.controller.frozen_meters()
+        frozen = self.controller.faulty_meters()
         if frozen:
             names = ", ".join(sorted(
                 self.config.outlet(r).label
@@ -505,6 +628,11 @@ class Application:
             items.append(
                 MenuItem(t("Update it now"), action=self.update_script)
             )
+        if self.script_unreachable:
+            items.append(MenuItem.info(t(
+                "On-device script cannot reach {devices}",
+                devices=", ".join(sorted(self.script_unreachable)),
+            )))
 
         if self.busy:
             items.append(MenuItem.info(f"Busy: {self.busy}"))
@@ -567,15 +695,14 @@ class Application:
         harmless: latching relays, and `initial_state` brings the PC's
         outlet back on no matter what.
         """
-        keys = {
-            ref.split(":")[0] for ref in self.controller.frozen_meters()
-        }
+        keys = self.controller.faulty_meter_devices()
 
         def worker() -> None:
             for key in sorted(keys):
                 self.controller.reboot_device(key)
             time.sleep(15.0)
             self.controller.connect_all(allow_scan=False)
+            self.controller.unsettle_location()
 
         self._run_async("Restarting device", worker)
 

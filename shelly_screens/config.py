@@ -67,6 +67,8 @@ USER_SETTINGS = (
     "detach_ghost_screens",
     "quick_outlets",
     "keep_taskbar_autohide",
+    "history_ema",
+    "history_ema_min",
 )
 # Device and sensing fields the application updates by itself: an address
 # changed by DHCP, the id and fingerprint of the script it installed.
@@ -513,6 +515,19 @@ class PowerSensing:
         return ""
 
 
+# Bounds of the history curve's moving average, in minutes.
+EMA_MINUTES = (1, 10)
+
+
+def clamp_ema_minutes(value: Any) -> int:
+    """Time constant of the history's moving average, kept within bounds."""
+    low, high = EMA_MINUTES
+    try:
+        return min(max(int(value), low), high)
+    except (TypeError, ValueError):
+        return 5
+
+
 @dataclass
 class Settings:
     """Behaviour settings."""
@@ -564,6 +579,11 @@ class Settings:
     # Put the taskbar's auto-hide back whenever Windows drops it: it
     # sometimes does when screens come and go.
     keep_taskbar_autohide: bool = False
+    # Exponential moving average drawn over the power curve of the history
+    # window, and its time constant in minutes (1 to 10): it smooths the
+    # bursts of a working PC into a level one can read.
+    history_ema: bool = False
+    history_ema_min: int = 5
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -602,6 +622,10 @@ class Settings:
             quick_outlets=[str(r) for r in data.get("quick_outlets", [])],
             keep_taskbar_autohide=bool(
                 data.get("keep_taskbar_autohide", defaults.keep_taskbar_autohide)
+            ),
+            history_ema=bool(data.get("history_ema", defaults.history_ema)),
+            history_ema_min=clamp_ema_minutes(
+                data.get("history_ema_min", defaults.history_ema_min)
             ),
         )
 

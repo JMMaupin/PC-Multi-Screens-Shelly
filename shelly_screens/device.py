@@ -32,6 +32,12 @@ AUTH_USERNAME = "admin"  # imposed by the Shelly Gen2+ firmware
 # declaring them here rather than hard-coding them in two places.
 RPC_METHOD = "POST"
 RPC_URI = "/rpc"
+# What a failed connection may raise. OverflowError is no OSError, yet
+# Windows sometimes resolves a `.local` name to an IPv6 address whose
+# flowinfo is out of range, and the socket refuses it with that very
+# exception: `connect(): flowinfo must be 0-1048575`. Left uncaught, one
+# power strip slow to answer on wake aborted the whole resume.
+NETWORK_ERRORS = (urllib.error.URLError, OSError, OverflowError)
 
 
 class ShellyError(RuntimeError):
@@ -91,6 +97,9 @@ class SwitchState:
     current: float  # current, A
     energy_total: float  # cumulative energy, Wh
     source: str  # what caused the last change (SHC, HTTP, button...)
+    # Mains frequency, Hz; 0 when the device does not report it. A metering
+    # channel that gave out reports absurd values here (223750 Hz).
+    freq: float = 0.0
 
     @classmethod
     def from_rpc(cls, payload: dict[str, Any]) -> "SwitchState":
@@ -103,6 +112,7 @@ class SwitchState:
             current=float(payload.get("current") or 0.0),
             energy_total=float(aenergy.get("total") or 0.0),
             source=str(payload.get("source") or ""),
+            freq=float(payload.get("freq") or 0.0),
         )
 
 
@@ -146,8 +156,15 @@ class ShellyDevice:
 
     # ------------------------------------------------------------------ RPC
 
-    def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
-        """Call an RPC method and return its "result"."""
+    def call(
+        self, method: str, params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        """Call an RPC method and return its "result".
+
+        `timeout` replaces the client's own, for a method that makes the
+        device wait in turn -- an `HTTP.GET` it sends somewhere else.
+        """
         with self._lock:
             self._request_id += 1
             request_id = self._request_id
@@ -164,8 +181,9 @@ class ShellyDevice:
         url = f"http://{self.address or ipv4_host(self.host)}{RPC_URI}"
 
         auth_header = self._build_auth_header(challenge) if challenge else None
+        timeout = timeout or self.timeout
         try:
-            payload = self._post_with_backoff(url, raw, auth_header)
+            payload = self._post_with_backoff(url, raw, auth_header, timeout)
         except urllib.error.HTTPError as exc:
             if exc.code != 401:
                 raise ShellyUnreachable(f"{self.host}: HTTP {exc.code}") from exc
@@ -179,7 +197,7 @@ class ShellyDevice:
                 self._nonce_count = 0
             try:
                 payload = self._post_with_backoff(
-                    url, raw, self._build_auth_header(challenge)
+                    url, raw, self._build_auth_header(challenge), timeout
                 )
             except urllib.error.HTTPError as retry_exc:
                 if retry_exc.code == 401:
@@ -191,9 +209,9 @@ class ShellyDevice:
                 raise ShellyUnreachable(
                     f"{self.host}: HTTP {retry_exc.code}"
                 ) from retry_exc
-            except (urllib.error.URLError, OSError) as retry_exc:
+            except NETWORK_ERRORS as retry_exc:
                 raise ShellyUnreachable(f"{self.host}: {retry_exc}") from retry_exc
-        except (urllib.error.URLError, OSError) as exc:
+        except NETWORK_ERRORS as exc:
             raise ShellyUnreachable(f"{self.host}: {exc}") from exc
 
         if "error" in payload:
@@ -202,7 +220,7 @@ class ShellyDevice:
         return payload.get("result")
 
     def _post_with_backoff(
-        self, url: str, raw: bytes, auth_header: str | None
+        self, url: str, raw: bytes, auth_header: str | None, timeout: float
     ) -> dict[str, Any]:
         """Send the request, waiting whenever the device asks for a breather.
 
@@ -212,19 +230,21 @@ class ShellyDevice:
         """
         for attempt in range(RATE_LIMIT_RETRIES):
             try:
-                return self._post(url, raw, auth_header)
+                return self._post(url, raw, auth_header, timeout)
             except urllib.error.HTTPError as exc:
                 if exc.code != RATE_LIMIT_STATUS or attempt == RATE_LIMIT_RETRIES - 1:
                     raise
                 time.sleep(RATE_LIMIT_PAUSE_S * (attempt + 1))
         raise ShellyUnreachable(f"{self.host}: rate limited")
 
-    def _post(self, url: str, raw: bytes, auth_header: str | None) -> dict[str, Any]:
+    def _post(
+        self, url: str, raw: bytes, auth_header: str | None, timeout: float
+    ) -> dict[str, Any]:
         request = urllib.request.Request(url, data=raw, method="POST")
         request.add_header("Content-Type", "application/json")
         if auth_header:
             request.add_header("Authorization", auth_header)
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
     def _build_auth_header(self, challenge: dict[str, str]) -> str:

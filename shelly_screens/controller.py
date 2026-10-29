@@ -145,6 +145,12 @@ RESOLVE_COOLDOWN_S = 30.0
 # offering to restart a healthy device. A real freeze lasts until the
 # device restarts, hours later: waiting five minutes loses nothing.
 FROZEN_METER_READS = 60
+# Mains frequency a working channel reports, 50 or 60 Hz give or take. The
+# freeze can also leave absurd figures behind -- 223750 Hz and 2 V on two
+# outlets of a running strip, on 2026-10-29: no need to wait five minutes
+# for those. It froze as the PC was switched on, so the on-device script
+# never saw it start, and its screens stayed off.
+MAINS_HZ_RANGE = (45.0, 65.0)
 # The signal is read separately, and rarely. A Wi-Fi link does not change
 # in the blink of an eye, and every extra query weighs on a firmware whose
 # fragility we learned about tonight: once a minute is plenty to see a
@@ -295,12 +301,19 @@ class ScreenController:
         keys = [device.key for device in self.config.devices]
         if not keys:
             return {}
+
+        def connect(key: str) -> bool:
+            # One device's unexpected error must not take the others down:
+            # raised from the pool, it aborted the whole wake-up, the
+            # profile left unapplied.
+            try:
+                return self.connect_device(key, allow_scan, force=True) is not None
+            except Exception as exc:  # noqa: BLE001
+                self._log(f"Device '{key}' not connected: {exc}")
+                return False
+
         with ThreadPoolExecutor(max_workers=len(keys)) as pool:
-            found = pool.map(
-                lambda key: self.connect_device(key, allow_scan, force=True) is not None,
-                keys,
-            )
-            return dict(zip(keys, found))
+            return dict(zip(keys, pool.map(connect, keys)))
 
     def connect_device(
         self, key: str, allow_scan: bool = True, force: bool = False
@@ -749,15 +762,26 @@ class ScreenController:
         place. A location without a PC outlet cannot be recognised that way:
         it is chosen only if no PC outlet draws, and it is the only one
         whose devices answer.
+
+        A PC outlet whose metering has given out proves nothing either way:
+        its location is chosen when no PC outlet draws and it is the only
+        such one. Concluding "at no location" there turned the profiles off
+        at the very moment the screens needed switching on by hand.
         """
         floor = self.host_pc_floor()
+        faulty = self.faulty_meter_devices()
         readings: dict[str, str] = {}
         drawing = []
+        unmeasured = []
         for location in self.config.locations:
             pc = self.config.host_pc_at(location.key)
             if pc is None:
                 continue
             state = states.get(pc.ref)
+            if state is not None and pc.device in faulty:
+                readings[location.key] = f"{pc.ref} measurement faulty"
+                unmeasured.append(location.key)
+                continue
             readings[location.key] = (
                 f"{pc.ref} {state.apower:.0f} W" if state else f"{pc.ref} unreachable"
             )
@@ -774,6 +798,8 @@ class ScreenController:
             if len(watched) == 1:
                 return watched[0], "its screens are the ones Windows sees"
             return None, "several PC outlets draw power: " + ", ".join(readings.values())
+        if len(unmeasured) == 1:
+            return unmeasured[0], f"PC outlet {readings[unmeasured[0]]}, its device answers"
         answering = [
             location.key for location in self.config.locations
             if self.config.host_pc_at(location.key) is None
@@ -845,6 +871,32 @@ class ScreenController:
             for ref, readings in self._meter_history.items()
             if len(readings) >= FROZEN_METER_READS and len(set(readings)) == 1
         }
+
+    def implausible_meters(self) -> set[str]:
+        """Outlets on whose mains frequency is out of any grid's range.
+
+        Off outlets and devices that report no frequency say nothing.
+        """
+        low, high = MAINS_HZ_RANGE
+        return {
+            ref
+            for ref, state in self.last_states.items()
+            if state.output and state.freq > 0 and not low <= state.freq <= high
+        }
+
+    def faulty_meters(self) -> set[str]:
+        """Outlets whose metering has given out: frozen, or reading absurd figures."""
+        return self.frozen_meters() | self.implausible_meters()
+
+    def faulty_meter_devices(self) -> set[str]:
+        """Devices with an outlet whose metering has given out.
+
+        The whole device is suspect, not that outlet alone: on 2026-10-29,
+        two outlets read absurd figures while the PC's, on the same strip,
+        read a plausible 1 W frozen in place -- the PC drew 150. A restart
+        brings every channel back at once.
+        """
+        return {ref.split(":")[0] for ref in self.faulty_meters()}
 
     def reboot_device(self, key: str) -> None:
         """Restart a device.

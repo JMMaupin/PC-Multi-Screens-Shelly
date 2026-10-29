@@ -33,6 +33,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import TYPE_CHECKING
 
+from .. import config as config_module
 from .. import power_history
 from ..i18n import t
 from ..win import icon as icon_module
@@ -182,6 +183,11 @@ class HistoryWindow:
         self.end = time.time()
         self.follow = True
         self.log_scale = tk.BooleanVar(self.root, value=True)
+        settings = self.config.settings
+        self.ema_on = tk.BooleanVar(self.root, value=settings.history_ema)
+        self.ema_minutes = tk.IntVar(self.root, value=settings.history_ema_min)
+        # Average per pixel column, kept for the pointer's readout.
+        self.ema_values: list[float | None] = []
         self.drag: tuple[int, float] | None = None
         self.cursor_x: int | None = None
         self.view: tuple[float, float, int, int, int, int] | None = None
@@ -236,6 +242,18 @@ class HistoryWindow:
             scale, text=t("Linear"), value=False, variable=self.log_scale,
             command=self.draw,
         ).pack(side="left", padx=(8, 0))
+
+        average = ttk.Frame(bar)
+        average.pack(side="right", padx=(0, 18))
+        ttk.Checkbutton(
+            average, text=t("EMA"), variable=self.ema_on, command=self._on_ema_changed,
+        ).pack(side="left")
+        low, high = config_module.EMA_MINUTES
+        ttk.Spinbox(
+            average, from_=low, to=high, increment=1, width=3, state="readonly",
+            textvariable=self.ema_minutes, command=self._on_ema_changed,
+        ).pack(side="left", padx=(6, 4))
+        ttk.Label(average, text=t("min")).pack(side="left")
 
         export = ttk.Menubutton(bar, text=t("Export"))
         menu = tk.Menu(export, tearoff=False)
@@ -559,6 +577,67 @@ class HistoryWindow:
                     cell[1] = watts
         return columns
 
+    def _ema_columns(
+        self, start: float, end: float, count: int, now: float, tau: float
+    ) -> list[float | None]:
+        """Exponential moving average at the right edge of each pixel column.
+
+        Exact on the step curve the points make: each one holds until the
+        next, and the average closes in on it as 1 - exp(-dt / tau), however
+        irregular the readings -- five seconds apart while the PC runs,
+        minutes apart from the on-device probe while it sleeps. A plain
+        per-point coefficient would weigh those very differently.
+
+        It starts five time constants before the view, so as to arrive
+        settled at its left edge. A gap restarts it from the first point
+        after: averaging across hours without data would invent a slope.
+        """
+        columns: list[float | None] = [None] * count
+        if count <= 0 or not self.samples or tau <= 0:
+            return columns
+        index = max(bisect_right(self.times, start - 5 * tau) - 1, 0)
+        ema = self.samples[index].watts
+        clock = self.times[index]
+        width = (end - start) / count
+        last = len(self.times) - 1
+        for column in range(count):
+            target = min(start + (column + 1) * width, now)
+            while True:
+                sample = self.samples[index]
+                following = self.times[index + 1] if index < last else now
+                valid_until = min(following, sample.t + sample.max_gap)
+                if clock < valid_until:
+                    reach = min(valid_until, target)
+                    if reach > clock:
+                        ema = sample.watts + (ema - sample.watts) * math.exp(
+                            -(reach - clock) / tau
+                        )
+                        clock = reach
+                    if clock >= target:
+                        break
+                if index >= last or self.times[index + 1] > target:
+                    break  # in a gap, or past the last point
+                index += 1
+                if self.times[index] > clock:
+                    ema = self.samples[index].watts  # after a gap: start over
+                    clock = self.times[index]
+            # Reached within this column: drawn. Stopped short of it (a gap)
+            # or not started yet (before the first point): left blank.
+            if target - width < clock <= target:
+                columns[column] = ema
+        return columns
+
+    def _on_ema_changed(self) -> None:
+        """Redraw, and keep the choice for the next opening."""
+        settings = self.config.settings
+        settings.history_ema = bool(self.ema_on.get())
+        settings.history_ema_min = config_module.clamp_ema_minutes(self.ema_minutes.get())
+        self.draw()
+        try:
+            self.config.save()
+        except OSError as exc:
+            self.app.log(f"History window: average setting not saved: {exc}")
+
     def _fit_y(self, values: list[float]) -> tuple[float, float]:
         """Vertical range, fitted to what is visible."""
         if self.log_scale.get():
@@ -605,6 +684,7 @@ class HistoryWindow:
                 x, self._y(cell[1]) - 1, x, self._y(cell[0]) + 1,
                 fill=palette.accent, width=2,
             )
+        self._draw_ema(start, end, x0, now)
 
         if self.key is None:
             message = t("No outlet configured.")
@@ -622,6 +702,29 @@ class HistoryWindow:
         self._update_stats(start, end, now)
         self._update_mode(end)
         self._draw_cursor()
+
+    def _draw_ema(self, start: float, end: float, x0: int, now: float) -> None:
+        """The moving average, as a line broken where data is missing.
+
+        It stays within the range of the points it averages, so the
+        vertical fit, made on those points, already holds it.
+        """
+        self.ema_values = []
+        if not self.ema_on.get() or self.view is None:
+            return
+        count = self.view[4] - x0
+        tau = config_module.clamp_ema_minutes(self.ema_minutes.get()) * 60.0
+        self.ema_values = self._ema_columns(start, end, count, now, tau)
+        run: list[float] = []
+        for column, watts in enumerate(self.ema_values + [None]):
+            if watts is not None:
+                run += [x0 + column + 0.5, self._y(watts)]
+                continue
+            if len(run) >= 4:
+                self.canvas.create_line(
+                    *run, fill=self.palette.caution, width=2,
+                )
+            run = []
 
     def _draw_y_grid(self, x0: int, y0: int, x1: int, y1: int) -> None:
         canvas = self.canvas
@@ -757,8 +860,20 @@ class HistoryWindow:
                   self.palette.bg, self.palette.text, bold=True,
                   outline=self.palette.accent)
         origin = "   " + t("(on-device probe, PC asleep)") if asleep else ""
+        average = ""
+        column = int(self.cursor_x - x0)
+        ema = self.ema_values[column] if 0 <= column < len(self.ema_values) else None
+        if ema is not None:
+            y_ema = self._y(ema)
+            canvas.create_oval(
+                self.cursor_x - 4, y_ema - 4, self.cursor_x + 4, y_ema + 4,
+                fill=self.palette.caution, outline=self.palette.bg, tags="cursor",
+            )
+            average = "   " + t("EMA {minutes} min: {watts} W",
+                                 minutes=config_module.clamp_ema_minutes(self.ema_minutes.get()),
+                                 watts=f"{ema:.1f}")
         self.readout.set(
-            f"{_stamp(moment, seconds=True)}   {sample.watts:.1f} W{origin}"
+            f"{_stamp(moment, seconds=True)}   {sample.watts:.1f} W{average}{origin}"
         )
 
     def _tag(self, x, y, text, anchor, left, right, fill, colour, bold=False,

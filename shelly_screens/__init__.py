@@ -22,7 +22,7 @@ A third number, not a second decimal: versions compare number by number,
 so "2.21" would read as newer than "2.3", and an update would be refused.
 """
 
-__version__ = "3.1.2"
+__version__ = "3.2.0"
 
 
 def version_tuple(text: str) -> tuple[int, ...]:

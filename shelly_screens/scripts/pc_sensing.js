@@ -89,7 +89,7 @@ function pump() {
     Shelly.call("HTTP.GET", {
       url: "http://" + prefix + outlet.h + "/rpc/Switch.Set?id=" + JSON.stringify(outlet.i)
         + "&on=" + (job.on ? "true" : "false"),
-      timeout: 5,
+      timeout: CFG.wait,
     }, function (res, err) {
       if (err !== 0 || res === null || res.code !== 200) {
         print("pc_sensing: remote outlet " + JSON.stringify(job.i)

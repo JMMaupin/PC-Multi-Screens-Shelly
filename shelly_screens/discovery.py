@@ -18,10 +18,11 @@ import ipaddress
 import json
 import socket
 import subprocess
-import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+
+from .device import NETWORK_ERRORS
 
 PROBE_TIMEOUT = 1.5
 # A first mDNS resolution queries the network over multicast and waits for
@@ -117,7 +118,11 @@ def probe(host: str, timeout: float = PROBE_TIMEOUT) -> DeviceIdentity | None:
             f"http://{ipv4_host(host)}/shelly", timeout=timeout
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    except (*NETWORK_ERRORS, ValueError, json.JSONDecodeError):
+        # The OverflowError among them is the one `ipv4_host` set out to
+        # avoid: when the name does not resolve over IPv4, urllib still
+        # tries it, and Windows may hand it an unusable IPv6 address. Missed
+        # here, it aborted a whole resume from sleep (2026-10-25).
         return None
     if not isinstance(payload, dict) or "mac" not in payload or "app" not in payload:
         return None

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .config import AppConfig, OutletConfig, parse_ref
+from .config import AppConfig, DeviceConfig, OutletConfig, parse_ref
 from .device import AUTH_USERNAME, ShellyError
 
 if TYPE_CHECKING:
@@ -50,6 +50,12 @@ KVS_KEY_NOT_FOUND = -105
 COMMAND_GAP_MS = 1200
 # Number of attempts per remote command before giving up.
 COMMAND_TRIES = 3
+# Seconds the script gives another power strip to answer. The check of
+# `unreachable_remotes` grants the same, no more.
+REMOTE_TIMEOUT_S = 5
+# What the application adds to that delay when it asks for the check: the
+# round trip to the device hosting the script, on top of its own wait.
+REMOTE_CHECK_MARGIN_S = 3.0
 # Maximum size of one code upload. The firmware rejects requests that are
 # too large (HTTP 413): the code is therefore sent in chunks, the first
 # replacing the content and the following ones appended to it.
@@ -116,6 +122,46 @@ def host_device_key(config: AppConfig) -> str:
     return parse_ref(config.sensing.pc_ref)[0]
 
 
+def remote_host(device: DeviceConfig) -> str:
+    """How the script reaches another power strip: its address if fixed, else its name.
+
+    The device's own HTTP client does not resolve `.local` names reliably.
+    On 2026-10-25, the power strip hosting the script answered "Host not
+    found" for its neighbour's name while the address answered at once:
+    the neighbour's screens had stayed on through two sleeps, with no trace
+    anywhere. The name remains for a device on DHCP, the only lead that
+    follows it when its lease changes.
+    """
+    if device.fixed_ip and device.ip:
+        return device.ip
+    return device.host
+
+
+def _remote_entry(device: DeviceConfig, switch_id: int) -> dict[str, Any]:
+    """An outlet of another power strip, as the script addresses it."""
+    host = remote_host(device)
+    if not host:
+        raise SensingError(
+            f"Device '{device.key}' has no known address; reconnect it first"
+        )
+    # The credentials travel in the URL, the only form the on-device HTTP
+    # client accepts: neither the Basic header nor an `auth` field is
+    # honoured -- both answer 401, whereas `http://admin:pwd@host/` answers
+    # 200. Without this, a password-protected power strip rejects every
+    # command from the script, and its outlets stay frozen.
+    userinfo = ""
+    password = device.get_password()
+    if password:
+        userinfo = AUTH_USERNAME + ":" + quote(password, safe="")
+    return {"h": host, "i": switch_id, "u": userinfo}
+
+
+def _remote_url(entry: dict[str, Any], query: str) -> str:
+    """The URL the script builds for an entry (see `pump` in the script)."""
+    prefix = entry["u"] + "@" if entry["u"] else ""
+    return f"http://{prefix}{entry['h']}/rpc/{query}"
+
+
 def build_script_config(config: AppConfig) -> dict[str, Any]:
     """Assemble the configuration injected into the script."""
     sensing = config.sensing
@@ -131,23 +177,11 @@ def build_script_config(config: AppConfig) -> dict[str, Any]:
             outlets.append({"h": None, "i": outlet.switch_id})
         else:
             device = config.device(outlet.device)
-            if device is None or not device.host:
+            if device is None:
                 raise SensingError(
                     f"Device '{outlet.device}' has no known address; reconnect it first"
                 )
-            # The credentials travel in the URL, the only form the on-device
-            # HTTP client accepts: neither the Basic header nor an `auth`
-            # field is honoured -- both answer 401, whereas
-            # `http://admin:pwd@host/` answers 200. Without this, a
-            # password-protected power strip rejects every command from the
-            # script, and its outlets stay frozen.
-            userinfo = ""
-            password = device.get_password()
-            if password:
-                userinfo = AUTH_USERNAME + ":" + quote(password, safe="")
-            outlets.append(
-                {"h": device.host, "i": outlet.switch_id, "u": userinfo}
-            )
+            outlets.append(_remote_entry(device, outlet.switch_id))
 
     boot = config.boot_screen_outlet()
     boot_index = outlet_index(config, boot.ref) if boot is not None else -1
@@ -168,6 +202,7 @@ def build_script_config(config: AppConfig) -> dict[str, Any]:
         "poll": round(poll, 1),
         "gap": COMMAND_GAP_MS,
         "tries": COMMAND_TRIES,
+        "wait": REMOTE_TIMEOUT_S,
         "boot": boot_index,
         "key": KVS_PROFILE_KEY,
         "outlets": outlets,
@@ -432,6 +467,62 @@ def status(controller: "ScreenController", config: AppConfig) -> ScriptStatus:
         )
     except Exception as exc:  # noqa: BLE001
         return ScriptStatus(error=str(exc))
+
+
+def unreachable_remotes(
+    controller: "ScreenController", config: AppConfig
+) -> dict[str, str]:
+    """Power strips the script cannot reach, by key, with what its device answered.
+
+    The script commands the other power strips over HTTP, from the device
+    it runs on, and a failure there shows up nowhere: neither the
+    application nor its log sees it, and the screens simply stay on all
+    night. So that device is asked to make the very same request -- same
+    address, same credentials, same delay, as many attempts -- on a method
+    that changes nothing.
+
+    Raises when the device hosting the script does not answer itself:
+    nothing can be concluded about the others then.
+    """
+    if not config.sensing.enabled or not config.sensing.pc_ref:
+        return {}
+    host_key = host_device_key(config)
+    remotes: dict[str, dict[str, Any]] = {}
+    for outlet in controlled_outlets(config):
+        device = config.device(outlet.device)
+        if outlet.device != host_key and device is not None:
+            remotes.setdefault(outlet.device, _remote_entry(device, outlet.switch_id))
+    if not remotes:
+        return {}
+    host = controller.device_for(host_key)
+    failures: dict[str, str] = {}
+    for key, entry in remotes.items():
+        url = _remote_url(entry, f"Switch.GetStatus?id={entry['i']}")
+        reason = ""
+        for _attempt in range(COMMAND_TRIES):
+            reason = _ask_remote(host, url)
+            if not reason:
+                break
+        if reason:
+            # The URL carries the password: should the device ever echo it
+            # back, it must not reach the log.
+            failures[key] = reason.replace(entry["u"], "***") if entry["u"] else reason
+    return failures
+
+
+def _ask_remote(host, url: str) -> str:
+    """Have the hosting device fetch `url`; "" if answered, else the reason."""
+    try:
+        result = host.call(
+            "HTTP.GET",
+            {"url": url, "timeout": REMOTE_TIMEOUT_S},
+            timeout=REMOTE_TIMEOUT_S + REMOTE_CHECK_MARGIN_S,
+        ) or {}
+    except ShellyError as exc:
+        # The device's own verdict: timed out, host not found...
+        return str(exc)
+    code = int(result.get("code") or 0)
+    return "" if code == 200 else f"HTTP {code}"
 
 
 def publish_profile(

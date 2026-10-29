@@ -466,7 +466,7 @@ class SettingsWindow:
 
     def _selected_device_key(self) -> str | None:
         selection = self.device_tree.selection()
-        # Location rows head the devices when there are several: not devices.
+        # Location rows head the devices: not devices.
         if not selection or selection[0].startswith(LOCATION_ROW):
             return None
         return selection[0]
@@ -2330,12 +2330,14 @@ class SettingsWindow:
         """Rebuild the lists from the configuration."""
         online = self.app.controller.online_keys
 
-        # --- devices, under their location as soon as there are several
+        # --- devices, under their location, even a single one: without it,
+        # nothing showed where the devices are, nor which location the PC
+        # was recognised at -- the very thing to check when it is at none.
         selection = self.device_tree.selection()
         selected_device = selection[0] if selection else None
         self.device_tree.delete(*self.device_tree.get_children())
         parents = {}
-        if self.config.has_several_locations():
+        if self.config.locations:
             for location in self.config.locations:
                 here = location.key == self.config.location
                 row = LOCATION_ROW + location.key
