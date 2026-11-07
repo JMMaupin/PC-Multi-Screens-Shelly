@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from . import screen_map
 from . import theme as theme_module
 from . import tk_thread
+from .. import controller as controller_module
 from .. import discovery, sensing
 from .. import i18n
 from ..i18n import t
@@ -3083,7 +3084,17 @@ class AddDeviceDialog:
         if identity.mac.upper() in self._known_macs():
             self.message.set("This device is already configured")
             return
-        device = self.app.controller.adopt(identity)
+        try:
+            device = self.app.controller.adopt(identity)
+        except controller_module.OutsidePcNetwork as exc:
+            self.message.set(t(
+                "Not added: {where} is not on this PC's network. A device still "
+                "on its own access point (192.168.33.1) must first join this "
+                "PC's network.",
+                where=f"{exc.host} ({exc.address})"
+                if exc.address and exc.address != exc.host else exc.host,
+            ))
+            return
         self.owner.refresh()
         self.owner.set_status(f"Device '{device.key}' added ({identity.model})")
         self._close()

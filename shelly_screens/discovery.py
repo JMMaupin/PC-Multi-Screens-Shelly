@@ -18,6 +18,8 @@ import ipaddress
 import json
 import socket
 import subprocess
+import threading
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -57,6 +59,16 @@ SUPPORTED_APPS = {
     "Pro4PM",
     "Switch",
 }
+# Address of a Shelly on its own access point (`wifi_setup.AP_HOST`). Only
+# the first setup may talk to it, by that literal address: a device adopted
+# there would be lost as soon as the PC leaves its access point.
+AP_ADDRESS = "192.168.33.1"
+# The PC's networks change rarely (a cable, a VPN, the Wi-Fi of a device
+# being set up), and reading them costs a PowerShell start, about a second:
+# read again at most once a minute.
+PC_NETWORKS_TTL_S = 60.0
+_pc_networks_lock = threading.Lock()
+_pc_networks: tuple[float, list[ipaddress.IPv4Network]] | None = None
 
 
 @dataclass(frozen=True)
@@ -79,13 +91,64 @@ def address_of(host: str) -> str:
     The device is often reached by its mDNS name, more stable than its DHCP
     lease. Handy for the program, but the address is still what one wants
     to read to open the web interface or spot a lease change.
+
+    Only an address on the PC's network is returned, "" otherwise: a device
+    whose access point is still on also announces its name there. Seen on
+    2026-11-07 with a Plug M Gen3: its name resolved once to 192.168.33.1,
+    and that address was recorded as the device's own.
     """
-    if not host:
-        return ""
+    for address in ipv4_addresses(host):
+        if on_pc_network(address):
+            return address
+    return ""
+
+
+def on_pc_network(address: str) -> bool:
+    """Whether a device can be reached at `address` from this PC's own networks.
+
+    True when the address falls within the mask of one of the PC's network
+    adapters, and is not a Shelly's access point address. When the PC's
+    networks cannot be read, nothing is refused: better a doubtful address
+    than every device turned away.
+    """
     try:
-        return socket.gethostbyname(host)
+        ip = ipaddress.IPv4Address(address)
+    except ValueError:
+        return False
+    if address == AP_ADDRESS:
+        return False
+    networks = pc_networks()
+    if not networks:
+        return True
+    return any(ip in network for network in networks)
+
+
+def pc_networks() -> list[ipaddress.IPv4Network]:
+    """The PC's private IPv4 networks, as read from its adapters (cached)."""
+    global _pc_networks
+    with _pc_networks_lock:
+        now = time.monotonic()
+        if _pc_networks is None or now - _pc_networks[0] > PC_NETWORKS_TTL_S:
+            # No guess here: the fallback assumes a /24, which would turn
+            # away half of a /23 network such as this PC's.
+            _pc_networks = (now, _local_networks(guess=False))
+        return list(_pc_networks[1])
+
+
+def ipv4_addresses(host: str) -> list[str]:
+    """Every IPv4 address behind a host, in the order the system gives them."""
+    if not host:
+        return []
+    try:
+        infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
     except (OSError, UnicodeError):
-        return ""
+        return []
+    addresses: list[str] = []
+    for info in infos:
+        address = str(info[4][0])
+        if address not in addresses:
+            addresses.append(address)
+    return addresses
 
 
 def ipv4_host(host: str) -> str:
@@ -100,13 +163,17 @@ def ipv4_host(host: str) -> str:
 
     On failure we return the name as is: better to let urllib try its luck
     than to refuse the connection outright.
+
+    An address on the PC's network is preferred (see `address_of`); failing
+    one, the first address, as before. A literal address is used as is: the
+    first setup reaches the device on its access point that way.
     """
     if not host or host.replace(".", "").isdigit():
         return host
-    try:
-        return socket.gethostbyname(host)
-    except (OSError, UnicodeError):
+    addresses = ipv4_addresses(host)
+    if not addresses:
         return host
+    return next((a for a in addresses if on_pc_network(a)), addresses[0])
 
 
 def probe(host: str, timeout: float = PROBE_TIMEOUT) -> DeviceIdentity | None:
@@ -222,10 +289,14 @@ def _candidate_addresses() -> set[str]:
     return addresses
 
 
-def _local_networks() -> list[ipaddress.IPv4Network]:
-    """Private IPv4 subnets this PC is attached to."""
+def _local_networks(guess: bool = True) -> list[ipaddress.IPv4Network]:
+    """Private IPv4 subnets this PC is attached to.
+
+    `guess=False` gives up rather than fall back on a /24 around the main
+    address when the adapters cannot be read.
+    """
     networks: list[ipaddress.IPv4Network] = []
-    for ip, netmask in _local_interfaces():
+    for ip, netmask in _local_interfaces(guess):
         try:
             interface = ipaddress.IPv4Interface(f"{ip}/{netmask}")
         except ValueError:
@@ -238,8 +309,9 @@ def _local_networks() -> list[ipaddress.IPv4Network]:
     return networks
 
 
-def _local_interfaces() -> list[tuple[str, str]]:
+def _local_interfaces(guess: bool = True) -> list[tuple[str, str]]:
     """(address, mask) pairs of the active network adapters, via PowerShell."""
+    fallback = _fallback_interfaces if guess else list
     command = [
         "powershell.exe",
         "-NoProfile",
@@ -258,7 +330,7 @@ def _local_interfaces() -> list[tuple[str, str]]:
         )
         entries = json.loads(completed.stdout or "[]")
     except (OSError, ValueError, subprocess.SubprocessError):
-        return _fallback_interfaces()
+        return fallback()
     if isinstance(entries, dict):
         entries = [entries]
     result: list[tuple[str, str]] = []
@@ -267,7 +339,7 @@ def _local_interfaces() -> list[tuple[str, str]]:
         prefix = entry.get("PrefixLength")
         if ip and prefix is not None:
             result.append((ip, str(prefix)))
-    return result or _fallback_interfaces()
+    return result or fallback()
 
 
 def _fallback_interfaces() -> list[tuple[str, str]]:

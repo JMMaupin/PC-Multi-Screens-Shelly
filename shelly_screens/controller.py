@@ -117,6 +117,21 @@ class NotInControl(RuntimeError):
         super().__init__("Another Windows session drives the devices")
 
 
+class OutsidePcNetwork(RuntimeError):
+    """A device answered at an address outside the PC's own networks.
+
+    Typically 192.168.33.1, a Shelly's own access point, still on after the
+    device joined the home Wi-Fi: adopted there, it would be lost as soon as
+    the PC leaves that access point.
+    """
+
+    def __init__(self, host: str, address: str) -> None:
+        self.host = host
+        self.address = address
+        where = f"{host} ({address})" if address and address != host else host
+        super().__init__(f"{where} is not on this PC's network")
+
+
 class SensingRealmMissing(RuntimeError):
     """Cannot set a password without knowing the device's identity."""
 
@@ -432,6 +447,10 @@ class ScreenController:
         """
         if not (device_config.ip and device_config.mac):
             return None, ""
+        # An address recorded outside the PC's networks (an access point
+        # address taken for the device's own) proves nothing: searched anew.
+        if not discovery.on_pc_network(device_config.ip):
+            return None, ""
         found = discovery.probe(device_config.ip)
         if found is None or normalise_mac(found.mac) != normalise_mac(device_config.mac):
             return None, ""
@@ -577,7 +596,19 @@ class ScreenController:
             return 0
 
     def adopt(self, identity: discovery.DeviceIdentity, name: str = "") -> DeviceConfig:
-        """Add a discovered device to the configuration."""
+        """Add a discovered device to the configuration.
+
+        Refused (`OutsidePcNetwork`) when the device answers at no address
+        on the PC's networks: checked here, not only in the dialog, before
+        anything is changed.
+        """
+        if not discovery.address_of(identity.host):
+            addresses = discovery.ipv4_addresses(identity.host)
+            self._log(
+                f"Device {identity.device_id or identity.mac} not added: "
+                f"{identity.host} {addresses} is not on this PC's network"
+            )
+            raise OutsidePcNetwork(identity.host, addresses[0] if addresses else "")
         existing = next(
             (d for d in self.config.devices if d.mac.upper() == identity.mac.upper()), None
         )

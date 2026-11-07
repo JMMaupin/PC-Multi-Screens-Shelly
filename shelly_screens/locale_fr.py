@@ -405,6 +405,11 @@ CATALOG: dict[str, str] = {
     "Finish": "Terminer",
     "New device found: check it, then Add selected.":
         "Nouvel appareil trouve : verifiez-le, puis Ajouter la selection.",
+    "Not added: {where} is not on this PC's network. A device still on its own "
+    "access point (192.168.33.1) must first join this PC's network.":
+        "Non ajoute : {where} n'est pas sur le reseau de ce PC. Un appareil encore "
+        "sur son propre point d'acces (192.168.33.1) doit d'abord rejoindre le "
+        "reseau de ce PC.",
     "Version {version}": "Version {version}",
     "Author: {author}": "Auteur : {author}",
     "Validated devices": "Appareils valides",
