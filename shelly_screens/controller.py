@@ -175,6 +175,20 @@ SIGNAL_REFRESH_S = 60.0
 # the normal pace as soon as the device answers.
 READ_BACKOFF_S = (0.0, 15.0, 30.0, 60.0)
 
+# How long a PC outlet must stay out of reach before that silence counts as
+# "the PC is not there". On wake, the network can take minutes to come back,
+# and not for every device at once: on 2026-11-16 the plug at the other
+# location answered four minutes after wake, before the desk's power strips,
+# and the PC was settled there for the whole afternoon, its layout and
+# profiles out of sight.
+PC_OUTLET_SILENCE_S = 300.0
+
+# How often the other location's silent devices are looked for, in the
+# background. Before, they were left alone until the next wake: a device
+# there, lost to a network cut while the PC sat here, stayed offline for
+# good although it answered at its address.
+ELSEWHERE_RETRY_S = 120.0
+
 
 class ScreenController:
     """Drives one or more Shelly devices according to the profiles."""
@@ -196,6 +210,13 @@ class ScreenController:
         # traffic, not more.
         self._read_failures: dict[str, int] = {}
         self._retry_after: dict[str, float] = {}
+        # Time of the first failed reading in a row, per device: how long it
+        # has been silent. Cleared on wake, where silence starts over.
+        self._failing_since: dict[str, float] = {}
+        # Background search for the other location's silent devices: next
+        # time it may run, and whether one is under way.
+        self._elsewhere_due = 0.0
+        self._elsewhere_searching = False
         # Latest voltages read per outlet, to spot a metering channel that
         # no longer moves.
         self._meter_history: dict[str, list[float]] = {}
@@ -331,13 +352,14 @@ class ScreenController:
             return dict(zip(keys, pool.map(connect, keys)))
 
     def connect_device(
-        self, key: str, allow_scan: bool = True, force: bool = False
+        self, key: str, allow_scan: bool = True, force: bool = False, quiet: bool = False
     ) -> discovery.DeviceIdentity | None:
         """Find a device and remember its address.
 
         `force` overrides the cooldown: that is what the reconnect button
         does, or a startup, or a password change -- deliberate actions,
-        which must not wait.
+        which must not wait. `quiet` leaves a device not found out of the
+        log: the other location's devices, looked for in the background.
         """
         device_config = self.config.device(key)
         if device_config is None:
@@ -353,12 +375,34 @@ class ScreenController:
         # counted while it is being found would hold it back once found.
         self._connecting.add(key)
         try:
-            return self._connect(key, device_config, allow_scan)
+            return self._connect(key, device_config, allow_scan, quiet)
         finally:
             self._connecting.discard(key)
 
+    def _search_elsewhere(self, keys: list[str]) -> None:
+        """Look for the other location's silent devices, in the background.
+
+        Left alone, a device there lost to a network cut stayed offline
+        until the next wake. Searched by its address and name only, no
+        sweep, and out of the reading thread: a name that does not resolve
+        costs seconds, which every reading would otherwise wait for.
+        """
+
+        def search() -> None:
+            try:
+                for key in keys:
+                    try:
+                        self.connect_device(key, allow_scan=False, quiet=True)
+                    except Exception:  # noqa: BLE001 - next time, then
+                        pass
+            finally:
+                self._elsewhere_searching = False
+
+        self._elsewhere_searching = True
+        threading.Thread(target=search, name="search-elsewhere", daemon=True).start()
+
     def _connect(
-        self, key: str, device_config: DeviceConfig, allow_scan: bool
+        self, key: str, device_config: DeviceConfig, allow_scan: bool, quiet: bool = False
     ) -> discovery.DeviceIdentity | None:
         """The search and the connection proper (see `connect_device`)."""
         identity, address = self._direct_identity(device_config)
@@ -377,7 +421,8 @@ class ScreenController:
             if identity is None:
                 self._devices.pop(key, None)
                 self._identities.pop(key, None)
-                self._log(f"Device '{key}' not found on the local network")
+                if not quiet:
+                    self._log(f"Device '{key}' not found on the local network")
                 return None
 
             fixed_changed = device_config.fixed_ip != bool(fixed)
@@ -676,14 +721,17 @@ class ScreenController:
         """
         states: dict[str, SwitchState] = {}
         now = time.monotonic()
+        away: list[str] = []
         for device_config in self.config.devices:
             key = device_config.key
             # Once the PC is located, a silent device at another location is
-            # left alone until the next wake: it is out of reach because the
-            # PC is not there, and searching for it every minute -- a name
-            # that does not resolve, a sweep of the network -- would only
-            # slow down every reading.
+            # not read: it is most likely out of reach because the PC is not
+            # there, and searching for it every minute -- a name that does
+            # not resolve, a sweep of the network -- would only slow down
+            # every reading. It is looked for in the background, below.
             if key not in self._devices and self._elsewhere(key):
+                if key not in self._connecting:
+                    away.append(key)
                 continue
             # Being connected right now (at start, on wake): the connection
             # will tell. Reading it as well counted a failure, and its
@@ -708,6 +756,7 @@ class ScreenController:
                 # cooldown of `connect_device` will handle it on the next
                 # round, once the device has calmed down.
                 self._devices.pop(key, None)
+                self._failing_since.setdefault(key, now)
                 attempt = self._read_failures.get(key, 0) + 1
                 self._read_failures[key] = attempt
                 delay = READ_BACKOFF_S[min(attempt, len(READ_BACKOFF_S) - 1)]
@@ -720,6 +769,7 @@ class ScreenController:
                 continue
             self._read_failures.pop(key, None)
             self._retry_after.pop(key, None)
+            self._failing_since.pop(key, None)
             self.auth_failures.pop(key, None)
             for switch_id, state in switches.items():
                 ref = f"{key}:{switch_id}"
@@ -732,6 +782,9 @@ class ScreenController:
         self._outputs = {ref: state.output for ref, state in states.items()}
         self.last_states = dict(states)
         self._locate()
+        if away and not self._elsewhere_searching and now >= self._elsewhere_due:
+            self._elsewhere_due = now + ELSEWHERE_RETRY_S
+            self._search_elsewhere(away)
         return states
 
     def output(self, ref: str) -> bool | None:
@@ -747,12 +800,17 @@ class ScreenController:
         a PC outlet or a device's location changes.
         """
         self._location_settled = False
+        # A silence from before the sleep says nothing of the network now.
+        self._failing_since.clear()
 
     def _locate(self) -> None:
         """Find where the PC is, unless already settled."""
         if self._location_settled:
             return
-        key, why = self._find_location(self.last_states)
+        key, why, firm = self._find_location(self.last_states)
+        if firm is None:
+            # Too early to tell: the location in place stays as it is.
+            return
         pc_devices = {
             pc.device for pc in map(self.config.host_pc_at, self.config.location_keys())
             if pc is not None
@@ -761,7 +819,10 @@ class ScreenController:
             # A PC outlet's device is still being found (at start, on
             # wake): "at no location" would only be its absence so far.
             return
-        self._location_settled = key is not None
+        # A location chosen only because a PC outlet stays silent is not
+        # settled: that outlet is still read, and the PC moves back to its
+        # location the moment it answers drawing power.
+        self._location_settled = key is not None and firm
         # Logged when the conclusion changes, not when a reading moves by
         # a watt: while the PC is away, this runs at every refresh.
         note = f"{key}|{why.partition(':')[0]}"
@@ -780,8 +841,14 @@ class ScreenController:
         if changed and self.on_location is not None:
             self.on_location(key)
 
-    def _find_location(self, states: dict[str, SwitchState]) -> tuple[str | None, str]:
-        """The location the PC is at, and why; None when it is at none.
+    def _find_location(
+        self, states: dict[str, SwitchState]
+    ) -> tuple[str | None, str, bool | None]:
+        """The location the PC is at, why, and how sure; None when it is at none.
+
+        The third value is True for a conclusion that holds until the next
+        wake, False for one to check again at every reading, None for "too
+        early to tell".
 
         The PC is where its outlet draws power: a running PC cannot be
         anywhere else. Its outlet elsewhere draws nothing, or does not
@@ -794,6 +861,13 @@ class ScreenController:
         it is chosen only if no PC outlet draws, and it is the only one
         whose devices answer.
 
+        A PC outlet that does not answer proves nothing at first: after a
+        wake, the network may come back for the other location's devices
+        before the desk's. Such a location is chosen only once the PC
+        outlets have stayed silent for `PC_OUTLET_SILENCE_S`, and even then
+        it is not settled: the outlets keep being read, and the first one to
+        answer drawing power takes the PC back.
+
         A PC outlet whose metering has given out proves nothing either way:
         its location is chosen when no PC outlet draws and it is the only
         such one. Concluding "at no location" there turned the profiles off
@@ -801,9 +875,14 @@ class ScreenController:
         """
         floor = self.host_pc_floor()
         faulty = self.faulty_meter_devices()
+        now = time.monotonic()
         readings: dict[str, str] = {}
         drawing = []
         unmeasured = []
+        # PC outlets out of reach: silent long enough to count as "the PC
+        # is not there", or not yet.
+        silent = []
+        too_soon = []
         for location in self.config.locations:
             pc = self.config.host_pc_at(location.key)
             if pc is None:
@@ -816,10 +895,16 @@ class ScreenController:
             readings[location.key] = (
                 f"{pc.ref} {state.apower:.0f} W" if state else f"{pc.ref} unreachable"
             )
-            if state is not None and state.apower >= floor:
+            if state is None:
+                since = self._failing_since.get(pc.device)
+                if since is not None and now - since >= PC_OUTLET_SILENCE_S:
+                    silent.append(pc.ref)
+                else:
+                    too_soon.append(pc.ref)
+            elif state.apower >= floor:
                 drawing.append(location.key)
         if len(drawing) == 1:
-            return drawing[0], f"PC outlet {readings[drawing[0]]}"
+            return drawing[0], f"PC outlet {readings[drawing[0]]}", True
         if len(drawing) > 1:
             seen = monitors.connected_keys() or set()
             watched = [
@@ -827,20 +912,32 @@ class ScreenController:
                 if any(o.monitor_key in seen for o in self.config.outlets_at(key) if o.monitor_key)
             ]
             if len(watched) == 1:
-                return watched[0], "its screens are the ones Windows sees"
-            return None, "several PC outlets draw power: " + ", ".join(readings.values())
+                return watched[0], "its screens are the ones Windows sees", True
+            return None, "several PC outlets draw power: " + ", ".join(readings.values()), True
         if len(unmeasured) == 1:
-            return unmeasured[0], f"PC outlet {readings[unmeasured[0]]}, its device answers"
+            return (
+                unmeasured[0], f"PC outlet {readings[unmeasured[0]]}, its device answers", True
+            )
         answering = [
             location.key for location in self.config.locations
             if self.config.host_pc_at(location.key) is None
             and any(o.ref in states for o in self.config.outlets_at(location.key))
         ]
         if len(answering) == 1:
-            return answering[0], "its devices answer, and it has no PC outlet"
+            if too_soon:
+                # Silent for a moment only: the network coming back after
+                # a wake, most likely, not a PC gone elsewhere.
+                return None, "waiting for " + ", ".join(too_soon), None
+            if silent:
+                return answering[0], (
+                    "its devices answer, it has no PC outlet, and "
+                    + ", ".join(silent)
+                    + f" silent for {PC_OUTLET_SILENCE_S / 60:.0f} min"
+                ), False
+            return answering[0], "its devices answer, and it has no PC outlet", True
         if readings:
-            return None, "no PC outlet draws power: " + ", ".join(readings.values())
-        return None, "no device answers"
+            return None, "no PC outlet draws power: " + ", ".join(readings.values()), True
+        return None, "no device answers", True
 
     def _refresh_signal(self, key: str, now: float) -> None:
         """Re-read the Wi-Fi signal strength and network, without ever failing.
